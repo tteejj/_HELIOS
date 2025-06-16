@@ -1,0 +1,147 @@
+# Command Palette System
+
+# Command registry to store all discoverable commands
+$script:CommandRegistry = @()
+
+function global:Register-Command {
+    param(
+        [string]$Name,
+        [string]$Description,
+        [scriptblock]$Action,
+        [string[]]$Tags = @(),
+        [string]$Category = "General",
+        [string[]]$Aliases = @(),
+        [string]$KeyBinding = ""
+    )
+    
+    $script:CommandRegistry += [PSCustomObject]@{
+        Name = $Name; Description = $Description; Action = $Action; Tags = $Tags
+        Category = $Category; Aliases = $Aliases; KeyBinding = $KeyBinding
+        SearchText = "$Name $Description $($Tags -join ' ') $($Aliases -join ' ')"
+    }
+}
+
+function global:Initialize-CommandRegistry {
+    $script:CommandRegistry = @()
+    Register-Command -Name "Add Manual Time Entry" -Description "Log time manually with project and description" -Action {Add-ManualTimeEntry} -Tags "time,log,manual" -Category "Time" -KeyBinding "M"
+    Register-Command -Name "Start Timer" -Description "Start a timer for a project or task" -Action {Start-Timer} -Tags "timer,start,track" -Category "Time" -KeyBinding "S"
+    Register-Command -Name "Stop Timer" -Description "Stop running timer(s) and log time" -Action {Stop-Timer} -Tags "timer,stop,finish" -Category "Time"
+    Register-Command -Name "Add Task" -Description "Create a new task with full details" -Action {Add-TodoTask} -Tags "task,add,todo" -Category "Task" -KeyBinding "A"
+    Register-Command -Name "Quick Add Task" -Description "Fast task entry with inline syntax" -Action {Quick-AddTask} -Tags "task,quick,add" -Category "Task" -Aliases "qa"
+    Register-Command -Name "Complete Task" -Description "Mark a task as completed" -Action {Complete-Task} -Tags "task,complete,done" -Category "Task"
+    Register-Command -Name "Today's Overview" -Description "Show today's summary of tasks, time, and timers" -Action {Show-TodayView} -Tags "today,overview,summary" -Category "Views" -KeyBinding "T"
+    Register-Command -Name "Week Report" -Description "Display week timesheet report" -Action {Show-WeekReport} -Tags "week,report,timesheet" -Category "Reports" -KeyBinding "W"
+    Register-Command -Name "Calendar View" -Description "Show monthly calendar with task indicators" -Action {Show-Calendar} -Tags "calendar,month,date" -Category "Views"
+    Register-Command -Name "Add Project" -Description "Create a new project" -Action {Add-Project} -Tags "project,add,client" -Category "Project"
+    Register-Command -Name "Project Details" -Description "View detailed project information" -Action {Show-ProjectDetail} -Tags "project,details,info" -Category "Project" -KeyBinding "P"
+    Register-Command -Name "Manage Command Snippets" -Description "Access the command snippet manager" -Action {Manage-CommandSnippets} -Tags "command,snippet,script" -Category "Tools" -Aliases "cmd"
+    Register-Command -Name "Backup Now" -Description "Create immediate backup of all data" -Action {Backup-Data} -Tags "backup,save,data" -Category "Data"
+    Register-Command -Name "File Browser" -Description "Launch the interactive terminal file browser" -Action {Start-TerminalFileBrowser} -Tags "file,browser,explore" -Category "File Management" -Aliases "fb"
+    Register-Command -Name "File Utilities Help" -Description "Help for all file utility commands" -Action {Show-FileUtilsHelp} -Tags "file,utilities,help" -Category "File Management" -Aliases "fuh"
+    Register-Command -Name "Fuzzy Text Search" -Description "Search for approximate text within files" -Action {Search-FuzzyText -Interactive} -Tags "search,fuzzy,text,file" -Category "File Management" -Aliases "fz"
+}
+
+function global:Show-CommandPalette {
+    param(
+        [string]$InitialFilter = ""
+    )
+    if ($script:CommandRegistry.Count -eq 0) { Initialize-CommandRegistry }
+    $filter = $InitialFilter; $selectedIndex = 0; $maxDisplay = 15
+    while ($true) {
+        Clear-Host
+        Write-Host "╔═══════════════════ COMMAND PALETTE ═══════════════════╗" -ForegroundColor (Get-LegacyColor (Get-ThemeProperty "Palette.HeaderFG"))
+        Write-Host "║ Type to search | ↑↓ Navigate | Enter: Execute | Esc: Cancel ║" -ForegroundColor (Get-LegacyColor (Get-ThemeProperty "Palette.SubtleFG"))
+        Write-Host "╚═════════════════════════════════════════════════════════╝" -ForegroundColor (Get-LegacyColor (Get-ThemeProperty "Palette.HeaderFG"))
+        Write-Host "`nSearch: " -NoNewline -ForegroundColor (Get-LegacyColor (Get-ThemeProperty "Palette.WarningFG")); Write-Host "$filter" -NoNewline; Write-Host "_" -ForegroundColor (Get-LegacyColor (Get-ThemeProperty "Palette.WarningFG")); Write-Host ""
+        
+        $filtered = @()
+        if ([string]::IsNullOrWhiteSpace($filter)) {
+            $filtered = $script:CommandRegistry | Sort-Object Category, Name
+        } else {
+            foreach ($command in $script:CommandRegistry) {
+                $maxSimilarity = Get-FuzzyMatch -SearchTerm $filter -Target $command.SearchText
+                
+                # For multi-word searches, check if all words in filter match
+                $filterWords = $filter.ToLower().Split(' ', [StringSplitOptions]::RemoveEmptyEntries)
+                $searchText = $command.SearchText.ToLower()
+                
+                if ($filterWords.Count -gt 1) {
+                    $allWordsMatch = $true
+                    foreach ($word in $filterWords) {
+                        if (-not $searchText.Contains($word)) {
+                            $allWordsMatch = $false
+                            break
+                        }
+                    }
+                    if ($allWordsMatch) {
+                        $maxSimilarity += 50  # Big bonus for multi-word matches
+                    }
+                }
+                
+                # Bonus for exact substring matches (case insensitive)
+                if ($searchText.Contains($filter.ToLower())) {
+                    $maxSimilarity += 30  # Significant bonus for containing the search term
+                }
+                
+                # Bonus for name starting with search term
+                if ($command.Name.ToLower().StartsWith($filter.ToLower())) {
+                    $maxSimilarity += 20  # Bonus for prefix match
+                }
+                if ($maxSimilarity -gt 0) { $command | Add-Member -NotePropertyName Score -NotePropertyValue $maxSimilarity -Force; $filtered += $command }
+            }
+            $filtered = $filtered | Sort-Object Score -Descending
+        }
+        if ($selectedIndex -ge $filtered.Count) { $selectedIndex = [Math]::Max(0, $filtered.Count - 1) }
+        
+        $startIndex = [Math]::Max(0, $selectedIndex - [Math]::Floor($maxDisplay / 2)); $endIndex = [Math]::Min($filtered.Count - 1, $startIndex + $maxDisplay - 1)
+        if ($filtered.Count -eq 0) { Write-Host "`n  No commands match '$filter'" -ForegroundColor (Get-LegacyColor (Get-ThemeProperty "Palette.SubtleFG")) }
+        else {
+            $groups = $filtered[$startIndex..$endIndex] | Group-Object Category
+            $displayIndex = $startIndex
+            foreach ($group in $groups) {
+                Write-Host "`n  $($group.Name)" -ForegroundColor (Get-LegacyColor (Get-ThemeProperty "Palette.AccentFG"))
+                foreach ($cmd in $group.Group) {
+                    $isSelected = ($displayIndex -eq $selectedIndex)
+                    if ($isSelected) { Write-Host "  → " -NoNewline -ForegroundColor (Get-LegacyColor (Get-ThemeProperty "Palette.HeaderFG")) } else { Write-Host "    " -NoNewline }
+                    Write-Host "$($cmd.Name)" -NoNewline -ForegroundColor $(if ($isSelected) { "White" } else { "Gray" })
+                    if ($cmd.KeyBinding) { Write-Host " [$($cmd.KeyBinding)]" -NoNewline -ForegroundColor (Get-LegacyColor (Get-ThemeProperty "Palette.WarningFG")) }
+                    Write-Host ""; Write-Host "      $($cmd.Description)" -ForegroundColor $(if ($isSelected) { "Gray" } else { "DarkGray" })
+                    $displayIndex++
+                }
+            }
+            if ($startIndex -gt 0) { Write-Host "`n  ↑ More above..." -ForegroundColor (Get-LegacyColor (Get-ThemeProperty "Palette.SubtleFG")) }
+            if ($endIndex -lt $filtered.Count - 1) { Write-Host "  ↓ More below..." -ForegroundColor (Get-LegacyColor (Get-ThemeProperty "Palette.SubtleFG")) }
+        }
+        
+        $key = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+        switch ($key.VirtualKeyCode) {
+            38 { $selectedIndex = [Math]::Max(0, $selectedIndex - 1) } # Up
+            40 { $selectedIndex = [Math]::Min($filtered.Count - 1, $selectedIndex + 1) } # Down
+            13 { if ($filtered.Count -gt 0 -and $selectedIndex -lt $filtered.Count) { $selected = $filtered[$selectedIndex]; Clear-Host; Write-Success "Executing: $($selected.Name)"; & $selected.Action; return $selected }; break } # Enter
+            27 { return $null } # Escape
+            8 { if ($filter.Length -gt 0) { $filter = $filter.Substring(0, $filter.Length - 1); $selectedIndex = 0 } } # Backspace
+            default { 
+                # Only add printable characters, ignore modifier keys
+                if ($key.Character -and -not [char]::IsControl($key.Character) -and $key.Character -ne "`0" -and $key.VirtualKeyCode -notin @(16,17,18,91)) { 
+                    $filter += $key.Character; $selectedIndex = 0 
+                } 
+            }
+        }
+    }
+}
+
+function global:Invoke-CommandPalette {
+    $result = Show-CommandPalette
+    if ($result) {
+        Write-Host "`nCommand completed." -ForegroundColor (Get-ThemeProperty "Palette.SubtleFG")
+    } else {
+        Write-Info "Command palette cancelled."
+    }
+}
+
+function global:Find-Commands {
+    param([string]$SearchTerm)
+    if ($script:CommandRegistry.Count -eq 0) { Initialize-CommandRegistry }
+    $results = @(); foreach ($command in $script:CommandRegistry) { $similarity = Get-FuzzyMatch -SearchTerm $SearchTerm -Target $command.SearchText; if ($similarity -gt 0) { $command | Add-Member -NotePropertyName Similarity -NotePropertyValue $similarity -Force; $results += $command } }
+    return $results | Sort-Object Similarity -Descending
+}

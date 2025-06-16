@@ -1,0 +1,176 @@
+Of course. Here is a comprehensive, consolidated roadmap that synthesizes all previous analysis. It is structured into prioritized phases, moving from critical bug fixes required to make the application stable, through major architectural improvements, and finally to advanced features and polish.
+
+---
+
+## TUI Framework: The Complete Integration & Improvement Roadmap
+
+This document outlines a prioritized path for evolving the TUI framework from its current state into a robust, performant, and developer-friendly platform. Each phase builds upon the last, ensuring stability before introducing complexity.
+
+### Phase 1: Foundation & Stability (Critical Priority)
+
+**Goal:** Address critical performance bottlenecks and fundamental bugs that make the application unstable or unusable in real-world scenarios. The application is not considered "working" until these are complete.
+
+---
+
+**1.1. Fix Engine & Framework Performance (Highest Priority)** ##X##
+
+*   **Problem:** The engine creates thousands of temporary objects (hashtables) per frame, and the framework clones every component on every render. This leads to massive garbage collection pressure, high CPU usage, and a sluggish UI.
+*   **Location:** `tui-engine-v2.psm1`, `tui-framework.psm1`
+*   **Action Plan:**
+    1.  **Eliminate Component Cloning:** In `Create-TuiScreen`'s `Render` block, remove `$renderableChild = $child.Clone()`. Pass dynamic state (like `IsFocused`) as parameters directly to the component's `Render` method: `& $child.Render -self $child -IsFocused $isFocused`.
+    2.  **Optimize Buffer Rendering:** In `Render-BufferOptimized`, do not create a new hashtable for the front buffer. Modify the existing cell's properties: `$frontCell.Char = $backCell.Char`, etc.
+    3.  **Use Cell Pooling:** In `Write-BufferString`, use the `Get-PooledCell` function instead of creating a new hashtable for every character written to the back buffer.
+*   **Impact:** This is the most important fix. It will result in a dramatic, order-of-magnitude improvement in performance and responsiveness.
+
+**1.2. Fix Component-to-Screen State Communication** ##X##
+
+*   **Problem:** The `OnChange`/`OnClick` event handlers on components have a fragile dependency on PowerShell's scoping. A component cannot reliably update its parent screen's state without cumbersome, error-prone workarounds.
+*   **Location:** `tui-framework.psm1`
+*   **Action Plan:**
+    1.  In `Create-TuiScreen`'s `Init` block, when instantiating a component, wrap any user-provided event handlers (`OnChange`, etc.).
+    2.  The new wrapper scriptblock should automatically pass the parent screen's context (`$self`) as the first argument to the user's original scriptblock.
+    3.  Example: `OnChange = { param($EventArgs) & $userOnChange -self $self -EventArgs $EventArgs }.GetNewClosure()`
+*   **Impact:** Creates a stable, predictable contract for developers. This makes the framework usable and drastically reduces the potential for bugs.
+
+**1.3. Fix Data-Heavy Component Performance**
+
+*   **Problem:** `New-TuiDataTable` re-filters and re-sorts its entire dataset on every single render, making it unusable with more than a few hundred rows.
+*   **Location:** `advanced-data-components.psm1`
+*   **Action Plan:**
+    1.  Decouple data processing from rendering. The `ProcessData` scriptblock should *only* be called when the filter, sort order, or source data actually changes.
+    2.  Call `ProcessData` from the `HandleInput` block when keys affecting filter/sort are pressed, *not* from the `Render` block.
+    3.  Add a public `RefreshData()` method to the component so it can be updated externally when its source data changes.
+*   **Impact:** Ensures the application remains responsive even when displaying large amounts of data.
+
+**1.4. Implement Asynchronous Operation Support**
+
+*   **Problem:** Any long-running operation (network request, file I/O) will completely freeze the UI.
+*   **Location:** New helper function, likely in `tui-framework.psm1`.
+*   **Action Plan:**
+    1.  Create a helper function, `Invoke-TuiAsync`, that takes a `-ScriptBlock`, `-OnComplete`, and `-OnError` parameter.
+    2.  This function will run the main scriptblock in a background job or runspace.
+    3.  The `OnComplete` and `OnError` scriptblocks must be marshaled back to the main UI thread to safely update state and call `Request-TuiRefresh`.
+*   **Impact:** A non-negotiable feature for any real-world application. It prevents UI lockups and provides a safe pattern for background work.
+
+---
+
+### Phase 2: Core Functionality & Usability (High Priority)
+
+**Goal:** Implement features that are standard expectations for a modern TUI. This phase makes the application feel complete and robust from a user's perspective.
+
+---
+
+**2.1. Implement Window Resize Handling**
+
+*   **Problem:** Resizing the terminal window breaks rendering and can cause crashes.
+*   **Location:** `tui-engine-v2.psm1`, `main.ps1`.
+*   **Action Plan:**
+    1.  In the main loop (`Start-TuiLoop`), check for changes in `[Console]::WindowWidth` and `[Console]::WindowHeight` on every frame.
+    2.  If a resize is detected, re-initialize the engine's buffers to the new dimensions, force a full re-render, and publish a `System.Resized` event.
+    3.  Screens (like the dashboard) must subscribe to this event to recalculate their layouts.
+*   **Impact:** Makes the application robust and professional.
+
+**2.2. Implement Mouse Support**
+
+*   **Problem:** The UI is keyboard-only. Mouse interaction is expected for components like buttons, sliders, and tables.
+*   **Location:** `tui-engine-v2.psm1`.
+*   **Action Plan:**
+    1.  Enable mouse event reporting in the console via ANSI escape codes.
+    2.  Update the input thread to parse these mouse event sequences.
+    3.  Create a "hit testing" mechanism in the engine to determine which component is at the clicked coordinates.
+    4.  Dispatch mouse events (Click, Scroll, Drag) to the appropriate component's `HandleInput` method.
+*   **Impact:** Massively improves usability and makes the application feel modern.
+
+**2.3. Unify and Standardize Component Creation & Layouts**
+
+*   **Problem:** High-level abstractions like `Create-TuiForm` use hardcoded coordinates, and `Create-TuiScreen` bypasses the `Create-TuiComponent` factory.
+*   **Location:** `tui-framework.psm1`.
+*   **Action Plan:**
+    1.  Refactor `Create-TuiScreen` to use the `Create-TuiComponent` factory for all child instantiation.
+    2.  Refactor `Create-TuiForm` to be a layout-driven container, using the `Stack` or `Grid` layout manager internally.
+    3.  Ensure the complex dashboard (`dashboard-screen-complex.psm1`) is refactored to use the engine's layout managers instead of manual coordinate calculation.
+*   **Impact:** Creates a consistent, maintainable, and powerful declarative system. The framework's own features should use its best practices.
+
+---
+
+### Phase 3: Architectural Purity & Developer Experience (Medium Priority)
+
+**Goal:** Refactor the core architecture to be more powerful, flexible, and enjoyable to work with. These changes unlock more advanced UI patterns and accelerate development.
+
+---
+
+**3.1. Implement a Z-Indexed Render Stack**
+
+*   **Problem:** The current render model is a fixed two-layer system (Screen -> Dialog), which cannot handle complex overlapping UI like dropdown lists within dialogs or global toast notifications.
+*   **Location:** `tui-engine-v2.psm1`.
+*   **Action Plan:**
+    1.  Replace the `ScreenStack` and `CurrentDialog` with a single, ordered list of "render layers" in `TuiState`.
+    2.  Each layer has a Z-Index. The engine renders layers in ascending Z-Index order.
+    3.  Input is always routed to the topmost visible layer.
+*   **Impact:** This is a fundamental architectural evolution, turning the engine into a true windowing manager and enabling far more complex UIs.
+
+**3.2. Implement a Measure/Arrange Layout Pass**
+
+*   **Problem:** Layouts are purely top-down. Containers dictate the exact size of their children, making content-driven, responsive components difficult to create.
+*   **Location:** `tui-engine-v2.psm1` (Layout Managers).
+*   **Action Plan:**
+    1.  Implement a two-pass layout system.
+    2.  **Measure Pass:** The layout manager asks each child how much space it *wants*.
+    3.  **Arrange Pass:** The manager considers all requests and assigns a final size and position to each child.
+*   **Impact:** A paradigm shift that enables truly fluid and adaptive layouts, where components can size themselves based on their content.
+
+**3.3. Introduce a Declarative UI DSL**
+
+*   **Problem:** Defining UI with nested hashtables is verbose and error-prone.
+*   **Location:** New module providing DSL functions.
+*   **Action Plan:**
+    1.  Create PowerShell functions that mimic UI components (e.g., `Screen`, `StackPanel`, `Button`).
+    2.  These functions will internally build the required hashtable definitions and call the underlying framework functions.
+*   **Impact:** Transformative improvement to developer experience, making UI code more readable, concise, and less prone to syntax errors.
+
+**3.4. Implement Hot-Reloading**
+
+*   **Problem:** The development cycle (edit, stop, restart) is slow.
+*   **Location:** `main.ps1` or a new "dev-harness" script.
+*   **Action Plan:**
+    1.  Use a `FileSystemWatcher` to monitor UI definition files.
+    2.  On file change, automatically re-import the module and refresh the current screen.
+*   **Impact:** Provides an immediate feedback loop, dramatically accelerating UI development.
+
+---
+
+### Phase 4: Advanced Platform Features & Polish (Low Priority)
+
+**Goal:** Add "nice-to-have" features that provide polish, improve long-term maintainability, and support very large-scale applications.
+
+---
+
+**4.1. Refactor to PowerShell Classes**
+
+*   **Problem:** Hashtable-based objects lack type safety, method discoverability, and true inheritance.
+*   **Action Plan:** Systematically refactor all components and core concepts into PowerShell classes (`class TuiButton : TuiComponent { ... }`).
+*   **Impact:** Improves performance, maintainability, and makes the framework easier to understand for developers with an OOP background.
+
+**4.2. Introduce an Animation Engine**
+
+*   **Problem:** All UI transitions are instantaneous and can feel jarring.
+*   **Action Plan:** Extend the main loop to support time-based animations for properties like position, size, or color. This enables effects like smooth scrolling and fade-ins.
+*   **Impact:** The single biggest improvement for a polished, professional user experience.
+
+**4.3. Decouple from Global State**
+
+*   **Problem:** Heavy reliance on global script-scoped variables makes testing and encapsulation difficult.
+*   **Action Plan:** Refactor the engine to use a "TUI Context" object that is passed explicitly to all core functions, removing the dependency on globals like `$script:TuiState`.
+*   **Impact:** Improves testability and architectural purity.
+
+**4.4. Implement an Advanced Navigation Router**
+
+*   **Problem:** The simple `ScreenStack` doesn't support complex navigation like tabs or master-detail views.
+*   **Action Plan:** Create a navigation service that maps named routes to screens, allowing for more complex, non-linear application flows.
+*   **Impact:** Enables the creation of much larger and more sophisticated applications.
+
+**4.5. General Polish and Tooling**
+*   **Debug Visualizer:** A toggleable overlay showing component boundaries and state.
+*   **Component Scaffolding:** A CLI tool to generate new component templates.
+*   **Advanced Focus Management:** Implement a visible "focus ring" and explicit `TabIndex` controls.
+*   **Documentation:** Comprehensive documentation for the component API, DSL, and framework architecture.

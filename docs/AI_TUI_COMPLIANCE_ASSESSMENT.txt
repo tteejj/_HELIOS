@@ -1,0 +1,74 @@
+Excellent. Here is a re-analysis of the provided code, using the newly generated AI/LLM documentation as the canonical "specification." This critique identifies what is compliant, what is non-compliant, and what actions are required to align the entire codebase with the new, unified architecture.
+
+### Executive Summary: Analysis Against the New Standard
+
+The codebase is currently in a **transitional state**. It contains both the "gold standard" implementation of the new architecture (the advanced components) and significant legacy code that directly conflicts with it (the screens and basic components).
+
+The core engine (`tui-engine-v2.txt`) and key subsystems (`event-system.txt`, `dialog-system.txt`) are robust and **compliant** with the new standard. The primary task is to refactor the non-compliant UI layers (screens and basic components) to use the established patterns, and to remove deprecated functions from the framework itself.
+
+---
+
+### Detailed Compliance Analysis
+
+#### 1. Core Systems (`modules/`)
+
+*   **`tui-engine-v2.txt`**: **COMPLIANT**
+    *   **Assessment:** The engine successfully implements the required features: double-buffering, an asynchronous input loop, and a robust focus management system. It provides the necessary low-level rendering primitives (`Write-BufferString`, `Write-BufferBox`) that all components rely on. No changes are needed.
+
+*   **`dialog-system.txt`**: **COMPLIANT**
+    *   **Assessment:** This module is the **canonical implementation** for all dialogs. Its factory functions (`Show-ConfirmDialog`, etc.) and internal component-based structure are perfectly aligned with the new architecture. It correctly uses engine primitives and follows the specified patterns.
+
+*   **`event-system.txt` / `data-manager.txt` / `theme-manager.txt`**: **COMPLIANT**
+    *   **Assessment:** These subsystems are well-defined, decoupled, and provide clear APIs (`Publish-Event`, `Save-UnifiedData`, `Get-ThemeColor`) that the UI layer can consume without issue. They are fully compliant.
+
+*   **`tui-framework.txt`**: **PARTIALLY COMPLIANT / NEEDS REPLACEMENT**
+    *   **Assessment:** This module is a source of major architectural conflict. While it provides compliant, essential utilities like `Invoke-TuiAsync` and `Create-TuiState`, it also contains the primary factory functions for the old, deprecated architecture.
+    *   **Required Fixes:**
+        1.  **REMOVE `Create-TuiScreen`:** This is the core function of the old declarative model. It is now superseded by the programmatic pattern defined in `AI_DEVELOPMENT_PATTERNS.md`. Removing it will enforce the new standard.
+        2.  **REMOVE `Create-TuiComponent`:** This factory is also part of the old model. The new standard is to use specific `New-Tui<ComponentName>` factories for each component.
+        3.  **REMOVE `Create-TuiForm`:** This function creates a rigid form structure. The new, more flexible pattern is to construct forms manually within a screen's `Init` block using layout containers and individual input components. The `Get-AddTaskScreen` function in `task-management-screen.txt` is a good (though imperfect) example of this approach.
+        4.  **RETAIN & PROMOTE:** The functions `Invoke-TuiAsync`, `Stop-AllTuiAsyncJobs`, and `Create-TuiState` are valuable, compliant utilities and should be retained.
+
+---
+
+#### 2. Components (`components/`)
+
+*   **`advanced-input-components.psm1` & `advanced-data-components.psm1`**: **COMPLIANT (GOLD STANDARD)**
+    *   **Assessment:** These files are the **definitive reference** for the new component architecture. They correctly implement the stateful, programmatic factory pattern (`New-Tui...`). They manage their own internal state and expose events via `$Props`. They require no changes.
+
+*   **`tui-components.psm1`**: **NON-COMPLIANT / NEEDS REPLACEMENT**
+    *   **Assessment:** This file is a mix of patterns and contains deprecated/conflicting code. While the individual `New-Tui...` functions are a step in the right direction, they are built on the inconsistent `New-TuiComponent` base.
+    *   **Required Fixes:**
+        1.  **REMOVE `New-TuiDialog`:** This is a duplicate of the more robust implementation in `dialog-system.txt`. It must be removed to avoid conflicts.
+        2.  **REMOVE `New-TuiComponent`:** This base factory function should be removed. Each component factory (`New-TuiButton`, `New-TuiTextBox`, etc.) should be rewritten to create the component hashtable directly, just as the advanced components do. This will enforce a single, consistent component structure across the entire framework.
+        3.  **REMOVE `New-TuiForm`:** This is a high-level container that is now deprecated. It is fully replaced by the programmatic screen pattern.
+
+---
+
+#### 3. Screens (`screens/`)
+
+*   **`dashboard-screen-grid.txt`**: **NON-COMPLIANT / NEEDS REPLACEMENT**
+    *   **Assessment:** This screen is fundamentally broken according to the new standard. It uses the deprecated `Create-TuiScreen -Definition` model, which is no longer supported by how the rest of the system is intended to work. It attempts to define children declaratively instead of instantiating them programmatically. It has no concept of managing focus between its child widgets.
+    *   **Required Fix:** This file must be **completely rewritten** from scratch following the pattern in `AI_DEVELOPMENT_PATTERNS.md`.
+        *   It needs an `Init` block to programmatically call `New-TuiDataTable`, `New-TuiButton`, etc., for each dashboard widget and store them in a `$screen.Components` hashtable.
+        *   It needs a focus management system within its `HandleInput` to cycle focus between the interactive widgets (e.g., the Quick Actions list).
+        *   Its `Render` method must iterate through `$screen.Components` and call the `Render` method for each widget.
+
+*   **`task-management-screen.txt`**: **PARTIALLY COMPLIANT / NEEDS REPLACEMENT**
+    *   **Assessment:** This screen is a hybrid.
+        *   **The Good:** The `Get-AddTaskScreen` sub-function is a near-perfect example of the new architecture. It programmatically creates components and uses a (now deprecated) `New-TuiForm` to manage them. This shows the developer was moving in the right direction.
+        *   **The Bad:** The main task list view is **not component-based**. Its `Render` method is a single, monolithic block that manually draws a list using `Write-BufferString`. It does not use the `New-TuiDataTable` or even a simpler list component. This makes it rigid and hard to maintain.
+    *   **Required Fix:**
+        1.  The main list view should be refactored to use a single, powerful `New-TuiDataTable` component from `advanced-data-components.psm1`. The screen's `State` would hold the filtered tasks, which are then passed to the table's `Data` property during the `Render` phase.
+        2.  Input handling would then be delegated to the data table component, simplifying the screen's `HandleInput` logic immensely.
+        3.  The `Get-AddTaskScreen` function should be updated to remove its dependency on the deprecated `New-TuiForm` and instead use a standard `Container` component with a `Stack` layout.
+
+### Roadmap to Full Compliance
+
+1.  **Clean `tui-framework.psm1`:** Remove the deprecated `Create-TuiScreen`, `Create-TuiComponent`, and `Create-TuiForm` functions.
+2.  **Clean `tui-components.psm1`:** Remove the duplicate `New-TuiDialog`.
+3.  **Refactor `tui-components.psm1`:** Rewrite all `New-Tui...` functions in this file to abandon the `New-TuiComponent` base and directly create hashtables, mirroring the pattern in the advanced components.
+4.  **Rewrite `dashboard-screen-grid.txt`:** Re-implement the entire screen using the programmatic `Get-DashboardScreen` factory pattern. Instantiate all widgets as components in the `Init` block.
+5.  **Refactor `task-management-screen.txt`:** Replace the monolithic render block with an instance of `New-TuiDataTable`. Update `Get-AddTaskScreen` to use a standard container instead of `New-TuiForm`.
+6.  **Resolve Unicode Bug:** Implement the provided fix for `Write-BufferString` in `tui-engine-v2.txt` to correctly handle wide characters.
+7.  **Address Clipboard (Optional but Recommended):** Add basic clipboard paste functionality to `New-TuiTextBox` and `New-TuiTextArea`.

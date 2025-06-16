@@ -1,0 +1,356 @@
+# Focus System Consolidation Fix
+# Addresses focus management inconsistencies across the TUI framework
+
+# ISSUE: The focus system has some inconsistencies between engine-level focus tracking
+# and screen-level focus management. This fix consolidates focus handling.
+
+# 1. Enhanced Global Focus Management
+# Replace the current focus management in tui-engine-v2.psm1 with this enhanced version:
+
+function global:Set-ComponentFocus-Enhanced {
+    param([hashtable]$Component, [hashtable]$Screen = $null)
+    
+    # Don't focus disabled components
+    if ($Component -and ($Component.IsEnabled -eq $false -or $Component.Disabled -eq $true -or $Component.IsFocusable -eq $false)) {
+        return $false
+    }
+    
+    # Get current screen if not provided
+    if (-not $Screen) {
+        $Screen = $script:TuiState.CurrentScreen
+    }
+    
+    try {
+        # Blur previous component with error handling
+        if ($script:TuiState.FocusedComponent -and $script:TuiState.FocusedComponent.OnBlur) {
+            $script:TuiState.FocusedComponent.IsFocused = $false
+            try {
+                & $script:TuiState.FocusedComponent.OnBlur -self $script:TuiState.FocusedComponent
+            } catch {
+                Write-Log -Level Warning -Message "Component blur error: $_"
+            }
+        }
+        
+        # Update screen-level focus tracking
+        if ($Screen) {
+            # Find the component name in the screen's components
+            $componentName = $null
+            if ($Screen.Components -is [hashtable]) {
+                foreach ($kvp in $Screen.Components.GetEnumerator()) {
+                    if ($kvp.Value -eq $Component) {
+                        $componentName = $kvp.Key
+                        break
+                    }
+                }
+            }
+            
+            # Update screen's focus tracking
+            if ($componentName) {
+                $Screen.FocusedComponentName = $componentName
+                $Screen.LastFocusedComponent = $Component
+            }
+            
+            # Clear IsFocused on all other components in the screen
+            if ($Screen.Components -is [hashtable]) {
+                foreach ($comp in $Screen.Components.Values) {
+                    if ($comp -ne $Component) {
+                        $comp.IsFocused = $false
+                    }
+                }
+            }
+        }
+        
+        # Focus new component with error handling
+        $script:TuiState.FocusedComponent = $Component
+        if ($Component) {
+            $Component.IsFocused = $true
+            if ($Component.OnFocus) {
+                try {
+                    & $Component.OnFocus -self $Component
+                } catch {
+                    Write-Log -Level Warning -Message "Component focus error: $_"
+                }
+            }
+        }
+        
+        Request-TuiRefresh
+        return $true
+        
+    } catch {
+        Write-Log -Level Error -Message "Set-ComponentFocus error: $_" -Data $_
+        return $false
+    }
+}
+
+# 2. Enhanced Tab Navigation with Screen Awareness
+function global:Handle-TabNavigation-Enhanced {
+    param([bool]$Reverse = $false)
+    
+    $currentScreen = $script:TuiState.CurrentScreen
+    if (-not $currentScreen) { return $false }
+    
+    try {
+        # Get focusable components from current screen
+        $focusableComponents = @()
+        $componentNames = @()
+        
+        if ($currentScreen.Components -is [hashtable]) {
+            # Sort by TabIndex or position
+            $sortedComponents = $currentScreen.Components.GetEnumerator() | Sort-Object {
+                $comp = $_.Value
+                if ($null -ne $comp.TabIndex) { 
+                    $comp.TabIndex 
+                } else { 
+                    ($comp.Y ?? 0) * 1000 + ($comp.X ?? 0) 
+                }
+            }
+            
+            foreach ($kvp in $sortedComponents) {
+                $comp = $kvp.Value
+                if ($comp -and 
+                    $comp.IsFocusable -ne $false -and 
+                    $comp.IsEnabled -ne $false -and 
+                    $comp.Disabled -ne $true -and
+                    $comp.IsVisible -ne $false -and
+                    $comp.Visible -ne $false) {
+                    
+                    $focusableComponents += $comp
+                    $componentNames += $kvp.Key
+                }
+            }
+        }
+        
+        if ($focusableComponents.Count -eq 0) { return $false }
+        
+        if ($Reverse) {
+            [Array]::Reverse($focusableComponents)
+            [Array]::Reverse($componentNames)
+        }
+        
+        # Find current component index
+        $currentIndex = -1
+        for ($i = 0; $i -lt $focusableComponents.Count; $i++) {
+            if ($focusableComponents[$i] -eq $script:TuiState.FocusedComponent) {
+                $currentIndex = $i
+                break
+            }
+        }
+        
+        # Get next component (with wrap-around)
+        $nextIndex = if ($currentIndex -ge 0) {
+            ($currentIndex + 1) % $focusableComponents.Count
+        } else {
+            0
+        }
+        
+        $nextComponent = $focusableComponents[$nextIndex]
+        $nextComponentName = $componentNames[$nextIndex]
+        
+        # Use enhanced focus function
+        if (Set-ComponentFocus-Enhanced -Component $nextComponent -Screen $currentScreen) {
+            Write-Log -Level Debug -Message "Tab navigation: focused '$nextComponentName'"
+            return $true
+        }
+        
+    } catch {
+        Write-Log -Level Error -Message "Tab navigation error: $_" -Data $_
+    }
+    
+    return $false
+}
+
+# 3. Screen Focus Restoration
+function global:Restore-ScreenFocus {
+    param([hashtable]$Screen)
+    
+    if (-not $Screen) { return }
+    
+    try {
+        # Restore focus to the last focused component
+        $componentToFocus = $null
+        
+        if ($Screen.LastFocusedComponent -and $Screen.Components) {
+            # Verify the component still exists and is focusable
+            $found = $false
+            if ($Screen.Components -is [hashtable]) {
+                foreach ($comp in $Screen.Components.Values) {
+                    if ($comp -eq $Screen.LastFocusedComponent -and 
+                        $comp.IsFocusable -ne $false -and 
+                        $comp.Visible -ne $false) {
+                        $componentToFocus = $comp
+                        $found = $true
+                        break
+                    }
+                }
+            }
+            
+            if (-not $found) {
+                $Screen.LastFocusedComponent = $null
+            }
+        }
+        
+        # If no valid last focused component, find the first focusable one
+        if (-not $componentToFocus -and $Screen.Components -is [hashtable]) {
+            $sortedComponents = $Screen.Components.GetEnumerator() | Sort-Object {
+                $comp = $_.Value
+                if ($null -ne $comp.TabIndex) { 
+                    $comp.TabIndex 
+                } else { 
+                    ($comp.Y ?? 0) * 1000 + ($comp.X ?? 0) 
+                }
+            }
+            
+            foreach ($kvp in $sortedComponents) {
+                $comp = $kvp.Value
+                if ($comp -and 
+                    $comp.IsFocusable -ne $false -and 
+                    $comp.IsEnabled -ne $false -and 
+                    $comp.Disabled -ne $true -and
+                    $comp.IsVisible -ne $false -and
+                    $comp.Visible -ne $false) {
+                    
+                    $componentToFocus = $comp
+                    break
+                }
+            }
+        }
+        
+        if ($componentToFocus) {
+            Set-ComponentFocus-Enhanced -Component $componentToFocus -Screen $Screen
+            Write-Log -Level Debug -Message "Screen focus restored"
+        } else {
+            # No focusable components, clear focus
+            Clear-ComponentFocus
+            Write-Log -Level Debug -Message "No focusable components in screen"
+        }
+        
+    } catch {
+        Write-Log -Level Error -Message "Restore screen focus error: $_" -Data $_
+    }
+}
+
+# 4. Enhanced Screen Navigation with Focus Management
+# Update Push-Screen and Pop-Screen functions to use the enhanced focus system:
+
+function global:Push-Screen-Enhanced {
+    param([hashtable]$Screen)
+    if (-not $Screen) { return }
+    
+    Write-Log -Level Debug -Message "Pushing screen: $($Screen.Name)"
+    
+    try {
+        # Handle focus before switching screens
+        if ($script:TuiState.FocusedComponent -and $script:TuiState.FocusedComponent.OnBlur) {
+            $script:TuiState.FocusedComponent.IsFocused = $false
+            try {
+                & $script:TuiState.FocusedComponent.OnBlur -self $script:TuiState.FocusedComponent
+            } catch {
+                Write-Log -Level Warning -Message "Component blur error: $_"
+            }
+        }
+        
+        # Save current screen state
+        if ($script:TuiState.CurrentScreen) {
+            if ($script:TuiState.CurrentScreen.OnExit) { 
+                try {
+                    & $script:TuiState.CurrentScreen.OnExit -self $script:TuiState.CurrentScreen
+                } catch {
+                    Write-Log -Level Warning -Message "Screen exit error: $_"
+                }
+            }
+            $script:TuiState.ScreenStack.Push($script:TuiState.CurrentScreen)
+        }
+        
+        # Switch to new screen
+        $script:TuiState.CurrentScreen = $Screen
+        $script:TuiState.FocusedComponent = $null
+        
+        # Initialize new screen
+        if ($Screen.Init) { 
+            try {
+                & $Screen.Init -self $Screen 
+            } catch {
+                Write-Log -Level Warning -Message "Screen init error: $_"
+            }
+        }
+        
+        # Restore or set initial focus
+        Restore-ScreenFocus -Screen $Screen
+        
+        Request-TuiRefresh
+        
+        # Publish screen change event
+        if (Get-Command Publish-Event -ErrorAction SilentlyContinue) {
+            Publish-Event -EventName "Screen.Pushed" -Data @{ ScreenName = $Screen.Name }
+        }
+        
+    } catch {
+        Write-Log -Level Error -Message "Push screen error: $_" -Data $_
+    }
+}
+
+function global:Pop-Screen-Enhanced {
+    if ($script:TuiState.ScreenStack.Count -eq 0) { return $false }
+    
+    Write-Log -Level Debug -Message "Popping screen"
+    
+    try {
+        # Handle focus before switching screens
+        if ($script:TuiState.FocusedComponent -and $script:TuiState.FocusedComponent.OnBlur) {
+            $script:TuiState.FocusedComponent.IsFocused = $false
+            try {
+                & $script:TuiState.FocusedComponent.OnBlur -self $script:TuiState.FocusedComponent
+            } catch {
+                Write-Log -Level Warning -Message "Component blur error: $_"
+            }
+        }
+        
+        # Store the screen to exit
+        $screenToExit = $script:TuiState.CurrentScreen
+        
+        # Pop the previous screen
+        $script:TuiState.CurrentScreen = $script:TuiState.ScreenStack.Pop()
+        $script:TuiState.FocusedComponent = $null
+        
+        # Handle lifecycle events
+        if ($screenToExit -and $screenToExit.OnExit) { 
+            try {
+                & $screenToExit.OnExit -self $screenToExit
+            } catch {
+                Write-Log -Level Warning -Message "Screen exit error: $_"
+            }
+        }
+        
+        if ($script:TuiState.CurrentScreen -and $script:TuiState.CurrentScreen.OnResume) { 
+            try {
+                & $script:TuiState.CurrentScreen.OnResume -self $script:TuiState.CurrentScreen
+            } catch {
+                Write-Log -Level Warning -Message "Screen resume error: $_"
+            }
+        }
+        
+        # Restore focus to the returned screen
+        Restore-ScreenFocus -Screen $script:TuiState.CurrentScreen
+        
+        Request-TuiRefresh
+        
+        # Publish screen change event
+        if (Get-Command Publish-Event -ErrorAction SilentlyContinue) {
+            Publish-Event -EventName "Screen.Popped" -Data @{ ScreenName = $script:TuiState.CurrentScreen.Name }
+        }
+        
+        return $true
+        
+    } catch {
+        Write-Log -Level Error -Message "Pop screen error: $_" -Data $_
+        return $false
+    }
+}
+
+# 5. Integration Instructions
+# To apply these fixes:
+# 1. Replace the existing focus functions in tui-engine-v2.psm1 with the enhanced versions
+# 2. Update existing screens to use the FocusedComponentName pattern if they don't already
+# 3. Ensure all components properly implement IsFocusable, OnFocus, and OnBlur
+
+# STATUS: These enhancements provide robust, consistent focus management across the entire TUI framework.

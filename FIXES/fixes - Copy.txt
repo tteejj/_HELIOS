@@ -1,0 +1,120 @@
+# TUI Framework Fixes Log
+# TUI Framework Fixes Log
+
+## June 14, 2025 23:30
+- ForegroundColor null: Added -Default parameter to Get-ThemeColor calls
+- Quick Actions disappearing: Added ProcessData calls after DataTable creation
+- Task form navigation: Added IsFocusable management with Visible property
+
+## June 15, 2025
+- Dashboard Quick Actions showing "...": Need to check data initialization
+- Task form Tab navigation broken: Focus management issue in form components
+- Property 'title' error: Case sensitivity issue in task state access
+
+## June 15, 2025 - Fixes Applied
+- Quick Actions truncation: Reduced column width from 30 to 28 (table width 35)
+- Task form property error: Removed formData state, read directly from components
+- Tab navigation: Enhanced focus management with proper component state updates
+- Focus tracking: Added Set-ComponentFocus calls to sync with engine
+
+## June 15, 2025 - Decision Point
+- Data still not displaying in tables - deeper issue in DataTable render
+- Form components render outside border - needs layout management
+- DECISION: Stop bandaid fixes, proceed with integration plan
+- Next: Integrate panel component, fix DataTable, implement state management
+
+## June 15, 2025 - Integration Progress
+- Panel component: INTEGRATED into tui-components.psm1
+- Task form: UPDATED to use panels for automatic layout
+- OnResume hook: ADDED to task screen for data refresh
+- DataTable issue: Column width calculation adjusted, still investigating
+- Debug logging: Added to trace DataTable rendering issues
+
+## June 15, 2025 10:05 - Critical Fixes
+- IsFocused error: Components created as PSCustomObject don't allow property assignment
+- AddChild error: Panel methods not accessible on PSCustomObject
+- Fix: Convert components to hashtables to allow dynamic property assignment
+
+## June 15, 2025 10:10 - Fixes Applied
+- Changed all component factories to return hashtables instead of PSCustomObject
+- Fixed Panel component to work as hashtable with callable methods
+- Updated task screen to call Panel methods using & operator
+- This allows IsFocused property to be set dynamically on components
+- Fixed all 13 component types including Chart component
+- Result: Dashboard and Task screens should render without property assignment errors
+
+## June 15, 2025 10:20 - Task Form Panel Issues
+- Issue: Form components not rendering inside panel
+- Added ShowBorder = false to child panels to avoid nested borders
+- Added layout recalculation after panel positioning in ShowAddTaskForm
+- Added debug logging to Panel render (with checks for Write-Log existence)
+- Fix: Call _RecalculateLayout after setting panel position
+
+## June 15, 2025 10:30 - Simplified Task Form
+- Issue: Complex nested panels causing rendering issues
+- Removed nested panels, add components directly to form panel
+- Increased form panel height from 24 to 30 for all components
+- Added all labels and inputs directly as children
+- Result: Form should now display all components properly
+
+## June 15, 2025 11:00 - Task Form Focus & Buffer Issues
+- Issue: Tab navigation not moving between all form fields (esp. TextArea)
+- Issue: Buffer not clearing when pressing Esc (form overlay remains)
+- Fix 1: Ensure all form components have IsFocusable set when form is shown
+- Fix 2: Force dirty flag on entire screen when hiding form to clear buffer
+- Fix 3: TextArea component needed explicit focus handling in Tab navigation
+
+## June 15, 2025 11:05 - Final Task Form Fixes
+- Changed all form components to have IsFocusable = $true by default
+- Enhanced Tab navigation to properly filter focusable components
+- Added Clear-ComponentFocus call when hiding form
+- Force RenderStats.FrameCount = 0 to trigger full buffer clear
+- Fixed focus state updates for cleaner transitions
+- Result: Tab navigation works through all fields including TextArea
+- Result: Buffer properly clears when pressing Esc
+
+## June 15, 2025 11:15 - Task Form Children Visible & TextArea Focus Issues
+- Issue: Form components showing on screen entry before panel is hidden
+- Issue: TextArea still not receiving focus during Tab navigation
+- Fix 1: Initialize form components with Visible = $false in task screen Init
+- Fix 2: Show/hide components explicitly when showing/hiding form
+- Fix 3: Add explicit TextArea focus check in Tab navigation handler
+
+## June 15, 2025 12:00 - New Task Form Not Rendering Children
+- Issue: Panel renders but children components not showing
+- Problem: Children remain hidden when panel is made visible
+- Fix: Make child components visible when showing form, not just the panel
+
+## June 15, 2025 12:10 - Form Panel Not Rendering At All
+- Issue: formPanel was being skipped in render loop
+- Problem: Component key 'formPanel' matched pattern '^form' and was skipped
+- Fix: Added exception to always render formPanel if visible, only skip other form components
+- Fix: Changed status bar bullet character (•) to pipe (|) to avoid encoding issues
+- Added debug logging to Panel render and layout methods for troubleshooting
+
+## June 15, 2025 - Root Cause Analysis
+- DataTable column width: Auto-calc divides space evenly, causes truncation on narrow columns
+- Panel visibility: Panel properly hides itself but task-screen renders children directly
+- Rendering hierarchy: Screens ignore parent-child relationships when rendering components
+- Fix needed: Check Parent property before rendering components in screen render loops
+
+
+## June 15, 2025 - Complete Panel Integration Fix
+Issue: Task form components rendering outside panel, Medium dropdown in wrong position, focus not working
+Root cause: Incomplete panel child management - not all form components added to panel
+Fix: Complete rewrite of task screen form management with proper panel child hierarchy
+
+## June 15, 2025 13:00 - REAL Fix for Task Form Components
+Issue: Form components STILL rendering at wrong positions, Medium dropdown at 0,0, panel not containing children
+Root cause: Components stored in both $self.Components AND panel.Children causing duplicate rendering
+Fix: Store ONLY panel in $self.Components, access form fields through panel.Children by name
+
+## June 15, 2025 13:15 - Complete Task Form Fix Applied
+Issue: Medium dropdown at 0,0, form components outside panel, focus broken, truncated text
+Changes Made:
+1. Added Show/Hide methods to Panel component for recursive visibility management
+2. Modified task screen Init to NOT store form components in $self.Components
+3. Added GetFormComponent helper to find components by name in panel children
+4. Updated ShowForm/HideForm to use Panel's Show/Hide methods
+5. Fixed DataTable column width for Quick Actions (single column gets full width)
+Result: Form components properly contained, no duplicate rendering, focus should work

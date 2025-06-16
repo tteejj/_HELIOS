@@ -1,0 +1,86 @@
+Of course. Here is a comprehensive, consolidated roadmap that synthesizes all previous analysis. It is structured into prioritized phases, moving from critical bug fixes required to make the application stable, through major architectural improvements, and finally to advanced features and polish.
+
+---
+
+## TUI Framework: The Complete Integration & Improvement Roadmap
+
+This document outlines a prioritized path for evolving the TUI framework from its current state into a robust, performant, and developer-friendly platform. Each phase builds upon the last, ensuring stability before introducing complexity.
+
+### Phase 1: Foundation & Stability (Critical Priority)
+
+**Goal:** Address critical performance bottlenecks and fundamental bugs that make the application unstable or unusable in real-world scenarios. The application is not considered "working" until these are complete.
+
+---
+
+**1.1. Fix Engine & Framework Performance (Highest Priority)** ##X##
+
+*   **Problem:** The engine creates thousands of temporary objects (hashtables) per frame, and the framework clones every component on every render. This leads to massive garbage collection pressure, high CPU usage, and a sluggish UI.
+*   **Location:** `tui-engine-v2.psm1`, `tui-framework.psm1`
+*   **Action Plan:**
+    1.  **Eliminate Component Cloning:** In `Create-TuiScreen`'s `Render` block, remove `$renderableChild = $child.Clone()`. Pass dynamic state (like `IsFocused`) as parameters directly to the component's `Render` method: `& $child.Render -self $child -IsFocused $isFocused`.
+    2.  **Optimize Buffer Rendering:** In `Render-BufferOptimized`, do not create a new hashtable for the front buffer. Modify the existing cell's properties: `$frontCell.Char = $backCell.Char`, etc.
+    3.  **Use Cell Pooling:** In `Write-BufferString`, use the `Get-PooledCell` function instead of creating a new hashtable for every character written to the back buffer.
+*   **Impact:** This is the most important fix. It will result in a dramatic, order-of-magnitude improvement in performance and responsiveness.
+
+**1.2. Fix Component-to-Screen State Communication** ##X##
+
+*   **Problem:** The `OnChange`/`OnClick` event handlers on components have a fragile dependency on PowerShell's scoping. A component cannot reliably update its parent screen's state without cumbersome, error-prone workarounds.
+*   **Location:** `tui-framework.psm1`
+*   **Action Plan:**
+    1.  In `Create-TuiScreen`'s `Init` block, when instantiating a component, wrap any user-provided event handlers (`OnChange`, etc.).
+    2.  The new wrapper scriptblock should automatically pass the parent screen's context (`$self`) as the first argument to the user's original scriptblock.
+    3.  Example: `OnChange = { param($EventArgs) & $userOnChange -self $self -EventArgs $EventArgs }.GetNewClosure()`
+*   **Impact:** Creates a stable, predictable contract for developers. This makes the framework usable and drastically reduces the potential for bugs.
+
+*
+
+### Phase 2: Core Functionality & Usability (High Priority)
+
+**Goal:** Implement features that are standard expectations for a modern TUI. This phase makes the application feel complete and robust from a user's perspective.
+
+---
+
+
+**2.3. Unify and Standardize Component Creation & Layouts**
+
+*   **Problem:** High-level abstractions like `Create-TuiForm` use hardcoded coordinates, and `Create-TuiScreen` bypasses the `Create-TuiComponent` factory.
+*   **Location:** `tui-framework.psm1`.
+*   **Action Plan:**
+    1.  Refactor `Create-TuiScreen` to use the `Create-TuiComponent` factory for all child instantiation.
+    2.  Refactor `Create-TuiForm` to be a layout-driven container, using the `Stack` or `Grid` layout manager internally.
+    3.  Ensure the complex dashboard (`dashboard-screen-complex.psm1`) is refactored to use the engine's layout managers instead of manual coordinate calculation.
+*   **Impact:** Creates a consistent, maintainable, and powerful declarative system. The framework's own features should use its best practices.
+
+---
+
+### Phase 3: Architectural Purity & Developer Experience (Medium Priority)
+
+**Goal:** Refactor the core architecture to be more powerful, flexible, and enjoyable to work with. These changes unlock more advanced UI patterns and accelerate development.
+
+---
+
+**3.1. Implement a Z-Indexed Render Stack**
+
+*   **Problem:** The current render model is a fixed two-layer system (Screen -> Dialog), which cannot handle complex overlapping UI like dropdown lists within dialogs or global toast notifications.
+*   **Location:** `tui-engine-v2.psm1`.
+*   **Action Plan:**
+    1.  Replace the `ScreenStack` and `CurrentDialog` with a single, ordered list of "render layers" in `TuiState`.
+    2.  Each layer has a Z-Index. The engine renders layers in ascending Z-Index order.
+    3.  Input is always routed to the topmost visible layer.
+*   **Impact:** This is a fundamental architectural evolution, turning the engine into a true windowing manager and enabling far more complex UIs.
+
+
+
+
+### Phase 4: Advanced Platform Features & Polish (Low Priority)
+
+**Goal:** Add "nice-to-have" features that provide polish, improve long-term maintainability, and support very large-scale applications.
+
+---
+
+
+**4.4. Implement an Advanced Navigation Router**
+
+*   **Problem:** The simple `ScreenStack` doesn't support complex navigation like tabs or master-detail views.
+*   **Action Plan:** Create a navigation service that maps named routes to screens, allowing for more complex, non-linear application flows.
+*   **Impact:** Enables the creation of much larger and more sophisticated applications.

@@ -1,0 +1,83 @@
+# TUI Engine v2 Rendering Fixes
+# Status: ALREADY IMPLEMENTED - Unicode fix is present in current code
+
+# The Unicode rendering fix mentioned in the AI documentation is already implemented
+# in the current tui-engine-v2.psm1 file. The Write-BufferString function correctly
+# handles wide characters with this code:
+
+# Pragmatic check for CJK/wide characters. A full implementation is library-dependent.
+if ($char -match '[\u1100-\u11FF\u2E80-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFFEF]') {
+    $currentX += 2
+    # Also fill the next cell with a space for wide characters to prevent overlap
+    if ($currentX -lt $script:TuiState.BufferWidth -and $currentX -gt 0) {
+        $script:TuiState.BackBuffer[$Y, $currentX - 1] = @{ 
+            Char = ' '
+            FG = $ForegroundColor
+            BG = $BackgroundColor 
+        }
+    }
+} else {
+    $currentX++
+}
+
+# ADDITIONAL OPTIMIZATION (OPTIONAL)
+# If you want to add even more comprehensive Unicode support, here's an enhanced version:
+
+function global:Write-BufferString-Enhanced {
+    param(
+        [int]$X, 
+        [int]$Y, 
+        [string]$Text, 
+        [ConsoleColor]$ForegroundColor = [ConsoleColor]::White, 
+        [ConsoleColor]$BackgroundColor = [ConsoleColor]::Black
+    )
+    if ($Y -lt 0 -or $Y -ge $script:TuiState.BufferHeight) { return }
+    if ([string]::IsNullOrEmpty($Text)) { return }
+    
+    $currentX = $X
+    foreach ($char in $Text.ToCharArray()) {
+        if ($currentX -ge $script:TuiState.BufferWidth) { break }
+
+        if ($currentX -ge 0) {
+            $script:TuiState.BackBuffer[$Y, $currentX] = @{ 
+                Char = $char
+                FG = $ForegroundColor
+                BG = $BackgroundColor 
+            }
+        }
+        
+        # Enhanced Unicode width detection
+        $charWidth = 1
+        $codePoint = [int][char]$char
+        
+        # CJK Unified Ideographs, Hangul, etc.
+        if ($codePoint -ge 0x1100 -and $codePoint -le 0x115F) { $charWidth = 2 }  # Hangul Jamo
+        elseif ($codePoint -ge 0x2E80 -and $codePoint -le 0x2EFF) { $charWidth = 2 }  # CJK Radicals
+        elseif ($codePoint -ge 0x2F00 -and $codePoint -le 0x2FDF) { $charWidth = 2 }  # Kangxi Radicals
+        elseif ($codePoint -ge 0x3000 -and $codePoint -le 0x303F) { $charWidth = 2 }  # CJK Symbols
+        elseif ($codePoint -ge 0x3040 -and $codePoint -le 0x309F) { $charWidth = 2 }  # Hiragana
+        elseif ($codePoint -ge 0x30A0 -and $codePoint -le 0x30FF) { $charWidth = 2 }  # Katakana
+        elseif ($codePoint -ge 0x3100 -and $codePoint -le 0x312F) { $charWidth = 2 }  # Bopomofo
+        elseif ($codePoint -ge 0x3200 -and $codePoint -le 0x32FF) { $charWidth = 2 }  # Enclosed CJK
+        elseif ($codePoint -ge 0x3400 -and $codePoint -le 0x4DBF) { $charWidth = 2 }  # CJK Extension A
+        elseif ($codePoint -ge 0x4E00 -and $codePoint -le 0x9FFF) { $charWidth = 2 }  # CJK Unified Ideographs
+        elseif ($codePoint -ge 0xAC00 -and $codePoint -le 0xD7AF) { $charWidth = 2 }  # Hangul Syllables
+        elseif ($codePoint -ge 0xF900 -and $codePoint -le 0xFAFF) { $charWidth = 2 }  # CJK Compatibility
+        elseif ($codePoint -ge 0xFE30 -and $codePoint -le 0xFE4F) { $charWidth = 2 }  # CJK Compatibility Forms
+        elseif ($codePoint -ge 0xFF00 -and $codePoint -le 0xFFEF) { $charWidth = 2 }  # Fullwidth Forms
+        
+        # Fill additional cell for wide characters
+        if ($charWidth -eq 2 -and ($currentX + 1) -lt $script:TuiState.BufferWidth) {
+            $script:TuiState.BackBuffer[$Y, $currentX + 1] = @{ 
+                Char = ' '
+                FG = $ForegroundColor
+                BG = $BackgroundColor 
+            }
+        }
+        
+        $currentX += $charWidth
+    }
+}
+
+# STATUS: Current implementation is sufficient for most use cases.
+# The basic wide character detection is already working correctly.

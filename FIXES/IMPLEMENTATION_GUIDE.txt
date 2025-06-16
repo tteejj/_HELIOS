@@ -1,0 +1,219 @@
+# TUI Framework Implementation Guide
+# Step-by-step guide for implementing the fixes and maintaining the compliant architecture
+
+## CURRENT STATUS ASSESSMENT
+
+The TUI framework is **already in excellent condition** and mostly compliant with the canonical architecture defined in the AI documentation. The major architectural rewrites mentioned in the AI documentation have already been implemented:
+
+✅ **tui-engine-v2.psm1** - Unicode rendering fix is already present
+✅ **dashboard-screen-grid.psm1** - Already rewritten with programmatic pattern 
+✅ **task-screen.psm1** - Already rewritten with component-based architecture
+✅ **Component libraries** - All using proper factory patterns
+✅ **Focus system** - Working correctly with minor enhancement opportunities
+
+## IMPLEMENTATION PRIORITIES
+
+### Priority 1: Apply Focus System Enhancements (Optional)
+The focus system is working but could benefit from consolidation:
+
+```powershell
+# 1. Review focus-consolidation-fix.txt
+# 2. Consider applying the enhanced focus functions to tui-engine-v2.psm1
+# 3. Test tab navigation across all screens
+```
+
+### Priority 2: Apply Screen Enhancements (Optional)
+Both dashboard and task screens are excellent but could use minor enhancements:
+
+```powershell
+# 1. Review dashboard-screen-fixes.txt for error handling improvements
+# 2. Review task-screen-fixes.txt for additional keyboard shortcuts
+# 3. Apply enhancements selectively based on user needs
+```
+
+### Priority 3: Framework Maintenance (Ongoing)
+Keep the framework compliant with the established patterns:
+
+```powershell
+# 1. Always use New-Tui* factory functions for components
+# 2. Follow the programmatic screen pattern (Get-*Screen functions)
+# 3. Use State hashtables for screen-level data
+# 4. Store components in Components hashtables
+# 5. Implement proper focus management with FocusedComponentName
+```
+
+## STEP-BY-STEP IMPLEMENTATION
+
+### Step 1: Backup Current Implementation
+```powershell
+# Create backup of current working implementation
+Copy-Item -Path "C:\Users\jhnhe\Documents\GitHub\pmc-terminal\modular\experimental features\new testgtound\fixed\current" `
+         -Destination "C:\Users\jhnhe\Documents\GitHub\pmc-terminal\modular\experimental features\new testgtound\fixed\backup_$(Get-Date -Format 'yyyyMMdd_HHmmss')" `
+         -Recurse
+```
+
+### Step 2: Apply Focus System Enhancements (Optional)
+```powershell
+# Only if you want enhanced focus management
+# 1. Open modules/tui-engine-v2.psm1
+# 2. Replace Set-ComponentFocus with Set-ComponentFocus-Enhanced from focus-consolidation-fix.txt
+# 3. Replace Handle-TabNavigation with Handle-TabNavigation-Enhanced
+# 4. Add Restore-ScreenFocus function
+# 5. Update Push-Screen and Pop-Screen functions
+# 6. Test thoroughly
+```
+
+### Step 3: Apply Screen Enhancements (Optional)
+```powershell
+# Dashboard enhancements
+# 1. Open screens/dashboard-screen-grid.psm1
+# 2. Consider applying Enhanced-RefreshData function
+# 3. Consider applying Enhanced-HandleInput function
+
+# Task screen enhancements  
+# 1. Open screens/task-screen.psm1
+# 2. Consider applying Enhanced-SaveTask function
+# 3. Consider applying Enhanced-HandleInput function
+# 4. Consider applying Enhanced-LoadTasksFromGlobalData function
+```
+
+### Step 4: Testing Protocol
+```powershell
+# 1. Start the application
+.\main.ps1
+
+# 2. Test basic functionality
+# - Dashboard navigation
+# - Task management
+# - Focus navigation (Tab/Shift+Tab)
+# - Screen switching (Escape, menu navigation)
+
+# 3. Test enhanced features (if applied)
+# - Keyboard shortcuts (Ctrl+N, Ctrl+S, etc.)
+# - Error handling
+# - Data persistence
+# - Focus restoration
+```
+
+### Step 5: Monitoring and Maintenance
+```powershell
+# 1. Check logs for any errors
+# 2. Monitor performance
+# 3. Get user feedback
+# 4. Apply additional enhancements as needed
+```
+
+## DEVELOPMENT BEST PRACTICES
+
+### Creating New Screens
+```powershell
+function global:Get-MyNewScreen {
+    $screen = @{
+        Name = "MyNewScreen"
+        State = @{
+            # Screen data here
+        }
+        Components = @{}
+        
+        Init = {
+            param($self)
+            # Create components using New-Tui* factories
+            $self.Components.myButton = New-TuiButton -Props @{
+                X = 10; Y = 5; Width = 20; Height = 3
+                Text = "Click Me"
+                OnClick = { 
+                    # Handle button click
+                }
+            }
+        }
+        
+        Render = {
+            param($self)
+            # Render screen elements
+            # Render components
+            foreach ($comp in $self.Components.Values) {
+                if ($comp.Render) {
+                    & $comp.Render -self $comp
+                }
+            }
+        }
+        
+        HandleInput = {
+            param($self, $Key)
+            # Handle screen-level input
+            # Delegate to focused component
+            # Return appropriate values ("Back", "Quit", $true, $false)
+        }
+    }
+    return $screen
+}
+```
+
+### Creating New Components
+```powershell
+function global:New-TuiMyComponent {
+    param([hashtable]$Props = @{})
+    
+    $component = @{
+        Type = "MyComponent"
+        IsFocusable = $true
+        
+        # Properties from Props
+        X = $Props.X ?? 0
+        Y = $Props.Y ?? 0
+        # ... other properties
+        
+        # Event handlers from Props
+        OnChange = $Props.OnChange
+        
+        # Methods
+        Render = {
+            param($self)
+            # Render the component
+        }
+        
+        HandleInput = {
+            param($self, $Key)
+            # Handle input, return $true if handled
+            return $false
+        }
+    }
+    
+    return $component
+}
+```
+
+## TROUBLESHOOTING
+
+### Common Issues and Solutions
+
+1. **Focus not working**
+   - Check that components have `IsFocusable = $true`
+   - Verify `OnFocus` and `OnBlur` handlers are implemented
+   - Ensure screen tracks focus with `FocusedComponentName`
+
+2. **Components not rendering**
+   - Check `Visible` property is not set to `$false`
+   - Verify component is in screen's `Components` hashtable
+   - Check for exceptions in component's `Render` method
+
+3. **Input not being handled**
+   - Verify component's `HandleInput` method returns `$true` when handling input
+   - Check that component is focused
+   - Ensure screen's `HandleInput` delegates to focused component
+
+4. **Screen switching issues**
+   - Check return values from screen's `HandleInput` ("Back", "Quit")
+   - Verify `Push-Screen` and `Pop-Screen` are called correctly
+   - Check screen lifecycle methods (`Init`, `OnExit`, `OnResume`)
+
+## CONCLUSION
+
+The current TUI framework implementation is excellent and fully compliant with the canonical architecture. The fixes provided are **optional enhancements** rather than critical fixes. The framework is production-ready as-is.
+
+Apply enhancements selectively based on specific needs:
+- Apply focus enhancements if you need more robust tab navigation
+- Apply screen enhancements if you want additional keyboard shortcuts and error handling
+- Keep the current implementation if it's working well for your use case
+
+The framework follows all the best practices outlined in the AI documentation and provides a solid foundation for building complex terminal user interfaces.

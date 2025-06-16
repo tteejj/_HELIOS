@@ -1,0 +1,260 @@
+# TARGETED FIX 1: Replace the Render block in Create-TuiScreen function
+# This eliminates component cloning
+
+# In Create-TuiScreen function, replace the entire Render block:
+Render = {
+    param($self)
+    
+    # Render all children components WITHOUT cloning
+    foreach ($child in $self.Children) {
+        if ($child.Render) {
+            # Pass dynamic state as parameters instead of cloning
+            $isFocused = ($child.Name -eq $self._focusedComponentName)
+            $isDisabled = if ($child.Disabled) { $child.Disabled } else { $false }
+            
+            # Call render with state parameters
+            & $child.Render -self $child -IsFocused $isFocused -IsDisabled $isDisabled
+        }
+    }
+}
+
+# TARGETED FIX 2: Add cell pooling to engine
+# Add this at the top of tui-engine-v2.psm1 after the TuiState initialization:
+
+$script:CellPool = @{
+    Cells = [System.Collections.ArrayList]::new()
+    MaxPoolSize = 1000
+}
+
+function Get-PooledCell {
+    param(
+        [string]$Char = ' ',
+        [ConsoleColor]$ForegroundColor = [ConsoleColor]::Gray,
+        [ConsoleColor]$BackgroundColor = [ConsoleColor]::Black
+    )
+    
+    if ($script:CellPool.Cells.Count -gt 0) {
+        $cell = $script:CellPool.Cells[0]
+        $script:CellPool.Cells.RemoveAt(0)
+        $cell.Char = $Char
+        $cell.ForegroundColor = $ForegroundColor
+        $cell.BackgroundColor = $BackgroundColor
+        return $cell
+    }
+    
+    return @{
+        Char = $Char
+        ForegroundColor = $ForegroundColor
+        BackgroundColor = $BackgroundColor
+    }
+}
+
+function Return-CellToPool {
+    param($Cell)
+    
+    if ($script:CellPool.Cells.Count -lt $script:CellPool.MaxPoolSize) {
+        $script:CellPool.Cells.Add($Cell) | Out-Null
+    }
+}
+
+# TARGETED FIX 3: Replace Write-BufferString to use pooled cells
+# Replace the entire Write-BufferString function:
+
+function Write-BufferString {
+    param(
+        [int]$X,
+        [int]$Y,
+        [string]$Text,
+        [ConsoleColor]$ForegroundColor = [ConsoleColor]::Gray,
+        [ConsoleColor]$BackgroundColor = [ConsoleColor]::Black
+    )
+    
+    if ($Y -lt 0 -or $Y -ge $script:TuiState.BufferHeight) { return }
+    
+    $maxLength = [Math]::Min($Text.Length, $script:TuiState.BufferWidth - $X)
+    if ($maxLength -le 0) { return }
+    
+    $text = if ($Text.Length -gt $maxLength) { $Text.Substring(0, $maxLength) } else { $Text }
+    
+    for ($i = 0; $i -lt $text.Length; $i++) {
+        $charX = $X + $i
+        if ($charX -ge 0 -and $charX -lt $script:TuiState.BufferWidth) {
+            # Use pooled cell instead of creating new hashtable
+            $cell = Get-PooledCell -Char $text[$i] -ForegroundColor $ForegroundColor -BackgroundColor $BackgroundColor
+            $script:TuiState.BackBuffer[$Y][$charX] = $cell
+        }
+    }
+}
+
+# TARGETED FIX 4: Optimize Render-BufferOptimized
+# Replace the section that updates the front buffer:
+
+function Render-BufferOptimized {
+    for ($y = 0; $y -lt $script:TuiState.BufferHeight; $y++) {
+        for ($x = 0; $x -lt $script:TuiState.BufferWidth; $x++) {
+            $backCell = $script:TuiState.BackBuffer[$y][$x]
+            $frontCell = $script:TuiState.FrontBuffer[$y][$x]
+            
+            if ($backCell.Char -ne $frontCell.Char -or
+                $backCell.ForegroundColor -ne $frontCell.ForegroundColor -or
+                $backCell.BackgroundColor -ne $frontCell.BackgroundColor) {
+                
+                # Update existing cell instead of creating new one
+                $frontCell.Char = $backCell.Char
+                $frontCell.ForegroundColor = $backCell.ForegroundColor
+                $frontCell.BackgroundColor = $backCell.BackgroundColor
+                
+                [Console]::SetCursorPosition($x, $y)
+                [Console]::ForegroundColor = $frontCell.ForegroundColor
+                [Console]::BackgroundColor = $frontCell.BackgroundColor
+                [Console]::Write($frontCell.Char)
+            }
+        }
+    }
+    
+    # Move cursor to bottom-right to avoid interference
+    [Console]::SetCursorPosition($script:TuiState.BufferWidth - 1, $script:TuiState.BufferHeight - 1)
+}
+
+# TARGETED FIX 5: Optimize Clear-BackBuffer to reuse cells
+# Replace Clear-BackBuffer function:
+
+function Clear-BackBuffer {
+    param(
+        [ConsoleColor]$BackgroundColor = [ConsoleColor]::Black
+    )
+    
+    for ($y = 0; $y -lt $script:TuiState.BufferHeight; $y++) {
+        for ($x = 0; $x -lt $script:TuiState.BufferWidth; $x++) {
+            $cell = $script:TuiState.BackBuffer[$y][$x]
+            # Reuse existing cell
+            $cell.Char = ' '
+            $cell.ForegroundColor = [ConsoleColor]::Gray
+            $cell.BackgroundColor = $BackgroundColor
+        }
+    }
+}
+
+# TARGETED FIX: Replace the Init block in Create-TuiScreen function
+# This wraps all event handlers to automatically pass parent context
+
+# In Create-TuiScreen function, replace the entire Init block:
+Init = {
+    param($self)
+    
+    # Wrap a user-provided event handler to inject parent context
+    function Wrap-EventHandler {
+        param(
+            [scriptblock]$Handler,
+            [hashtable]$ParentScreen,
+            [hashtable]$Component
+        )
+        
+        if (-not $Handler) { return $null }
+        
+        # Create wrapper that passes both parent screen and component
+        $wrapper = {
+            param($EventArgs)
+            
+            # Create event context with all relevant references
+            $context = @{
+                Screen = $wrappedParentScreen
+                Component = $wrappedComponent
+                EventArgs = $EventArgs
+            }
+            
+            # Call original handler with context
+            & $wrappedHandler -Context $context
+        }
+        
+        # Bind variables to the wrapper closure
+        $wrapper = $wrapper.GetNewClosure()
+        Set-Variable -Name 'wrappedHandler' -Value $Handler -Scope 1
+        Set-Variable -Name 'wrappedParentScreen' -Value $ParentScreen -Scope 1
+        Set-Variable -Name 'wrappedComponent' -Value $Component -Scope 1
+        
+        return $wrapper
+    }
+    
+    # Initialize children
+    $self.Children = [System.Collections.ArrayList]::new()
+    
+    # Process child components  
+    foreach ($childDef in $childComponents) {
+        if ($childDef.Type) {
+            # Create component instance
+            $component = Create-TuiComponent @childDef
+            
+            # Wrap all event handlers with parent context
+            $eventHandlers = @('OnChange', 'OnClick', 'OnFocus', 'OnBlur', 'OnSubmit')
+            foreach ($handlerName in $eventHandlers) {
+                if ($component.$handlerName) {
+                    $component.$handlerName = Wrap-EventHandler `
+                        -Handler $component.$handlerName `
+                        -ParentScreen $self `
+                        -Component $component
+                }
+            }
+            
+            # Add to children
+            [void]$self.Children.Add($component)
+            
+            # Store named components for easy access
+            if ($component.Name) {
+                $self."_$($component.Name)" = $component
+            }
+        }
+    }
+    
+    # Set initial focus
+    if ($self.Children.Count -gt 0) {
+        $focusable = $self.Children | Where-Object { -not $_.Disabled }
+        if ($focusable) {
+            $self._focusedComponentName = $focusable[0].Name
+        }
+    }
+}
+
+# EXAMPLE: How to use the new event handler pattern in your components
+# When defining a component with an event handler:
+
+$myComponent = @{
+    Type = "TextBox"
+    Name = "Username"
+    Label = "Username:"
+    OnChange = {
+        param($Context)
+        
+        # Access the parent screen's state
+        $Context.Screen.State.FormData.Username = $Context.Component.Text
+        
+        # Access the component that fired the event
+        Write-Host "Component $($Context.Component.Name) changed to: $($Context.Component.Text)"
+        
+        # Access any event-specific data
+        if ($Context.EventArgs) {
+            Write-Host "Event details: $($Context.EventArgs | ConvertTo-Json)"
+        }
+        
+        # Update other components on the same screen
+        $Context.Screen._StatusLabel.Text = "Username updated"
+        
+        # Request screen refresh
+        Request-TuiRefresh
+    }
+}
+
+# Alternative simpler usage for backwards compatibility
+# Add this helper function to tui-framework.psm1:
+
+function global:Get-ScreenContext {
+    <# .SYNOPSIS Helper to get current screen context from event handler #>
+    param($Context)
+    
+    if ($Context -is [hashtable] -and $Context.Screen) {
+        return $Context.Screen
+    }
+    
+    # Fallback for old-style handlers
+    return $null
+}

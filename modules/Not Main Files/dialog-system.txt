@@ -1,0 +1,482 @@
+# Dialog System Module
+# Modal dialogs and notifications for the TUI
+
+$script:DialogState = @{
+    DialogStack = [System.Collections.Stack]::new()
+    CurrentDialog = $null
+    NotificationQueue = [System.Collections.Queue]::new()
+    ActiveNotifications = @()
+}
+
+function global:Initialize-DialogSystem {
+    <#
+    .SYNOPSIS
+    Initializes the dialog system
+    #>
+    
+    $script:DialogState = @{
+        DialogStack = [System.Collections.Stack]::new()
+        CurrentDialog = $null
+        NotificationQueue = [System.Collections.Queue]::new()
+        ActiveNotifications = @()
+    }
+    
+    # Subscribe to dialog events
+    Subscribe-Event -EventName "Dialog.Show" -Handler {
+        param($EventData)
+        Show-Dialog -DialogData $EventData.Data
+    }
+    
+    Subscribe-Event -EventName "Notification.Show" -Handler {
+        param($EventData)
+        Show-NotificationToast -Data $EventData.Data
+    }
+    
+    Subscribe-Event -EventName "Confirm.Request" -Handler {
+        param($EventData)
+        Show-ConfirmDialog -Data $EventData.Data
+    }
+    
+    Write-Verbose "Dialog system initialized"
+}
+
+function global:Show-Dialog {
+    <#
+    .SYNOPSIS
+    Shows a modal dialog
+    
+    .PARAMETER DialogData
+    The dialog configuration
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$DialogData
+    )
+    
+    # Push current dialog to stack if exists
+    if ($script:DialogState.CurrentDialog) {
+        $script:DialogState.DialogStack.Push($script:DialogState.CurrentDialog)
+    }
+    
+    # Set new dialog as current
+    $script:DialogState.CurrentDialog = $DialogData
+    
+    # Request refresh
+    if (Get-Command -Name "Request-TuiRefresh" -ErrorAction SilentlyContinue) {
+        Request-TuiRefresh
+    }
+}
+
+function global:Close-Dialog {
+    <#
+    .SYNOPSIS
+    Closes the current dialog
+    #>
+    
+    if ($script:DialogState.DialogStack.Count -gt 0) {
+        # Pop previous dialog from stack
+        $script:DialogState.CurrentDialog = $script:DialogState.DialogStack.Pop()
+    } else {
+        # No more dialogs
+        $script:DialogState.CurrentDialog = $null
+    }
+    
+    # Request refresh
+    if (Get-Command -Name "Request-TuiRefresh" -ErrorAction SilentlyContinue) {
+        Request-TuiRefresh
+    }
+}
+
+function global:Show-NotificationToast {
+    <#
+    .SYNOPSIS
+    Shows a notification toast
+    
+    .PARAMETER Data
+    The notification data
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Data
+    )
+    
+    $notification = @{
+        Id = [Guid]::NewGuid().ToString()
+        Type = "Toast"
+        Text = $Data.Text
+        NotificationType = $Data.Type ?? "Info"
+        Duration = $Data.Duration ?? 3000
+        StartTime = Get-Date
+        Position = $Data.Position ?? "TopRight"
+        
+        Render = {
+            param($self, $bufferWidth, $bufferHeight)
+            
+            $toastWidth = [Math]::Min(50, $self.Text.Length + 8)
+            $toastHeight = 3
+            
+            # Calculate position
+            switch ($self.Position) {
+                "TopRight" {
+                    $toastX = $bufferWidth - $toastWidth - 2
+                    $toastY = 2
+                }
+                "TopLeft" {
+                    $toastX = 2
+                    $toastY = 2
+                }
+                "BottomRight" {
+                    $toastX = $bufferWidth - $toastWidth - 2
+                    $toastY = $bufferHeight - $toastHeight - 2
+                }
+                "BottomLeft" {
+                    $toastX = 2
+                    $toastY = $bufferHeight - $toastHeight - 2
+                }
+                default {
+                    $toastX = $bufferWidth - $toastWidth - 2
+                    $toastY = 2
+                }
+            }
+            
+            # Adjust Y position based on other active notifications
+            $samePositionNotifications = $script:DialogState.ActiveNotifications | 
+                Where-Object { $_.Position -eq $self.Position -and $_.Id -ne $self.Id }
+            
+            if ($self.Position -like "Top*") {
+                $toastY += ($samePositionNotifications.Count * ($toastHeight + 1))
+            } else {
+                $toastY -= ($samePositionNotifications.Count * ($toastHeight + 1))
+            }
+            
+            $bgColor = switch ($self.NotificationType) {
+                "Success" { Get-ThemeColor "Success" }
+                "Error" { Get-ThemeColor "Error" }
+                "Warning" { Get-ThemeColor "Warning" }
+                default { Get-ThemeColor "Info" }
+            }
+            
+            # Toast background
+            Write-BufferBox -X $toastX -Y $toastY -Width $toastWidth -Height $toastHeight -BorderColor $bgColor
+            
+            # Icon and text
+            $icon = switch ($self.NotificationType) {
+                "Success" { "✓" }
+                "Error" { "✗" }
+                "Warning" { "⚠" }
+                default { "ℹ" }
+            }
+            
+            Write-BufferString -X ($toastX + 2) -Y ($toastY + 1) -Text "$icon $($self.Text)" -ForegroundColor $bgColor
+        }
+        
+        ShouldClose = {
+            $elapsed = ((Get-Date) - $this.StartTime).TotalMilliseconds
+            return $elapsed -gt $this.Duration
+        }
+    }
+    
+    # Add to active notifications
+    $script:DialogState.ActiveNotifications += $notification
+    
+    # Request refresh
+    if (Get-Command -Name "Request-TuiRefresh" -ErrorAction SilentlyContinue) {
+        Request-TuiRefresh
+    }
+    
+    # Schedule removal (simplified approach)
+    Start-Job -ScriptBlock {
+        param($Duration, $NotificationId)
+        Start-Sleep -Milliseconds $Duration
+        # This would need proper implementation to remove the notification
+    } -ArgumentList $notification.Duration, $notification.Id | Out-Null
+}
+
+function global:Show-ConfirmDialog {
+    <#
+    .SYNOPSIS
+    Shows a confirmation dialog
+    
+    .PARAMETER Data
+    The confirmation dialog data
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Data
+    )
+    
+    $confirmDialog = @{
+        Type = "Confirm"
+        Title = $Data.Title ?? "Confirm"
+        Message = $Data.Message
+        OnConfirm = $Data.OnConfirm
+        OnCancel = $Data.OnCancel
+        SelectedButton = 0  # 0 = Yes, 1 = No
+        
+        Render = {
+            param($self)
+            
+            $dialogWidth = [Math]::Max(40, $self.Message.Length + 8)
+            $dialogHeight = 8
+            $dialogX = [Math]::Floor(($TuiState.BufferWidth - $dialogWidth) / 2)
+            $dialogY = [Math]::Floor(($TuiState.BufferHeight - $dialogHeight) / 2)
+            
+            # Dialog background
+            Write-BufferBox -X $dialogX -Y $dialogY -Width $dialogWidth -Height $dialogHeight -Title " $($self.Title) " -BorderColor (Get-ThemeColor "Warning")
+            
+            # Message
+            $messageY = $dialogY + 3
+            Write-BufferString -X ($dialogX + 2) -Y $messageY -Text $self.Message -ForegroundColor (Get-ThemeColor "Primary")
+            
+            # Buttons
+            $buttonY = $dialogY + 5
+            $yesX = $dialogX + [Math]::Floor($dialogWidth / 3)
+            $noX = $dialogX + [Math]::Floor($dialogWidth * 2 / 3)
+            
+            $yesColor = if ($self.SelectedButton -eq 0) { Get-ThemeColor "Warning" } else { Get-ThemeColor "Primary" }
+            $noColor = if ($self.SelectedButton -eq 1) { Get-ThemeColor "Warning" } else { Get-ThemeColor "Primary" }
+            
+            $yesText = if ($self.SelectedButton -eq 0) { "[Yes]" } else { " Yes " }
+            $noText = if ($self.SelectedButton -eq 1) { "[No]" } else { " No " }
+            
+            Write-BufferString -X $yesX -Y $buttonY -Text $yesText -ForegroundColor $yesColor
+            Write-BufferString -X $noX -Y $buttonY -Text $noText -ForegroundColor $noColor
+        }
+        
+        HandleInput = {
+            param($self, $Key)
+            
+            switch ($Key.Key) {
+                ([ConsoleKey]::LeftArrow) { $self.SelectedButton = 0; return $true }
+                ([ConsoleKey]::RightArrow) { $self.SelectedButton = 1; return $true }
+                ([ConsoleKey]::Tab) { $self.SelectedButton = 1 - $self.SelectedButton; return $true }
+                ([ConsoleKey]::Enter) {
+                    if ($self.SelectedButton -eq 0 -and $self.OnConfirm) {
+                        & $self.OnConfirm
+                    } elseif ($self.SelectedButton -eq 1 -and $self.OnCancel) {
+                        & $self.OnCancel
+                    }
+                    Close-Dialog
+                    return $true
+                }
+                ([ConsoleKey]::Y) {
+                    if ($self.OnConfirm) { & $self.OnConfirm }
+                    Close-Dialog
+                    return $true
+                }
+                ([ConsoleKey]::N) {
+                    if ($self.OnCancel) { & $self.OnCancel }
+                    Close-Dialog
+                    return $true
+                }
+                ([ConsoleKey]::Escape) {
+                    if ($self.OnCancel) { & $self.OnCancel }
+                    Close-Dialog
+                    return $true
+                }
+            }
+            return $false
+        }
+    }
+    
+    Show-Dialog -DialogData $confirmDialog
+}
+
+function global:Show-InputDialog {
+    <#
+    .SYNOPSIS
+    Shows an input dialog
+    
+    .PARAMETER Data
+    The input dialog data
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Data
+    )
+    
+    $inputDialog = @{
+        Type = "Input"
+        Title = $Data.Title ?? "Input"
+        Prompt = $Data.Prompt
+        DefaultValue = $Data.DefaultValue ?? ""
+        Value = $Data.DefaultValue ?? ""
+        OnSubmit = $Data.OnSubmit
+        OnCancel = $Data.OnCancel
+        
+        Render = {
+            param($self)
+            
+            $dialogWidth = 50
+            $dialogHeight = 8
+            $dialogX = [Math]::Floor(($TuiState.BufferWidth - $dialogWidth) / 2)
+            $dialogY = [Math]::Floor(($TuiState.BufferHeight - $dialogHeight) / 2)
+            
+            # Dialog background
+            Write-BufferBox -X $dialogX -Y $dialogY -Width $dialogWidth -Height $dialogHeight -Title " $($self.Title) " -BorderColor (Get-ThemeColor "Accent")
+            
+            # Prompt
+            Write-BufferString -X ($dialogX + 2) -Y ($dialogY + 2) -Text $self.Prompt -ForegroundColor (Get-ThemeColor "Primary")
+            
+            # Input field
+            $inputY = $dialogY + 4
+            $inputText = $self.Value + "_"
+            Write-BufferString -X ($dialogX + 2) -Y $inputY -Text "[$($inputText.PadRight($dialogWidth - 6))]" -ForegroundColor (Get-ThemeColor "Accent")
+            
+            # Instructions
+            Write-BufferString -X ($dialogX + 2) -Y ($dialogY + 6) -Text "Enter: Submit • Esc: Cancel" -ForegroundColor (Get-ThemeColor "Subtle")
+        }
+        
+        HandleInput = {
+            param($self, $Key)
+            
+            switch ($Key.Key) {
+                ([ConsoleKey]::Enter) {
+                    if ($self.OnSubmit) {
+                        & $self.OnSubmit $self.Value
+                    }
+                    Close-Dialog
+                    return $true
+                }
+                ([ConsoleKey]::Escape) {
+                    if ($self.OnCancel) {
+                        & $self.OnCancel
+                    }
+                    Close-Dialog
+                    return $true
+                }
+                ([ConsoleKey]::Backspace) {
+                    if ($self.Value.Length -gt 0) {
+                        $self.Value = $self.Value.Substring(0, $self.Value.Length - 1)
+                    }
+                    return $true
+                }
+                default {
+                    if ($Key.KeyChar -and -not [char]::IsControl($Key.KeyChar)) {
+                        $self.Value += $Key.KeyChar
+                    }
+                    return $true
+                }
+            }
+            return $false
+        }
+    }
+    
+    Show-Dialog -DialogData $inputDialog
+}
+
+function global:Get-CurrentDialog {
+    <#
+    .SYNOPSIS
+    Gets the current dialog if any
+    #>
+    
+    return $script:DialogState.CurrentDialog
+}
+
+function global:Get-ActiveNotifications {
+    <#
+    .SYNOPSIS
+    Gets all active notifications
+    #>
+    
+    # Clean up expired notifications
+    $now = Get-Date
+    $script:DialogState.ActiveNotifications = @($script:DialogState.ActiveNotifications | Where-Object {
+        -not (& $_.ShouldClose)
+    })
+    
+    return $script:DialogState.ActiveNotifications
+}
+
+function global:Clear-AllDialogs {
+    <#
+    .SYNOPSIS
+    Clears all dialogs and notifications
+    #>
+    
+    $script:DialogState.CurrentDialog = $null
+    $script:DialogState.DialogStack.Clear()
+    $script:DialogState.ActiveNotifications = @()
+    $script:DialogState.NotificationQueue.Clear()
+    
+    if (Get-Command -Name "Request-TuiRefresh" -ErrorAction SilentlyContinue) {
+        Request-TuiRefresh
+    }
+}
+
+function global:Handle-DialogInput {
+    <#
+    .SYNOPSIS
+    Handles input for the current dialog
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        $Key
+    )
+    
+    if ($script:DialogState.CurrentDialog -and $script:DialogState.CurrentDialog.HandleInput) {
+        $result = & $script:DialogState.CurrentDialog.HandleInput -self $script:DialogState.CurrentDialog -Key $Key
+        return ($result -eq $true)
+    }
+    
+    return $false
+}
+
+function global:Update-DialogSystem {
+    <#
+    .SYNOPSIS
+    Updates the dialog system (removes expired notifications, etc.)
+    #>
+    
+    # Clean up expired notifications
+    $script:DialogState.ActiveNotifications = @($script:DialogState.ActiveNotifications | Where-Object {
+        -not (& $_.ShouldClose)
+    })
+    
+    # Check if any dialogs need refresh
+    if ($script:DialogState.CurrentDialog -or $script:DialogState.ActiveNotifications.Count -gt 0) {
+        if (Get-Command -Name "Request-TuiRefresh" -ErrorAction SilentlyContinue) {
+            Request-TuiRefresh
+        }
+    }
+}
+
+function global:Render-Dialogs {
+    <#
+    .SYNOPSIS
+    Renders all active dialogs and notifications
+    #>
+    
+    # Get current buffer dimensions
+    $bufferWidth = $TuiState.BufferWidth
+    $bufferHeight = $TuiState.BufferHeight
+    
+    # Render notifications first (background layer)
+    foreach ($notification in $script:DialogState.ActiveNotifications) {
+        if ($notification.Render) {
+            & $notification.Render -self $notification -bufferWidth $bufferWidth -bufferHeight $bufferHeight
+        }
+    }
+    
+    # Render current dialog on top
+    if ($script:DialogState.CurrentDialog -and $script:DialogState.CurrentDialog.Render) {
+        & $script:DialogState.CurrentDialog.Render -self $script:DialogState.CurrentDialog
+    }
+}
+
+# Export functions
+Export-ModuleMember -Function @(
+    'Initialize-DialogSystem',
+    'Show-Dialog',
+    'Close-Dialog',
+    'Show-NotificationToast',
+    'Show-ConfirmDialog',
+    'Show-InputDialog',
+    'Get-CurrentDialog',
+    'Get-ActiveNotifications',
+    'Clear-AllDialogs',
+    'Handle-DialogInput',
+    'Update-DialogSystem',
+    'Render-Dialogs'
+)

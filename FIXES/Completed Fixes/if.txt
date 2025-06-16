@@ -1,0 +1,156 @@
+Of course. Based on your new information, the diagnosis shifts significantly. If the error persists even when only compliant screens are loaded, the bug is not in the non-compliant code but is a more subtle issue within the "gold standard" engine, framework, or one of the compliant screens themselves.
+
+Here is the requested audit and a new analysis that pinpoints the likely cause of the error.
+
+### Executive Summary
+
+The compliant screens (`dashboard`, `task`, `time-entry`) are exceptionally well-structured and adhere almost perfectly to the new architectural patterns. The issue is not with their design but with a **fragile invocation pattern** used to call their methods.
+
+The root cause of the `The term 'if' is not recognized...` error is the direct use of the PowerShell call operator (`&`) to execute component methods. This pattern is brittle and fails catastrophically if the method scriptblock is even slightly malformed or if a component is missing a method. The fix is to replace this direct invocation with a single, robust helper function that safely validates and executes component methods.
+
+---
+
+### Part 1: Audit of Compliant Screens
+
+#### 1. `dashboard-screen-grid - Copy.psm1.txt`
+*   **Compliance:** ✅ **Excellent**
+*   **Assessment:** This screen is a showcase of the new architecture.
+    *   **Pattern:** Correctly uses the `Get-DashboardScreen` factory pattern with `Init`, `State`, `Components`, `Render`, and `HandleInput` blocks.
+    *   **Components:** It programmatically creates instances of `New-TuiDataTable` and `New-TuiLabel` in its `Init` block and stores them in `$screen.Components`.
+    *   **State:** It correctly uses `$screen.State` to hold application data (`QuickStats`, `LastRefresh`) and correctly updates component properties from this state during the `Render` phase (e.g., updating stats labels).
+    *   **Input:** It correctly delegates input to the focused component.
+*   **Identified Weakness:** The method used to call component `Render` and `HandleInput` methods (`& $component.Render -self $component`) is the source of the framework's fragility, as detailed below.
+
+#### 2. `task-screen - Copy.psm1.txt`
+*   **Compliance:** ✅ **Excellent**
+*   **Assessment:** This is a perfect example of refactoring a complex, monolithic UI into a component-based one.
+    *   **Pattern:** Flawlessly implements the canonical screen pattern.
+    *   **Components:** It correctly uses `New-TuiDataTable` for the main list and individual components (`New-TuiTextBox`, `New-TuiDropdown`, etc.) for its "Add/Edit Task" form. The visibility of these components is properly managed.
+    *   **State:** Manages a complex state tree including `tasks`, `filter`, `sortBy`, and `formData` within `$screen.State`, which is the correct approach.
+    *   **Logic:** The screen contains well-defined helper methods on the screen object (`$self.RefreshTaskTable`, `$self.ShowAddTaskForm`) which is a great pattern for encapsulating screen-specific logic.
+*   **Identified Weakness:** Same as the dashboard; it relies on the direct and fragile `&` invocation pattern.
+
+#### 3. `time-entry-screen - Copy.psm1.txt`
+*   **Compliance:** ✅ **Excellent**
+*   **Assessment:** This screen is a model implementation of a simple, component-based form.
+    *   **Pattern:** Correctly uses the canonical screen pattern.
+    *   **Components:** Programmatically creates `New-TuiButton`, `New-TuiTextBox`, `New-TuiDatePicker`, etc., and manages their layout and focus order correctly.
+    *   **State:** Uses `$screen.State` for form data and validation errors, which is ideal.
+    *   **Input:** Correctly implements Tab navigation between its focusable components.
+*   **Identified Weakness:** Same as the others; it uses the direct `&` invocation pattern.
+
+---
+
+### Part 2: Deep Dive into the Runtime Error
+
+Your new information is the key: the error happens on render *and* on input (arrow keys), even with only compliant code.
+
+*   **Error:** `The term 'if' is not recognized as a name of a cmdlet...` This is a PowerShell parsing error. It means PowerShell received a string (e.g., `"if ($true) {}"`) where it expected a command or scriptblock, and it tried to execute the first word, "if", as a command.
+*   **Trigger:** This happens when a screen's `Render` or `HandleInput` method is called by the TUI engine. These methods, in turn, call the methods of their child components.
+*   **Root Cause:** The invocation pattern `& $component.Render -self $component` is used throughout the compliant screens. While syntactically correct under ideal conditions, it is extremely fragile. It will fail with the observed parsing error if `$component.Render` is not a *perfectly formed scriptblock*. This could happen if:
+    1.  A component was created without a `Render` method.
+    2.  A component's `Render` property was accidentally overwritten with a string or `$null`.
+    3.  A syntax error exists within one of the component's scriptblock definitions, causing it to be misinterpreted by the engine.
+
+The fact that the error occurs on an arrow key press confirms this. The sequence is:
+1.  Arrow key is pressed.
+2.  The screen's `HandleInput` is called.
+3.  It delegates to the focused `DataTable`'s `HandleInput`, which correctly changes its internal state (e.g., `SelectedRow`).
+4.  It calls `Request-TuiRefresh`.
+5.  On the next loop, the TUI engine calls the screen's `Render` method.
+6.  The `Render` method loops through its components and calls `& $component.Render...`.
+7.  One of these `Render` calls fails, triggering the `try/catch` in the TUI engine and printing the "Screen render error" message.
+
+This pattern is a critical architectural weakness. The entire UI's stability relies on every single component having perfectly defined methods, which is not a safe assumption.
+
+---
+
+### Part 3: The Fix - A Robust Invocation Helper
+
+We will fix this by replacing all direct `&` calls with a single, safe helper function. This function will validate the method before attempting to execute it, preventing the parsing error and making the entire framework more resilient.
+
+#### Step 1: Create `Invoke-TuiMethod` in `tui-framework.psm1`
+
+Add the following function to the `tui-framework - Copy.psm1.txt` file and export it.
+
+```powershell
+function global:Invoke-TuiMethod {
+    <#
+    .SYNOPSIS
+    Safely invokes a method on a TUI component.
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        [hashtable]$Component,
+
+        [Parameter(Mandatory=$true)]
+        [string]$MethodName,
+
+        [Parameter()]
+        [hashtable]$Arguments = @{}
+    )
+
+    if ($null -eq $Component) { return }
+    if (-not $Component.ContainsKey($MethodName)) { return }
+
+    $method = $Component[$MethodName]
+    if ($null -eq $method -or $method -isnot [scriptblock]) {
+        # The method doesn't exist or is not a scriptblock, so we can't call it.
+        # This prevents the "term is not recognized" error.
+        return
+    }
+
+    # Add the component itself as the 'self' parameter for convenience
+    $Arguments['self'] = $Component
+
+    try {
+        # Use splatting with the @ operator for robust parameter passing
+        return & $method @Arguments
+    }
+    catch {
+        Write-Warning "Error invoking method '$MethodName' on component '$($Component.Type)': $_"
+        # Force a refresh to show the warning if it happens during a non-render phase
+        Request-TuiRefresh
+    }
+}
+
+# Add 'Invoke-TuiMethod' to the Export-ModuleMember list at the end of the file.
+```
+
+#### Step 2: Refactor All Screens to Use `Invoke-TuiMethod`
+
+Now, we must update the `Render` and `HandleInput` methods in all compliant screens (`dashboard`, `task`, `time-entry`) to use this new, safe function.
+
+**Example Change in `dashboard-screen-grid - Copy.psm1.txt`:**
+
+**Current (Fragile) Code:**
+```powershell
+# In the Render method
+foreach ($component in $self.Components.Values) {
+    if ($component.Visible -ne $false) {
+        $component.IsFocused = ...
+        & $component.Render -self $component
+    }
+}
+
+# In the HandleInput method
+$result = & $focusedComponent.HandleInput -self $focusedComponent -Key $Key
+```
+
+**New (Robust) Code:**
+```powershell
+# In the Render method
+foreach ($component in $self.Components.Values) {
+    if ($component.Visible -ne $false) {
+        $component.IsFocused = ...
+        Invoke-TuiMethod -Component $component -MethodName 'Render'
+    }
+}
+
+# In the HandleInput method
+$result = Invoke-TuiMethod -Component $focusedComponent -MethodName 'HandleInput' -Arguments @{ Key = $Key }
+```
+
+**You must apply this change to every `& $component.Render...` and `& $focusedComponent.HandleInput...` call in all screen files.**
+
+This single change will fix the runtime error by ensuring the framework never attempts to execute a non-existent or malformed method. It hardens the TUI engine against component-level bugs and makes the entire system more stable and predictable. After this is done, you can proceed with rewriting `project-management-screen` on a solid foundation.

@@ -1,0 +1,39 @@
+# Dashboard and Task Screen Fixes - June 14, 2025 23:30
+
+## Issues Fixed
+
+### 1. ForegroundColor Null Error
+**Problem**: Get-ThemeColor was returning null for missing color keys, causing "Cannot convert null to type System.ConsoleColor" errors.
+**Fix**: Added -Default parameter to all Get-ThemeColor calls in advanced-data-components.psm1 with appropriate fallback colors.
+
+### 2. Quick Actions List Disappearing
+**Problem**: DataTable components weren't properly processing their data for display.
+**Fix**: 
+- Added explicit ProcessData calls after creating DataTable components in dashboard Init
+- Added ProcessData calls in RefreshData when updating component data
+- This ensures ProcessedData array is populated for rendering
+
+### 3. Task Form Navigation Issues
+**Problem**: Form components weren't properly managing visibility and focusability states.
+**Fix**:
+- Added IsFocusable property management alongside Visible property changes
+- Set IsFocusable = false when components are hidden, true when shown
+- Set initial IsFocusable = false for all form components on creation
+
+### 4. Minor Fixes
+- Fixed missing variable reference ($borderColor) in DataTable header separator
+- Added -Default parameter to Get-ThemeColor calls in dashboard render method
+- Added null checks when accessing component properties
+
+## Files Modified
+1. components/advanced-data-components.psm1
+2. screens/dashboard-screen-grid.psm1
+3. screens/task-screen.psm1
+
+## Testing Recommendations
+1. Launch the application and verify no ForegroundColor errors appear
+2. Check that Quick Actions list shows 6 items (Add Time Entry, Start Timer, etc.)
+3. Navigate to Task screen and test:
+   - Press 'N' to add new task - verify form appears and Tab navigation works
+   - Press 'E' to edit task - verify form shows with proper data
+   - Verify form can be saved or cancelled properly

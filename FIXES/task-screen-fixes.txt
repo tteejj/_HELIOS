@@ -1,0 +1,293 @@
+# Task Screen Fixes  
+# Status: ALREADY EXCELLENT - Current implementation is fully compliant
+
+# The current task-screen.psm1 is already using the programmatic pattern correctly!
+# It properly implements:
+# - Component-based architecture with proper factory pattern
+# - State management in screen State hashtable
+# - Form overlay functionality with proper component visibility management
+# - DataTable integration for main task list
+# - Proper event handling and data binding
+
+# MINOR ENHANCEMENTS (Optional improvements):
+
+# 1. Enhanced Data Persistence Integration
+function Enhanced-SaveTask {
+    param($self)
+    
+    $formData = $self.State.formData
+    $editingId = $self.State.editingTaskId
+    
+    try {
+        if ($editingId) {
+            # Update existing task
+            $task = $self.State.tasks | Where-Object { $_.Id -eq $editingId }
+            if ($task) {
+                $task.Title = $formData.title
+                $task.Description = $formData.description
+                $task.Category = $formData.category
+                $task.Priority = $formData.priority
+                $task.DueDate = $formData.dueDate
+                $task.ModifiedDate = Get-Date
+                
+                Write-Log -Level Info -Message "Task updated: $($task.Title)"
+            }
+        } else {
+            # Add new task
+            $newTask = @{
+                Id = [Guid]::NewGuid().ToString()
+                Title = $formData.title
+                Description = $formData.description
+                Category = $formData.category
+                Priority = $formData.priority
+                Status = "Active"
+                DueDate = $formData.dueDate
+                Created = Get-Date
+                ModifiedDate = Get-Date
+                Completed = $null
+            }
+            $self.State.tasks += $newTask
+            
+            Write-Log -Level Info -Message "New task created: $($newTask.Title)"
+        }
+        
+        # Persist to global data if available
+        if ($global:Data -and $global:Data.Tasks) {
+            $global:Data.Tasks = $self.State.tasks
+            
+            # Save to disk if data manager is available
+            if (Get-Command Save-UnifiedData -ErrorAction SilentlyContinue) {
+                Save-UnifiedData -Data $global:Data
+                Write-Log -Level Debug -Message "Task data persisted to disk"
+            }
+        }
+        
+        # Publish event for other screens to refresh
+        if (Get-Command Publish-Event -ErrorAction SilentlyContinue) {
+            Publish-Event -EventName "Tasks.Changed" -Data @{
+                Action = if ($editingId) { "Updated" } else { "Created" }
+                TaskId = if ($editingId) { $editingId } else { $newTask.Id }
+            }
+        }
+        
+        $self.HideForm()
+        $self.RefreshTaskTable()
+        
+    } catch {
+        Write-Log -Level Error -Message "Error saving task: $_" -Data $_
+        
+        # Show error dialog if available
+        if (Get-Command Show-AlertDialog -ErrorAction SilentlyContinue) {
+            Show-AlertDialog -Title "Save Error" -Message "Failed to save task: $($_.Exception.Message)"
+        }
+    }
+}
+
+# 2. Enhanced Keyboard Shortcuts
+function Enhanced-HandleInput {
+    param($self, $Key)
+    
+    try {
+        # Global shortcuts (work even when form is showing)
+        if ($Key.Modifiers -band [ConsoleModifiers]::Control) {
+            switch ($Key.Key) {
+                ([ConsoleKey]::N) {
+                    # Ctrl+N: New task
+                    if (-not $self.State.showingForm) {
+                        $self.ShowAddTaskForm()
+                        return $true
+                    }
+                }
+                ([ConsoleKey]::S) {
+                    # Ctrl+S: Save (when form is showing)
+                    if ($self.State.showingForm) {
+                        $self.SaveTask()
+                        return $true
+                    }
+                }
+                ([ConsoleKey]::F) {
+                    # Ctrl+F: Toggle filter
+                    if (-not $self.State.showingForm) {
+                        $self.State.showFilter = -not $self.State.showFilter
+                        Request-TuiRefresh
+                        return $true
+                    }
+                }
+                ([ConsoleKey]::R) {
+                    # Ctrl+R: Refresh data
+                    if (-not $self.State.showingForm) {
+                        $self.LoadTasksFromGlobalData()
+                        $self.RefreshTaskTable()
+                        return $true
+                    }
+                }
+            }
+        }
+        
+        # Handle form navigation
+        if ($self.State.showingForm) {
+            # Form-specific shortcuts
+            switch ($Key.Key) {
+                ([ConsoleKey]::Tab) {
+                    # Enhanced tab navigation within form
+                    $formComponents = @("formTitle", "formDescription", "formCategory", "formPriority", "formDueDate", "formSaveButton", "formCancelButton")
+                    $currentIndex = [array]::IndexOf($formComponents, $self.FocusedComponentName)
+                    
+                    if ($Key.Modifiers -band [ConsoleModifiers]::Shift) {
+                        # Shift+Tab - previous
+                        $nextIndex = ($currentIndex - 1 + $formComponents.Count) % $formComponents.Count
+                    } else {
+                        # Tab - next
+                        $nextIndex = ($currentIndex + 1) % $formComponents.Count
+                    }
+                    
+                    $self.FocusedComponentName = $formComponents[$nextIndex]
+                    
+                    # Set focus on component
+                    $focusedComponent = $self.Components[$self.FocusedComponentName]
+                    if ($focusedComponent -and (Get-Command Set-ComponentFocus -ErrorAction SilentlyContinue)) {
+                        Set-ComponentFocus -Component $focusedComponent
+                    }
+                    
+                    Request-TuiRefresh
+                    return $true
+                }
+                ([ConsoleKey]::Escape) {
+                    # Escape cancels form
+                    $self.HideForm()
+                    return $true
+                }
+            }
+        } else {
+            # Main table shortcuts
+            switch ($Key.Key) {
+                ([ConsoleKey]::Delete) {
+                    # Delete selected task with confirmation
+                    if ($self.Components.taskTable.SelectedRow -ge 0) {
+                        if (Get-Command Show-ConfirmDialog -ErrorAction SilentlyContinue) {
+                            Show-ConfirmDialog -Title "Delete Task" -Message "Are you sure you want to delete this task?" -OnConfirm {
+                                $self.DeleteTask()
+                            }
+                        } else {
+                            $self.DeleteTask()
+                        }
+                    }
+                    return $true
+                }
+                ([ConsoleKey]::Enter) {
+                    # Enter edits selected task
+                    if ($self.Components.taskTable.SelectedRow -ge 0) {
+                        $selectedData = $self.Components.taskTable.Data[$self.Components.taskTable.SelectedRow]
+                        if ($selectedData) {
+                            $self.ShowEditTaskForm($selectedData.Id)
+                        }
+                    }
+                    return $true
+                }
+                ([ConsoleKey]::Spacebar) {
+                    # Space toggles task completion
+                    $self.ToggleTaskStatus()
+                    return $true
+                }
+                # Number keys for quick filter
+                { $_ -in @([ConsoleKey]::D1, [ConsoleKey]::D2, [ConsoleKey]::D3) } {
+                    $filterMap = @{
+                        [ConsoleKey]::D1 = "all"
+                        [ConsoleKey]::D2 = "active" 
+                        [ConsoleKey]::D3 = "completed"
+                    }
+                    $self.State.filter = $filterMap[$Key.Key]
+                    $self.RefreshTaskTable()
+                    return $true
+                }
+                # Function keys for sorting
+                ([ConsoleKey]::F1) { $self.State.sortBy = "priority"; $self.RefreshTaskTable(); return $true }
+                ([ConsoleKey]::F2) { $self.State.sortBy = "dueDate"; $self.RefreshTaskTable(); return $true }
+                ([ConsoleKey]::F3) { $self.State.sortBy = "created"; $self.RefreshTaskTable(); return $true }
+            }
+        }
+        
+        # Delegate to focused component
+        $focusedComponent = if ($self.FocusedComponentName) { $self.Components[$self.FocusedComponentName] } else { $null }
+        if ($focusedComponent -and $focusedComponent.HandleInput) {
+            $result = & $focusedComponent.HandleInput -self $focusedComponent -Key $Key
+            if ($result) {
+                Request-TuiRefresh
+                return $true
+            }
+        }
+        
+    } catch {
+        Write-Log -Level Error -Message "Task screen HandleInput error: $_" -Data $_
+    }
+    
+    return $false
+}
+
+# 3. Enhanced Data Loading Integration
+function Enhanced-LoadTasksFromGlobalData {
+    param($self)
+    
+    try {
+        if ($global:Data -and $global:Data.Tasks) {
+            # Deep copy tasks to avoid reference issues
+            $self.State.tasks = @()
+            foreach ($task in $global:Data.Tasks) {
+                if ($task) {
+                    $taskCopy = @{}
+                    foreach ($prop in $task.Keys) {
+                        $taskCopy[$prop] = $task[$prop]
+                    }
+                    $self.State.tasks += $taskCopy
+                }
+            }
+            
+            Write-Log -Level Debug -Message "Loaded $($self.State.tasks.Count) tasks from global data"
+        } else {
+            # Initialize with sample data if no global data
+            Write-Log -Level Warning -Message "No global task data found, using sample data"
+            # Keep existing sample data initialization
+        }
+        
+        $self.RefreshTaskTable()
+        
+    } catch {
+        Write-Log -Level Error -Message "Error loading tasks from global data: $_" -Data $_
+    }
+}
+
+# 4. Enhanced Status Display
+function Enhanced-Render-StatusLine {
+    param($self)
+    
+    # Enhanced status bar with more information
+    $subtleColor = Get-ThemeColor "Subtle"
+    $statusY = $global:TuiState.BufferHeight - 2
+    
+    if ($self.State.showingForm) {
+        $statusText = "Ctrl+S: Save • Escape: Cancel • Tab: Next Field • Shift+Tab: Previous Field"
+    } else {
+        $activeCount = @($self.State.tasks | Where-Object { $_.Status -eq "Active" }).Count
+        $completedCount = @($self.State.tasks | Where-Object { $_.Status -eq "Completed" }).Count
+        $overdueCount = @($self.State.tasks | Where-Object { 
+            $_.Status -eq "Active" -and $_.DueDate -and ([DateTime]::Parse($_.DueDate) -lt (Get-Date).Date)
+        }).Count
+        
+        $statusText = "Active: $activeCount • Completed: $completedCount"
+        if ($overdueCount -gt 0) {
+            $statusText += " • Overdue: $overdueCount"
+        }
+        $statusText += " | Ctrl+N: New • Enter: Edit • Space: Toggle • Del: Delete"
+    }
+    
+    # Truncate if too long
+    $maxLength = $global:TuiState.BufferWidth - 4
+    if ($statusText.Length -gt $maxLength) {
+        $statusText = $statusText.Substring(0, $maxLength - 3) + "..."
+    }
+    
+    Write-BufferString -X 2 -Y $statusY -Text $statusText -ForegroundColor $subtleColor
+}
+
+# STATUS: Current task screen implementation is excellent and fully compliant.
+# These enhancements add better keyboard shortcuts, persistence integration, and user experience improvements.

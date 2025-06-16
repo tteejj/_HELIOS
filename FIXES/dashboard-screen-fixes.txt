@@ -1,0 +1,216 @@
+# Dashboard Screen Fixes
+# Status: MOSTLY IMPLEMENTED - Already using programmatic pattern correctly
+
+# The current dashboard-screen-grid.psm1 is already fully compliant with the new architecture!
+# It properly uses:
+# - Programmatic pattern with Get-DashboardScreen factory
+# - Component-based architecture with Components hashtable
+# - Proper state management in State hashtable
+# - Focus management with FocusedComponentName tracking
+# - Event-driven refresh patterns
+
+# MINOR OPTIMIZATIONS (Optional improvements):
+
+# 1. Enhanced Error Handling in RefreshData
+function Enhanced-RefreshData {
+    param($self)
+    
+    Write-Log -Level Debug -Message "RefreshData called"
+    
+    try {
+        # Add data validation
+        if (-not $global:Data) {
+            Write-Log -Level Warning -Message "Global data not available, initializing defaults"
+            return
+        }
+        
+        # Refresh Active Timers with better error handling
+        if ($global:Data.ActiveTimers) {
+            $timerData = @()
+            foreach ($timerEntry in $global:Data.ActiveTimers.GetEnumerator()) {
+                try {
+                    $timer = $timerEntry.Value
+                    if ($timer -and $timer.StartTime) {
+                        $startTime = if ($timer.StartTime -is [DateTime]) {
+                            $timer.StartTime
+                        } else {
+                            [DateTime]::Parse($timer.StartTime)
+                        }
+                        
+                        $elapsed = (Get-Date) - $startTime
+                        $project = if ($global:Data.Projects -and $timer.ProjectKey -and $global:Data.Projects[$timer.ProjectKey]) { 
+                            $global:Data.Projects[$timer.ProjectKey].Name 
+                        } else { 
+                            "Unknown" 
+                        }
+                        
+                        $timerData += @{
+                            Project = $project
+                            Time = "{0:00}:{1:00}:{2:00}" -f [Math]::Floor($elapsed.TotalHours), $elapsed.Minutes, $elapsed.Seconds
+                        }
+                    }
+                } catch {
+                    Write-Log -Level Warning -Message "Error processing timer entry: $_"
+                }
+            }
+            
+            if ($self.Components.activeTimers) {
+                $self.Components.activeTimers.Data = $timerData
+            }
+            Write-Log -Level Debug -Message "Active timers updated: $($timerData.Count) timers"
+        }
+        
+        # Enhanced Tasks refresh with validation
+        if ($global:Data.Tasks) {
+            $today = (Get-Date).ToString("yyyy-MM-dd")
+            $taskData = @()
+            foreach ($task in $global:Data.Tasks) {
+                try {
+                    if ($task -and -not $task.Completed) {
+                        $isDueToday = $task.DueDate -eq $today
+                        $isOverdue = $task.DueDate -and ([DateTime]::Parse($task.DueDate) -lt (Get-Date).Date)
+                        $hasNoDueDate = [string]::IsNullOrEmpty($task.DueDate)
+                        
+                        if ($isDueToday -or $isOverdue -or $hasNoDueDate) {
+                            $project = if ($global:Data.Projects -and $task.ProjectKey -and $global:Data.Projects[$task.ProjectKey]) { 
+                                $global:Data.Projects[$task.ProjectKey].Name 
+                            } else { 
+                                "None" 
+                            }
+                            
+                            $taskData += @{
+                                Priority = $task.Priority ?? "Medium"
+                                Description = $task.Description ?? "No description"
+                                Project = $project
+                                IsOverdue = $isOverdue
+                            }
+                        }
+                    }
+                } catch {
+                    Write-Log -Level Warning -Message "Error processing task: $_"
+                }
+            }
+            
+            if ($self.Components.todaysTasks) {
+                $self.Components.todaysTasks.Data = $taskData | Sort-Object @{
+                    Expression = { if ($_.IsOverdue) { 0 } else { 1 } }
+                }, Priority, Description
+            }
+            Write-Log -Level Debug -Message "Today's tasks updated: $($taskData.Count) tasks"
+        }
+        
+        # Enhanced stats calculation
+        $stats = @{ TodayHours = 0; WeekHours = 0; ActiveTasks = 0; RunningTimers = 0 }
+        
+        if ($global:Data) {
+            $today = (Get-Date).ToString("yyyy-MM-dd")
+            
+            # Calculate time entries with error handling
+            if ($global:Data.TimeEntries) {
+                try {
+                    $todayEntries = @($global:Data.TimeEntries | Where-Object { 
+                        $_ -and $_.Date -eq $today -and $_.Hours -is [double]
+                    })
+                    $stats.TodayHours = [Math]::Round(($todayEntries | Measure-Object -Property Hours -Sum).Sum, 2)
+                    
+                    $weekStart = (Get-Date).AddDays(-[int](Get-Date).DayOfWeek).Date
+                    $weekEntries = @($global:Data.TimeEntries | Where-Object { 
+                        $_ -and $_.Date -and $_.Hours -is [double] -and 
+                        ([DateTime]::Parse($_.Date) -ge $weekStart)
+                    })
+                    $stats.WeekHours = [Math]::Round(($weekEntries | Measure-Object -Property Hours -Sum).Sum, 2)
+                } catch {
+                    Write-Log -Level Warning -Message "Error calculating time statistics: $_"
+                }
+            }
+            
+            if ($global:Data.Tasks) {
+                $stats.ActiveTasks = @($global:Data.Tasks | Where-Object { 
+                    $_ -and -not $_.Completed 
+                }).Count
+            }
+            
+            if ($global:Data.ActiveTimers) {
+                $stats.RunningTimers = $global:Data.ActiveTimers.Count
+            }
+        }
+        
+        # Update UI components
+        $self.State.QuickStats = $stats
+        if ($self.Components.todayHoursLabel) { $self.Components.todayHoursLabel.Text = "Today: $($stats.TodayHours)h" }
+        if ($self.Components.weekHoursLabel) { $self.Components.weekHoursLabel.Text = "Week: $($stats.WeekHours)h" }
+        if ($self.Components.activeTasksLabel) { $self.Components.activeTasksLabel.Text = "Tasks: $($stats.ActiveTasks)" }
+        if ($self.Components.runningTimersLabel) { $self.Components.runningTimersLabel.Text = "Timers: $($stats.RunningTimers)" }
+        
+        Write-Log -Level Debug -Message "Stats updated: Today=$($stats.TodayHours)h, Week=$($stats.WeekHours)h, Tasks=$($stats.ActiveTasks), Timers=$($stats.RunningTimers)"
+        
+    } catch {
+        Write-Log -Level Error -Message "RefreshData error: $_" -Data $_
+        # Set safe defaults on error
+        $self.State.QuickStats = @{ TodayHours = 0; WeekHours = 0; ActiveTasks = 0; RunningTimers = 0 }
+    }
+}
+
+# 2. Enhanced Focus Management
+function Enhanced-HandleInput {
+    param($self, $Key)
+    
+    try {
+        # Enhanced Tab navigation with wrap-around
+        if ($Key.Key -eq [ConsoleKey]::Tab) {
+            $focusableComponents = @()
+            
+            # Get all focusable components in order
+            $componentOrder = @("quickActions", "activeTimers", "todaysTasks")
+            foreach ($name in $componentOrder) {
+                if ($self.Components.$name -and $self.Components.$name.IsFocusable -ne $false) {
+                    $focusableComponents += $name
+                }
+            }
+            
+            if ($focusableComponents.Count -gt 0) {
+                $currentIndex = [array]::IndexOf($focusableComponents, $self.FocusedComponentName)
+                
+                if ($Key.Modifiers -band [ConsoleModifiers]::Shift) {
+                    # Shift+Tab - go backwards with wrap-around
+                    $nextIndex = if ($currentIndex -le 0) { 
+                        $focusableComponents.Count - 1 
+                    } else { 
+                        $currentIndex - 1 
+                    }
+                } else {
+                    # Tab - go forwards with wrap-around
+                    $nextIndex = if ($currentIndex -ge ($focusableComponents.Count - 1)) { 
+                        0 
+                    } else { 
+                        $currentIndex + 1 
+                    }
+                }
+                
+                $self.FocusedComponentName = $focusableComponents[$nextIndex]
+                
+                # Update engine focus if available
+                $focusedComponent = $self.Components[$self.FocusedComponentName]
+                if ($focusedComponent -and (Get-Command Set-ComponentFocus -ErrorAction SilentlyContinue)) {
+                    Set-ComponentFocus -Component $focusedComponent
+                }
+                
+                Write-Log -Level Debug -Message "Focus changed to: $($self.FocusedComponentName)"
+                Request-TuiRefresh
+            }
+            return $true
+        }
+        
+        # Rest of existing input handling...
+        # (Current implementation is already good)
+        
+    } catch {
+        Write-Log -Level Error -Message "HandleInput error: $_" -Data $_
+    }
+    
+    # Continue with existing logic...
+    return $false
+}
+
+# STATUS: Current dashboard implementation is excellent and fully compliant.
+# These are optional enhancements for even better error handling and user experience.
