@@ -88,10 +88,18 @@ function Initialize-AppStore {
             
             # Run through middleware
             foreach ($mw in $store._middleware) {
-                $action = & $mw -Action $action -Store $store
-                if (-not $action) {
-                    # Middleware can cancel action by returning null
-                    return @{ Success = $false; Error = "Action cancelled by middleware" }
+                # Skip null middleware entries to prevent errors and log if debugging is enabled.
+                if ($null -ne $mw) {
+                    $action = & $mw -Action $action -Store $store
+                    if (-not $action) {
+                        # Middleware can cancel action by returning null
+                        return @{ Success = $false; Error = "Action cancelled by middleware" }
+                    }
+                }
+                else {
+                    if ($store._enableDebugLogging -and (Get-Command -Name "Write-Log" -ErrorAction SilentlyContinue)) {
+                        Write-Log -Level Warning -Message "Skipped null middleware in Dispatch."
+                    }
                 }
             }
             
