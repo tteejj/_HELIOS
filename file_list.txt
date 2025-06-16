@@ -1,25 +1,26 @@
-C:\Users\jhnhe\Documents\GitHub\pmc-terminal\modular\experimental features\new testgtound\fixed\current\main.ps1
-C:\Users\jhnhe\Documents\GitHub\pmc-terminal\modular\experimental features\new testgtound\fixed\current\screens\task-screen.psm1
-C:\Users\jhnhe\Documents\GitHub\pmc-terminal\modular\experimental features\new testgtound\fixed\current\screens\dashboard-screen-grid.psm1
-C:\Users\jhnhe\Documents\GitHub\pmc-terminal\modular\experimental features\new testgtound\fixed\current\screens\demo-screen.psm1
-C:\Users\jhnhe\Documents\GitHub\pmc-terminal\modular\experimental features\new testgtound\fixed\current\screens\debug-log-screen.psm1
-C:\Users\jhnhe\Documents\GitHub\pmc-terminal\modular\experimental features\new testgtound\fixed\current\screens\timer-start-screen.psm1
-C:\Users\jhnhe\Documents\GitHub\pmc-terminal\modular\experimental features\new testgtound\fixed\current\screens\timer-management-screen.psm1
-C:\Users\jhnhe\Documents\GitHub\pmc-terminal\modular\experimental features\new testgtound\fixed\current\screens\settings-screen.psm1
-C:\Users\jhnhe\Documents\GitHub\pmc-terminal\modular\experimental features\new testgtound\fixed\current\screens\reports-screen.psm1
-C:\Users\jhnhe\Documents\GitHub\pmc-terminal\modular\experimental features\new testgtound\fixed\current\screens\project-management-screen.psm1
-C:\Users\jhnhe\Documents\GitHub\pmc-terminal\modular\experimental features\new testgtound\fixed\current\screens\time-entry-screen.psm1
-C:\Users\jhnhe\Documents\GitHub\pmc-terminal\modular\experimental features\new testgtound\fixed\current\modules\logger.psm1
-C:\Users\jhnhe\Documents\GitHub\pmc-terminal\modular\experimental features\new testgtound\fixed\current\modules\data-manager.psm1
-C:\Users\jhnhe\Documents\GitHub\pmc-terminal\modular\experimental features\new testgtound\fixed\current\modules\dialog-system.psm1
-C:\Users\jhnhe\Documents\GitHub\pmc-terminal\modular\experimental features\new testgtound\fixed\current\modules\event-system.psm1
-C:\Users\jhnhe\Documents\GitHub\pmc-terminal\modular\experimental features\new testgtound\fixed\current\modules\theme-manager.psm1
-C:\Users\jhnhe\Documents\GitHub\pmc-terminal\modular\experimental features\new testgtound\fixed\current\modules\tui-engine-v2.psm1
-C:\Users\jhnhe\Documents\GitHub\pmc-terminal\modular\experimental features\new testgtound\fixed\current\modules\tui-framework.psm1
-C:\Users\jhnhe\Documents\GitHub\pmc-terminal\modular\experimental features\new testgtound\fixed\current\components\tui-components.psm1
-C:\Users\jhnhe\Documents\GitHub\pmc-terminal\modular\experimental features\new testgtound\fixed\current\components\advanced-data-components.psm1
-C:\Users\jhnhe\Documents\GitHub\pmc-terminal\modular\experimental features\new testgtound\fixed\current\components\advanced-input-components.psm1
-C:\Users\jhnhe\Documents\GitHub\pmc-terminal\modular\experimental features\new testgtound\fixed\current\utilities\focus-manager.psm1
-C:\Users\jhnhe\Documents\GitHub\pmc-terminal\modular\experimental features\new testgtound\fixed\current\utilities\layout-manager.psm1
-C:\Users\jhnhe\Documents\GitHub\pmc-terminal\modular\experimental features\new testgtound\fixed\current\utilities\positioning-helper.psm1
-		
+C:\Users\jhnhe\Documents\GitHub\_HELIOS\main-helios.ps1
+C:\Users\jhnhe\Documents\GitHub\_HELIOS\components\advanced-data-components.psm1
+C:\Users\jhnhe\Documents\GitHub\_HELIOS\components\advanced-input-components.psm1
+C:\Users\jhnhe\Documents\GitHub\_HELIOS\components\tui-components.psm1
+C:\Users\jhnhe\Documents\GitHub\_HELIOS\layout\panels.psm1
+C:\Users\jhnhe\Documents\GitHub\_HELIOS\modules\tui-framework.psm1
+C:\Users\jhnhe\Documents\GitHub\_HELIOS\modules\tui-engine-v2.psm1
+C:\Users\jhnhe\Documents\GitHub\_HELIOS\modules\theme-manager.psm1
+C:\Users\jhnhe\Documents\GitHub\_HELIOS\modules\text-resources.psm1
+C:\Users\jhnhe\Documents\GitHub\_HELIOS\modules\state-manager.psm1
+C:\Users\jhnhe\Documents\GitHub\_HELIOS\modules\logger.psm1
+C:\Users\jhnhe\Documents\GitHub\_HELIOS\modules\event-system.psm1
+C:\Users\jhnhe\Documents\GitHub\_HELIOS\modules\dialog-system.psm1
+C:\Users\jhnhe\Documents\GitHub\_HELIOS\modules\data-manager.psm1
+C:\Users\jhnhe\Documents\GitHub\_HELIOS\screens\task-screen-helios.psm1
+C:\Users\jhnhe\Documents\GitHub\_HELIOS\screens\dashboard-screen-helios.psm1
+C:\Users\jhnhe\Documents\GitHub\_HELIOS\services\app-store.psd1
+C:\Users\jhnhe\Documents\GitHub\_HELIOS\services\app-store.psm1
+C:\Users\jhnhe\Documents\GitHub\_HELIOS\services\keybindings.psd1
+C:\Users\jhnhe\Documents\GitHub\_HELIOS\services\keybindings.psm1
+C:\Users\jhnhe\Documents\GitHub\_HELIOS\services\navigation.psd1
+C:\Users\jhnhe\Documents\GitHub\_HELIOS\services\navigation.psm1
+C:\Users\jhnhe\Documents\GitHub\_HELIOS\utilities\focus-manager.psm1
+C:\Users\jhnhe\Documents\GitHub\_HELIOS\utilities\layout-manager.psm1
+C:\Users\jhnhe\Documents\GitHub\_HELIOS\utilities\positioning-helper.psm1
+C:\Users\jhnhe\Documents\GitHub\_HELIOS\tests\app-store.tests.ps1
