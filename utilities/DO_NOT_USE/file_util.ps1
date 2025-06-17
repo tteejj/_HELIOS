@@ -1,13 +1,13 @@
 # --- CONFIGURATION ---
 # The root folder of your existing structure where the files are located.
 # This script will search recursively starting from here.
-$sourceFolderStructureRoot = "C:\Users\jhnhe\Documents\GitHub\pmc-terminal\modular\experimental features\new testgtound\fixed\current"
+$sourceFolderStructureRoot = "C:\Users\jhnhe\Documents\GitHub\_HELIOS"
 
 # The separate folder where files will be copied and renamed.
-$destDir = "C:\Users\jhnhe\Documents\GitHub\pmc-terminal\modular\experimental features\new testgtound\fixed\current\Copies"
+$destDir = "C:\Users\jhnhe\Documents\GitHub\_HELIOS\Copies"
 
 # Path to the text file listing the filenames to process.
-$fileListPath = "C:\Users\jhnhe\Documents\GitHub\pmc-terminal\modular\experimental features\new testgtound\fixed\current\file_list.txt"
+$fileListPath = "C:\Users\jhnhe\Documents\GitHub\_HELIOS\file_list.txt"
 
 
 #

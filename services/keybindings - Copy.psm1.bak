@@ -75,28 +75,31 @@ function Initialize-KeybindingService {
         
         IsAction = {
             param(
-                $self,
                 [string]$ActionName, 
                 [System.ConsoleKeyInfo]$KeyInfo,
                 [string]$Context = $null
             )
             
-            if ([string]::IsNullOrWhiteSpace($ActionName)) { return $false }
+            if ([string]::IsNullOrWhiteSpace($ActionName)) {
+                return $false
+            }
             
             # Check context-specific binding first
             $contextKey = if ($Context) { "$Context.$ActionName" } else { $null }
-            if ($contextKey -and $self._keyMap.ContainsKey($contextKey)) {
-                return (& $self._matchesBinding -self $self -binding $self._keyMap[$contextKey] -keyInfo $KeyInfo)
+            if ($contextKey -and $service._keyMap.ContainsKey($contextKey)) {
+                return $service._matchesBinding($service._keyMap[$contextKey], $KeyInfo)
             }
             
             # Check global binding
-            if (-not $self._keyMap.ContainsKey($ActionName)) { return $false }
+            if (-not $service._keyMap.ContainsKey($ActionName)) { 
+                return $false 
+            }
             
-            return (& $self._matchesBinding -self $self -binding $self._keyMap[$ActionName] -keyInfo $KeyInfo)
+            return $service._matchesBinding($service._keyMap[$ActionName], $KeyInfo)
         }
         
         _matchesBinding = {
-            param($self, $binding, $keyInfo)
+            param($binding, $keyInfo)
             
             # Match key
             $keyMatches = $false
@@ -107,7 +110,9 @@ function Initialize-KeybindingService {
                 $keyMatches = $keyInfo.KeyChar.ToString().Equals($binding.Key, [System.StringComparison]::InvariantCultureIgnoreCase)
             }
             
-            if (-not $keyMatches) { return $false }
+            if (-not $keyMatches) {
+                return $false
+            }
             
             # Match modifiers
             $requiredModifiers = $binding.Modifiers ?? @()
@@ -125,62 +130,95 @@ function Initialize-KeybindingService {
         }
         
         GetBinding = {
-            param($self, [string]$ActionName)
-            return $self._keyMap[$ActionName]
+            param([string]$ActionName)
+            return $service._keyMap[$ActionName]
         }
         
         SetBinding = {
-            param($self, [string]$ActionName, $Key, [string[]]$Modifiers = @())
-            $self._keyMap[$ActionName] = @{ Key = $Key; Modifiers = $Modifiers }
+            param(
+                [string]$ActionName,
+                $Key,
+                [string[]]$Modifiers = @()
+            )
+            
+            $service._keyMap[$ActionName] = @{
+                Key = $Key
+                Modifiers = $Modifiers
+            }
+            
             Write-Log -Level Debug -Message "Set keybinding for '$ActionName': $Key + $($Modifiers -join '+')"
         }
         
         RemoveBinding = {
-            param($self, [string]$ActionName)
-            $self._keyMap.Remove($ActionName)
+            param([string]$ActionName)
+            $service._keyMap.Remove($ActionName)
             Write-Log -Level Debug -Message "Removed keybinding for '$ActionName'"
         }
         
         GetBindingDescription = {
-            param($self, [string]$ActionName)
-            if (-not $self._keyMap.ContainsKey($ActionName)) { return $null }
-            $binding = $self._keyMap[$ActionName]
-            $keyStr = if ($binding.Key -is [System.ConsoleKey]) { $binding.Key.ToString() } else { $binding.Key.ToString().ToUpper() }
-            if ($binding.Modifiers.Count -gt 0) { return "$($binding.Modifiers -join '+') + $keyStr" }
+            param([string]$ActionName)
+            
+            if (-not $service._keyMap.ContainsKey($ActionName)) {
+                return $null
+            }
+            
+            $binding = $service._keyMap[$ActionName]
+            $keyStr = if ($binding.Key -is [System.ConsoleKey]) {
+                $binding.Key.ToString()
+            } else {
+                $binding.Key.ToString().ToUpper()
+            }
+            
+            if ($binding.Modifiers.Count -gt 0) {
+                return "$($binding.Modifiers -join '+') + $keyStr"
+            }
+            
             return $keyStr
         }
         
         RegisterGlobalHandler = {
-            param($self, [string]$ActionName, [scriptblock]$Handler)
-            $self._globalHandlers[$ActionName] = $Handler
+            param(
+                [string]$ActionName,
+                [scriptblock]$Handler
+            )
+            
+            $service._globalHandlers[$ActionName] = $Handler
             Write-Log -Level Debug -Message "Registered global handler for '$ActionName'"
         }
         
         HandleKey = {
-            param($self, [System.ConsoleKeyInfo]$KeyInfo, [string]$Context = $null)
-            foreach ($action in $self._keyMap.Keys) {
-                if ((& $self.IsAction -self $self -ActionName $action -KeyInfo $KeyInfo -Context $Context)) {
-                    if ($self._globalHandlers.ContainsKey($action)) {
+            param(
+                [System.ConsoleKeyInfo]$KeyInfo,
+                [string]$Context = $null
+            )
+            
+            # Check all registered actions
+            foreach ($action in $service._keyMap.Keys) {
+                if ($service.IsAction($action, $KeyInfo, $Context)) {
+                    # Execute global handler if registered
+                    if ($service._globalHandlers.ContainsKey($action)) {
                         Write-Log -Level Debug -Message "Executing global handler for '$action'"
-                        return (& $self._globalHandlers[$action] -KeyInfo $KeyInfo -Context $Context)
+                        return & $service._globalHandlers[$action] -KeyInfo $KeyInfo -Context $Context
                     }
+                    
+                    # Return the action name for the caller to handle
                     return $action
                 }
             }
+            
             return $null
         }
         
         PushContext = {
-            param($self, [string]$Context)
-            $self._contextStack += $Context
+            param([string]$Context)
+            $service._contextStack += $Context
             Write-Log -Level Debug -Message "Pushed keybinding context: $Context"
         }
         
         PopContext = {
-            param($self)
-            if ($self._contextStack.Count -gt 0) {
-                $context = $self._contextStack[-1]
-                $self._contextStack = $self._contextStack[0..($self._contextStack.Count - 2)]
+            if ($service._contextStack.Count -gt 0) {
+                $context = $service._contextStack[-1]
+                $service._contextStack = $service._contextStack[0..($service._contextStack.Count - 2)]
                 Write-Log -Level Debug -Message "Popped keybinding context: $context"
                 return $context
             }
@@ -188,36 +226,47 @@ function Initialize-KeybindingService {
         }
         
         GetCurrentContext = {
-            param($self)
-            if ($self._contextStack.Count -gt 0) { return $self._contextStack[-1] }
+            if ($service._contextStack.Count -gt 0) {
+                return $service._contextStack[-1]
+            }
             return $null
         }
         
         GetAllBindings = {
-            param($self, [bool]$GroupByCategory = $false)
-            if (-not $GroupByCategory) { return $self._keyMap }
+            param([bool]$GroupByCategory = $false)
+            
+            if (-not $GroupByCategory) {
+                return $service._keyMap
+            }
+            
+            # Group by category (part before the dot)
             $grouped = @{}
-            foreach ($action in $self._keyMap.Keys) {
+            foreach ($action in $service._keyMap.Keys) {
                 $parts = $action.Split('.')
                 $category = if ($parts.Count -gt 1) { $parts[0] } else { "General" }
-                if (-not $grouped.ContainsKey($category)) { $grouped[$category] = @{} }
-                $grouped[$category][$action] = $self._keyMap[$action]
+                
+                if (-not $grouped.ContainsKey($category)) {
+                    $grouped[$category] = @{}
+                }
+                
+                $grouped[$category][$action] = $service._keyMap[$action]
             }
+            
             return $grouped
         }
         
         ExportBindings = {
-            param($self, [string]$Path)
-            $self._keyMap | ConvertTo-Json -Depth 3 | Out-File -FilePath $Path
+            param([string]$Path)
+            $service._keyMap | ConvertTo-Json -Depth 3 | Out-File -FilePath $Path
             Write-Log -Level Info -Message "Exported keybindings to: $Path"
         }
         
         ImportBindings = {
-            param($self, [string]$Path)
+            param([string]$Path)
             if (Test-Path $Path) {
                 $imported = Get-Content $Path | ConvertFrom-Json
                 foreach ($prop in $imported.PSObject.Properties) {
-                    $self._keyMap[$prop.Name] = @{
+                    $service._keyMap[$prop.Name] = @{
                         Key = $prop.Value.Key
                         Modifiers = $prop.Value.Modifiers
                     }

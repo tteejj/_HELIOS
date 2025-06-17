@@ -70,13 +70,9 @@ function global:Get-TaskManagementScreen {
                     Data = @()
                     AllowSort = $false  # We handle sorting through the store
                     OnRowSelect = {
-                        param($SelectedData, $SelectedIndex)
-                        if ($SelectedData -and $SelectedData.Id) {
-                            # Access services from global registry
-                            $globalServices = $global:Services
-                            if ($globalServices -and $globalServices.Store) {
-                                & $globalServices.Store.Dispatch -self $globalServices.Store -actionName "TASK_TOGGLE_STATUS" -payload @{ TaskId = $SelectedData.Id }
-                            }
+                        param($data, $index)
+                        if ($data -and $data.Id) {
+                            $services.Store.Dispatch("TASK_TOGGLE_STATUS", @{ TaskId = $data.Id })
                         }
                     }
                 }
@@ -92,7 +88,7 @@ function global:Get-TaskManagementScreen {
                 $self._CreateFormPanel()
                 
                 # Subscribe to store updates
-                $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "tasks" -handler {
+                $self._subscriptions += $services.Store.Subscribe("tasks", {
                     param($data)
                     if ($self._taskTable) {
                         $self._taskTable.Data = $data.NewValue
@@ -100,25 +96,25 @@ function global:Get-TaskManagementScreen {
                             & $self._taskTable.ProcessData -self $self._taskTable
                         }
                     }
-                }
+                })
                 
-                $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "taskFilter" -handler {
+                $self._subscriptions += $services.Store.Subscribe("taskFilter", {
                     param($data)
-                    & $services.Store.Dispatch -self $services.Store -actionName "TASKS_REFRESH"
-                }
+                    $services.Store.Dispatch("TASKS_REFRESH")
+                })
                 
-                $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "taskSort" -handler {
+                $self._subscriptions += $services.Store.Subscribe("taskSort", {
                     param($data)
-                    & $services.Store.Dispatch -self $services.Store -actionName "TASKS_REFRESH"
-                }
+                    $services.Store.Dispatch("TASKS_REFRESH")
+                })
                 
                 # Register store actions
                 if (-not $services.Store._actions.ContainsKey("TASKS_REFRESH")) {
-                    & $services.Store.RegisterAction -self $services.Store -actionName "TASKS_REFRESH" -scriptBlock {
+                    & $services.Store.RegisterAction -actionName "TASKS_REFRESH" -scriptBlock {
                         param($Context)
                         
-                        $filter = & $Context.GetState -path "taskFilter" ?? "all"
-                        $sort = & $Context.GetState -path "taskSort" ?? "priority"
+                        $filter = $Context.GetState("taskFilter") ?? "all"
+                        $sort = $Context.GetState("taskSort") ?? "priority"
                         
                         # Get raw tasks
                         $tasks = @()
@@ -171,7 +167,7 @@ function global:Get-TaskManagementScreen {
                         $Context.UpdateState(@{ tasks = $displayTasks })
                     }
                     
-                    & $services.Store.RegisterAction -self $services.Store -actionName "TASK_TOGGLE_STATUS" -scriptBlock {
+                    & $services.Store.RegisterAction -actionName "TASK_TOGGLE_STATUS" -scriptBlock {
                         param($Context, $Payload)
                         
                         if ($global:Data -and $global:Data.tasks -and $Payload.TaskId) {
@@ -186,12 +182,12 @@ function global:Get-TaskManagementScreen {
                                 }
                                 
                                 # Refresh display
-                                & $Context.Dispatch -actionName "TASKS_REFRESH"
+                                $Context.Dispatch("TASKS_REFRESH")
                             }
                         }
                     }
                     
-                    & $services.Store.RegisterAction -self $services.Store -actionName "TASK_CREATE" -scriptBlock {
+                    & $services.Store.RegisterAction -actionName "TASK_CREATE" -scriptBlock {
                         param($Context, $Payload)
                         
                         if (-not $global:Data) { $global:Data = @{} }
@@ -216,10 +212,10 @@ function global:Get-TaskManagementScreen {
                         }
                         
                         # Refresh display
-                        & $Context.Dispatch -actionName "TASKS_REFRESH"
+                        $Context.Dispatch("TASKS_REFRESH")
                     }
                     
-                    & $services.Store.RegisterAction -self $services.Store -actionName "TASK_UPDATE" -scriptBlock {
+                    & $services.Store.RegisterAction -actionName "TASK_UPDATE" -scriptBlock {
                         param($Context, $Payload)
                         
                         if ($global:Data -and $global:Data.tasks -and $Payload.TaskId) {
@@ -237,12 +233,12 @@ function global:Get-TaskManagementScreen {
                                 }
                                 
                                 # Refresh display
-                                & $Context.Dispatch -actionName "TASKS_REFRESH"
+                                $Context.Dispatch("TASKS_REFRESH")
                             }
                         }
                     }
                     
-                    & $services.Store.RegisterAction -self $services.Store -actionName "TASK_DELETE" -scriptBlock {
+                    & $services.Store.RegisterAction -actionName "TASK_DELETE" -scriptBlock {
                         param($Context, $Payload)
                         
                         if ($global:Data -and $global:Data.tasks -and $Payload.TaskId) {
@@ -254,19 +250,19 @@ function global:Get-TaskManagementScreen {
                             }
                             
                             # Refresh display
-                            & $Context.Dispatch -actionName "TASKS_REFRESH"
+                            $Context.Dispatch("TASKS_REFRESH")
                         }
                     }
                 }
                 
                 # Initialize filter and sort state
-                & $services.Store.Dispatch -self $services.Store -actionName "UPDATE_STATE" -payload @{
+                $services.Store.Dispatch("UPDATE_STATE", @{
                     taskFilter = "all"
                     taskSort = "priority"
-                }
+                })
                 
                 # Load initial data
-                & $services.Store.Dispatch -self $services.Store -actionName "TASKS_REFRESH"
+                $services.Store.Dispatch("TASKS_REFRESH")
                 
                 Write-Log -Level Debug -Message "Task screen Init completed"
                 
@@ -486,9 +482,9 @@ function global:Get-TaskManagementScreen {
             $services = $global:Services
             if ($self._editingTaskId) {
                 $formData.TaskId = $self._editingTaskId
-                & $services.Store.Dispatch -self $services.Store -actionName "TASK_UPDATE" -payload $formData
+                $services.Store.Dispatch("TASK_UPDATE", $formData)
             } else {
-                & $services.Store.Dispatch -self $services.Store -actionName "TASK_CREATE" -payload $formData
+                $services.Store.Dispatch("TASK_CREATE", $formData)
             }
             
             & $self._HideForm
@@ -541,7 +537,7 @@ function global:Get-TaskManagementScreen {
                 
                 # Form mode input handling
                 if ($self._formVisible) {
-                    if ((& $services.Keybindings.IsAction -self $services.Keybindings -ActionName "Form.Cancel" -KeyInfo $Key) -or $Key.Key -eq [ConsoleKey]::Escape) {
+                    if ($services.Keybindings.IsAction("Form.Cancel", $Key) -or $Key.Key -eq [ConsoleKey]::Escape) {
                         & $self._HideForm
                         return $true
                     }
@@ -564,7 +560,7 @@ function global:Get-TaskManagementScreen {
                         if ($selected -ge 0 -and $selected -lt $self._taskTable.ProcessedData.Count) {
                             $taskId = $self._taskTable.ProcessedData[$selected].Id
                             Show-ConfirmDialog -Title "Delete Task" -Message "Are you sure you want to delete this task?" -OnConfirm {
-                                & $services.Store.Dispatch -self $services.Store -actionName "TASK_DELETE" -payload @{ TaskId = $taskId }
+                                $services.Store.Dispatch("TASK_DELETE", @{ TaskId = $taskId })
                             }
                         }
                         return $true
@@ -572,18 +568,18 @@ function global:Get-TaskManagementScreen {
                     'q' { return "Back" }
                     
                     # Filter keys
-                    '1' { & $services.Store.Dispatch -self $services.Store -actionName "UPDATE_STATE" -payload @{ taskFilter = "all" }; return $true }
-                    '2' { & $services.Store.Dispatch -self $services.Store -actionName "UPDATE_STATE" -payload @{ taskFilter = "active" }; return $true }
-                    '3' { & $services.Store.Dispatch -self $services.Store -actionName "UPDATE_STATE" -payload @{ taskFilter = "completed" }; return $true }
+                    '1' { $services.Store.Dispatch("UPDATE_STATE", @{ taskFilter = "all" }); return $true }
+                    '2' { $services.Store.Dispatch("UPDATE_STATE", @{ taskFilter = "active" }); return $true }
+                    '3' { $services.Store.Dispatch("UPDATE_STATE", @{ taskFilter = "completed" }); return $true }
                     
                     # Sort keys
-                    'p' { & $services.Store.Dispatch -self $services.Store -actionName "UPDATE_STATE" -payload @{ taskSort = "priority" }; return $true }
-                    'd' { & $services.Store.Dispatch -self $services.Store -actionName "UPDATE_STATE" -payload @{ taskSort = "dueDate" }; return $true }
-                    'c' { & $services.Store.Dispatch -self $services.Store -actionName "UPDATE_STATE" -payload @{ taskSort = "created" }; return $true }
+                    'p' { $services.Store.Dispatch("UPDATE_STATE", @{ taskSort = "priority" }); return $true }
+                    'd' { $services.Store.Dispatch("UPDATE_STATE", @{ taskSort = "dueDate" }); return $true }
+                    'c' { $services.Store.Dispatch("UPDATE_STATE", @{ taskSort = "created" }); return $true }
                 }
                 
                 # Check global keybindings
-                $action = & $services.Keybindings.HandleKey -self $services.Keybindings -KeyInfo $Key
+                $action = $services.Keybindings.HandleKey($Key)
                 if ($action -eq "App.Back") {
                     return "Back"
                 }
@@ -605,7 +601,7 @@ function global:Get-TaskManagementScreen {
             $services = $global:Services
             if ($services -and $services.Store) {
                 foreach ($subId in $self._subscriptions) {
-                    & $services.Store.Unsubscribe -self $services.Store -subId $subId
+                    $services.Store.Unsubscribe($subId)
                 }
             }
         }
@@ -623,7 +619,7 @@ function global:Get-TaskManagementScreen {
             # Refresh data
             $services = $global:Services
             if ($services -and $services.Store) {
-                & $services.Store.Dispatch -self $services.Store -actionName "TASKS_REFRESH"
+                $services.Store.Dispatch("TASKS_REFRESH")
             }
             
             Request-TuiRefresh

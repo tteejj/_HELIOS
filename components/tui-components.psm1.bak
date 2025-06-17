@@ -19,6 +19,7 @@ function global:New-TuiLabel {
         Visible = $Props.Visible ?? $true
         Text = $Props.Text ?? ""
         ForegroundColor = $Props.ForegroundColor
+        Name = $Props.Name
         
         # Methods
         Render = {
@@ -35,6 +36,7 @@ function global:New-TuiLabel {
         }
     }
     
+    # Return as hashtable to allow dynamic property assignment
     return $component
 }
 
@@ -53,6 +55,7 @@ function global:New-TuiButton {
         Height = $Props.Height ?? 3
         Visible = $Props.Visible ?? $true
         Text = $Props.Text ?? "Button"
+        Name = $Props.Name
         
         # Internal State
         IsPressed = $false
@@ -90,6 +93,7 @@ function global:New-TuiButton {
         }
     }
     
+    # Return as hashtable to allow dynamic property assignment
     return $component
 }
 
@@ -110,6 +114,7 @@ function global:New-TuiTextBox {
         Text = $Props.Text ?? ""
         Placeholder = $Props.Placeholder ?? ""
         MaxLength = $Props.MaxLength ?? 100
+        Name = $Props.Name
         
         # Internal State
         CursorPosition = $Props.CursorPosition ?? 0
@@ -234,6 +239,7 @@ function global:New-TuiTextBox {
         }
     }
     
+    # Return as hashtable to allow dynamic property assignment
     return $component
 }
 
@@ -253,6 +259,7 @@ function global:New-TuiCheckBox {
         Visible = $Props.Visible ?? $true
         Text = $Props.Text ?? "Checkbox"
         Checked = $Props.Checked ?? $false
+        Name = $Props.Name
         
         # Event Handlers (from Props)
         OnChange = $Props.OnChange
@@ -282,6 +289,7 @@ function global:New-TuiCheckBox {
         }
     }
     
+    # Return as hashtable to allow dynamic property assignment
     return $component
 }
 
@@ -302,6 +310,7 @@ function global:New-TuiDropdown {
         Options = $Props.Options ?? @()
         Value = $Props.Value
         Placeholder = $Props.Placeholder ?? "Select..."
+        Name = $Props.Name
         
         # Internal State
         IsOpen = $false
@@ -396,6 +405,7 @@ function global:New-TuiDropdown {
         }
     }
     
+    # Return as hashtable to allow dynamic property assignment
     return $component
 }
 
@@ -416,6 +426,7 @@ function global:New-TuiProgressBar {
         Value = $Props.Value ?? 0
         Max = $Props.Max ?? 100
         ShowPercent = $Props.ShowPercent ?? $false
+        Name = $Props.Name
         
         # Methods
         Render = {
@@ -442,6 +453,7 @@ function global:New-TuiProgressBar {
         }
     }
     
+    # Return as hashtable to allow dynamic property assignment
     return $component
 }
 
@@ -462,6 +474,7 @@ function global:New-TuiTextArea {
         Text = $Props.Text ?? ""
         Placeholder = $Props.Placeholder ?? "Enter text..."
         WrapText = $Props.WrapText ?? $true
+        Name = $Props.Name
         
         # Internal State
         Lines = @($Props.Text -split "`n")
@@ -706,6 +719,7 @@ function global:New-TuiTextArea {
         }
     }
     
+    # Return as hashtable to allow dynamic property assignment
     return $component
 }
 
@@ -729,6 +743,7 @@ function global:New-TuiDatePicker {
         Visible = $Props.Visible ?? $true
         Value = $Props.Value ?? (Get-Date)
         Format = $Props.Format ?? "yyyy-MM-dd"
+        Name = $Props.Name
         
         # Event Handlers (from Props)
         OnChange = $Props.OnChange
@@ -786,6 +801,7 @@ function global:New-TuiDatePicker {
         }
     }
     
+    # Return as hashtable to allow dynamic property assignment
     return $component
 }
 
@@ -806,6 +822,7 @@ function global:New-TuiTimePicker {
         Hour = $Props.Hour ?? 0
         Minute = $Props.Minute ?? 0
         Format24H = $Props.Format24H ?? $true
+        Name = $Props.Name
         
         # Event Handlers (from Props)
         OnChange = $Props.OnChange
@@ -871,6 +888,7 @@ function global:New-TuiTimePicker {
         }
     }
     
+    # Return as hashtable to allow dynamic property assignment
     return $component
 }
 
@@ -894,6 +912,7 @@ function global:New-TuiTable {
         Visible = $Props.Visible ?? $true
         Columns = $Props.Columns ?? @()
         Rows = $Props.Rows ?? @()
+        Name = $Props.Name
         
         # Internal State
         SelectedRow = 0
@@ -1050,6 +1069,7 @@ function global:New-TuiTable {
         }
     }
     
+    # Return as hashtable to allow dynamic property assignment
     return $component
 }
 
@@ -1070,6 +1090,7 @@ function global:New-TuiChart {
         ChartType = $Props.ChartType ?? "Bar"
         Data = $Props.Data ?? @()
         ShowValues = $Props.ShowValues ?? $true
+        Name = $Props.Name
         
         # Methods
         Render = {
@@ -1139,6 +1160,7 @@ function global:New-TuiChart {
         }
     }
     
+    # Return as hashtable to allow dynamic property assignment
     return $component
 }
 
@@ -1146,22 +1168,14 @@ function global:New-TuiChart {
 
 #region Container Components
 
+# FILE: _tui-components.txt
+# ACTION: Replace the entire existing New-TuiPanel function with this code.
+
 function global:New-TuiPanel {
-    <#
-    .SYNOPSIS
-    Creates a container component that manages child layout automatically
-    
-    .PARAMETER Props
-    Hashtable of properties including:
-    - Layout: 'Stack' (default) or 'Grid'
-    - Orientation: 'Vertical' (default) or 'Horizontal' (for Stack layout)
-    - Spacing: Space between children (default 1)
-    - Padding: Internal padding (default 1)
-    - ShowBorder: Whether to draw a border (default false)
-    #>
     param([hashtable]$Props = @{})
     
     $component = @{
+        # --- Standard Component Metadata ---
         Type = "Panel"
         X = $Props.X ?? 0
         Y = $Props.Y ?? 0
@@ -1169,34 +1183,35 @@ function global:New-TuiPanel {
         Height = $Props.Height ?? 20
         Visible = $Props.Visible ?? $true
         IsFocusable = $Props.IsFocusable ?? $false
-        Children = @()
         
-        # Layout properties
+        # --- Child and Layout Management ---
+        Children = @()
         Layout = $Props.Layout ?? 'Stack'
         Orientation = $Props.Orientation ?? 'Vertical'
         Spacing = $Props.Spacing ?? 1
         Padding = $Props.Padding ?? 1
+        
+        # --- Visual Properties ---
         ShowBorder = $Props.ShowBorder ?? $false
         Title = $Props.Title
-        
-        # Methods
+        Name = $Props.Name
+
+        # =================================================================
+        # METHODS
+        # =================================================================
+
+        # --- Public Method: AddChild ---
         AddChild = {
             param($self, $Child)
             $self.Children += $Child
-            # Immediately recalculate layout
-            & $self._RecalculateLayout -self $self
+            $Child.Parent = $self
+            # We don't need to recalculate here; the Render loop will handle it,
+            # which is more efficient if multiple children are added in one frame.
         }
         
-        RemoveChild = {
-            param($self, $Child)
-            $self.Children = @($self.Children | Where-Object { $_ -ne $Child })
-            & $self._RecalculateLayout -self $self
-        }
-        
+        # --- Internal Method: _RecalculateLayout ---
         _RecalculateLayout = {
             param($self)
-            
-            # Calculate content area
             $contentX = $self.X + $self.Padding
             $contentY = $self.Y + $self.Padding
             $contentWidth = $self.Width - ($self.Padding * 2)
@@ -1209,95 +1224,114 @@ function global:New-TuiPanel {
                 $contentHeight -= 2
             }
             
-            # Apply layout
+            # Debug logging
+            if ((Get-Command Write-Log -ErrorAction SilentlyContinue) -and $self.Title) {
+                Write-Log -Level Debug -Message "Panel '$($self.Title)' layout: Panel at ($($self.X),$($self.Y)), Content area at ($contentX,$contentY) size ${contentWidth}x${contentHeight}"
+            }
+            
+            # Apply the chosen layout algorithm
             switch ($self.Layout) {
                 'Stack' {
                     $currentX = $contentX
                     $currentY = $contentY
                     
                     foreach ($child in $self.Children) {
-                        if (-not $child.Visible) { continue }
+                        # A child that is not visible does not occupy space in the layout.
+                        # This allows components to be "in" the panel but hidden without breaking layout.
+                        if ($child.Visible -ne $true) { continue }
                         
                         $child.X = $currentX
                         $child.Y = $currentY
                         
-                        # Constrain child size to panel
+                        # Debug child positioning
+                        if ((Get-Command Write-Log -ErrorAction SilentlyContinue) -and $child.Name) {
+                            Write-Log -Level Debug -Message "  Positioned child '$($child.Name)' at ($($child.X),$($child.Y))"
+                        }
+                        
                         if ($self.Orientation -eq 'Vertical') {
                             $child.Width = [Math]::Min($child.Width, $contentWidth)
                             $currentY += $child.Height + $self.Spacing
-                        } else {
+                        } else { # Horizontal
                             $child.Height = [Math]::Min($child.Height, $contentHeight)
                             $currentX += $child.Width + $self.Spacing
                         }
                     }
                 }
-                
-                'Grid' {
-                    # Simple grid - auto columns based on width
-                    if ($self.Children.Count -eq 0) { return }
-                    
-                    # Estimate columns based on average child width
-                    $avgWidth = 20
-                    if ($self.Children[0].Width) {
-                        $avgWidth = $self.Children[0].Width
-                    }
-                    
-                    $cols = [Math]::Max(1, [Math]::Floor($contentWidth / ($avgWidth + $self.Spacing)))
-                    $cellWidth = [Math]::Floor(($contentWidth - ($cols - 1) * $self.Spacing) / $cols)
-                    
-                    $row = 0
-                    $col = 0
-                    
-                    foreach ($child in $self.Children) {
-                        if (-not $child.Visible) { continue }
-                        
-                        $child.X = $contentX + ($col * ($cellWidth + $self.Spacing))
-                        $child.Y = $contentY + ($row * ($child.Height + $self.Spacing))
-                        $child.Width = [Math]::Min($child.Width, $cellWidth)
-                        
-                        $col++
-                        if ($col -ge $cols) {
-                            $col = 0
-                            $row++
-                        }
-                    }
-                }
+                # Other layouts like 'Grid' would be implemented here.
             }
         }
         
+        # --- THE NEW, CORRECTED RENDER METHOD ---
         Render = {
             param($self)
-            if (-not $self.Visible) { return }
             
-            # Draw border if requested
+            # 1. THE GOLDEN RULE: If the panel is not visible, it does NOTHING.
+            # It does not render its border. It does not render its children.
+            # This single check solves the entire category of visibility bugs.
+            if ($self.Visible -ne $true) {
+                return
+            }
+            
+            # 2. Recalculate layout on every render frame. This is the key to making
+            # the panel self-sufficient and responsive to changes in its own state.
+            & $self._RecalculateLayout -self $self
+
+            # 3. Draw the panel's own UI (its border and title).
             if ($self.ShowBorder) {
-                $borderColor = if ($self.IsFocused) {
-                    Get-ThemeColor "Accent" -Default ([ConsoleColor]::Cyan)
-                } else {
-                    Get-ThemeColor "Border" -Default ([ConsoleColor]::DarkGray)
-                }
-                
+                $borderColor = if ($self.IsFocused) { Get-ThemeColor "Accent" } else { Get-ThemeColor "Border" }
                 Write-BufferBox -X $self.X -Y $self.Y -Width $self.Width -Height $self.Height `
                     -BorderColor $borderColor -Title $self.Title
             }
             
-            # Render children
+            # 4. Delegate rendering to children.
+            # The panel is now the orchestrator.
             foreach ($child in $self.Children) {
-                if ($child.Visible -and $child.Render) {
+                # The panel respects the child's own Visible property. This allows for
+                # hiding a single field within an otherwise visible form.
+                # Since we already checked if the panel itself is visible, we are guaranteed
+                # that children of a hidden panel will never be rendered.
+                if ($child.Visible -eq $true -and $child.Render) {
                     & $child.Render -self $child
                 }
             }
         }
         
+        # --- Public Method: Show ---
+        # Recursively makes the panel and all its children visible.
+        Show = {
+            param($self)
+            $self.Visible = $true
+            foreach ($child in $self.Children) {
+                # Check if the child is a Panel itself and call its Show method,
+                # otherwise just set its Visible property.
+                if ($child.Show) {
+                    & $child.Show -self $child
+                } else {
+                    $child.Visible = $true
+                }
+            }
+        }
+        
+        # --- Public Method: Hide ---
+        # Recursively makes the panel and all its children invisible.
+        Hide = {
+            param($self)
+            $self.Visible = $false
+            foreach ($child in $self.Children) {
+                if ($child.Hide) {
+                    & $child.Hide -self $child
+                } else {
+                    $child.Visible = $false
+                }
+            }
+        }
+        
+        # --- Input Handling ---
         HandleInput = {
             param($self, $Key)
-            # Panels don't handle input directly, but could implement focus management
-            return $false
+            return $false # Panels delegate focus, they don't handle input.
         }
     }
-    
-    # Initial layout calculation
-    & $component._RecalculateLayout -self $component
     
     return $component
 }

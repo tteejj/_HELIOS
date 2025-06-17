@@ -43,7 +43,6 @@ function global:Get-DashboardScreen {
                 
                 $quickActions = New-TuiDataTable -Props @{
                     Name = "quickActions"
-                    Title = "Quick Actions"  # Add title for debugging
                     IsFocusable = $true
                     ShowBorder = $false
                     ShowHeader = $false
@@ -51,33 +50,16 @@ function global:Get-DashboardScreen {
                     Columns = @(
                         @{ Name = "Action"; Width = 32 }
                     )
-                    Data = @(  # Initialize with data immediately
-                        @{ Action = "1. Add Time Entry" },
-                        @{ Action = "2. Start Timer" },
-                        @{ Action = "3. Manage Tasks" },
-                        @{ Action = "4. Manage Projects" },
-                        @{ Action = "5. View Reports" },
-                        @{ Action = "6. Settings" }
-                    )
                     OnRowSelect = {
-                        param($SelectedData, $SelectedIndex)
-                        Write-Log -Level Debug -Message "Quick action selected: $SelectedIndex"
+                        param($data, $index)
+                        Write-Log -Level Debug -Message "Quick action selected: $index"
                         
                         # Use navigation service for routing
                         $routes = @("/time-entry", "/timer/start", "/tasks", "/projects", "/reports", "/settings")
-                        if ($SelectedIndex -ge 0 -and $SelectedIndex -lt $routes.Count) {
-                            # Access services from global registry
-                            $globalServices = $global:Services
-                            if ($globalServices -and $globalServices.Navigation) {
-                                & $globalServices.Navigation.GoTo -self $globalServices.Navigation -Path $routes[$SelectedIndex]
-                            }
+                        if ($index -ge 0 -and $index -lt $routes.Count) {
+                            $services.Navigation.GoTo($routes[$index])
                         }
                     }
-                }
-                
-                # Process initial data
-                if ($quickActions.ProcessData) {
-                    & $quickActions.ProcessData -self $quickActions
                 }
                 
                 & $quickActionsPanel.AddChild -self $quickActionsPanel -Child $quickActions
@@ -105,11 +87,6 @@ function global:Get-DashboardScreen {
                         @{ Name = "Time"; Width = 10 }
                     )
                     Data = @()
-                }
-                
-                # Process initial data
-                if ($activeTimers.ProcessData) {
-                    & $activeTimers.ProcessData -self $activeTimers
                 }
                 
                 & $timersPanel.AddChild -self $timersPanel -Child $activeTimers
@@ -184,11 +161,6 @@ function global:Get-DashboardScreen {
                     AllowSort = $true
                 }
                 
-                # Process initial data
-                if ($todaysTasks.ProcessData) {
-                    & $todaysTasks.ProcessData -self $todaysTasks
-                }
-                
                 & $tasksPanel.AddChild -self $tasksPanel -Child $todaysTasks
                 & $rootPanel.AddChild -self $rootPanel -Child $tasksPanel -LayoutProps @{ 
                     "Grid.Row" = 1
@@ -206,7 +178,7 @@ function global:Get-DashboardScreen {
                 $self._timersLabel = $timersLabel
                 
                 # Subscribe to app store updates
-                $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "quickActions" -handler {
+                $self._subscriptions += $services.Store.Subscribe("quickActions", {
                     param($data)
                     if ($self._quickActions) {
                         $self._quickActions.Data = $data.NewValue
@@ -214,9 +186,9 @@ function global:Get-DashboardScreen {
                             & $self._quickActions.ProcessData -self $self._quickActions
                         }
                     }
-                }
+                })
                 
-                $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "activeTimers" -handler {
+                $self._subscriptions += $services.Store.Subscribe("activeTimers", {
                     param($data)
                     if ($self._activeTimers) {
                         $self._activeTimers.Data = $data.NewValue
@@ -224,9 +196,9 @@ function global:Get-DashboardScreen {
                             & $self._activeTimers.ProcessData -self $self._activeTimers
                         }
                     }
-                }
+                })
                 
-                $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "todaysTasks" -handler {
+                $self._subscriptions += $services.Store.Subscribe("todaysTasks", {
                     param($data)
                     if ($self._todaysTasks) {
                         $self._todaysTasks.Data = $data.NewValue
@@ -234,39 +206,39 @@ function global:Get-DashboardScreen {
                             & $self._todaysTasks.ProcessData -self $self._todaysTasks
                         }
                     }
-                }
+                })
                 
-                $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "stats.todayHours" -handler {
+                $self._subscriptions += $services.Store.Subscribe("stats.todayHours", {
                     param($data)
                     if ($self._todayLabel) {
                         $self._todayLabel.Text = "Today: $($data.NewValue)h"
                     }
-                }
+                })
                 
-                $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "stats.weekHours" -handler {
+                $self._subscriptions += $services.Store.Subscribe("stats.weekHours", {
                     param($data)
                     if ($self._weekLabel) {
                         $self._weekLabel.Text = "Week: $($data.NewValue)h"
                     }
-                }
+                })
                 
-                $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "stats.activeTasks" -handler {
+                $self._subscriptions += $services.Store.Subscribe("stats.activeTasks", {
                     param($data)
                     if ($self._tasksLabel) {
                         $self._tasksLabel.Text = "Tasks: $($data.NewValue)"
                     }
-                }
+                })
                 
-                $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "stats.runningTimers" -handler {
+                $self._subscriptions += $services.Store.Subscribe("stats.runningTimers", {
                     param($data)
                     if ($self._timersLabel) {
                         $self._timersLabel.Text = "Timers: $($data.NewValue)"
                     }
-                }
+                })
                 
                 # Register store actions if not already registered
                 if (-not $services.Store._actions.ContainsKey("DASHBOARD_REFRESH")) {
-                    & $services.Store.RegisterAction -self $services.Store -actionName "DASHBOARD_REFRESH" -scriptBlock {
+                    & $services.Store.RegisterAction -actionName "DASHBOARD_REFRESH" -scriptBlock {
                         param($Context)
                         
                         # Quick Actions
@@ -282,13 +254,13 @@ function global:Get-DashboardScreen {
                         
                         # Active Timers
                         $timerData = @()
-                        if ($global:Data -and $global:Data.active_timers) {
-                            foreach ($timerEntry in $global:Data.active_timers.GetEnumerator()) {
+                        if ($global:Data -and $global:Data.ActiveTimers) {
+                            foreach ($timerEntry in $global:Data.ActiveTimers.GetEnumerator()) {
                                 $timer = $timerEntry.Value
-                                if ($timer -and $timer.start_time) {
-                                    $elapsed = (Get-Date) - [DateTime]$timer.start_time
-                                    $project = if ($global:Data.projects -and $timer.project_key) { 
-                                        $global:Data.projects[$timer.project_key].name 
+                                if ($timer -and $timer.StartTime) {
+                                    $elapsed = (Get-Date) - [DateTime]$timer.StartTime
+                                    $project = if ($global:Data.Projects -and $timer.ProjectKey) { 
+                                        $global:Data.Projects[$timer.ProjectKey].Name 
                                     } else { 
                                         "Unknown" 
                                     }
@@ -304,19 +276,19 @@ function global:Get-DashboardScreen {
                         
                         # Today's Tasks
                         $taskData = @()
-                        if ($global:Data -and $global:Data.tasks) {
+                        if ($global:Data -and $global:Data.Tasks) {
                             $today = (Get-Date).ToString("yyyy-MM-dd")
-                            foreach ($task in $global:Data.tasks) {
-                                if ($task -and -not $task.completed -and ($task.due_date -eq $today -or [string]::IsNullOrEmpty($task.due_date))) {
-                                    $project = if ($global:Data.projects -and $task.project_key) { 
-                                        $global:Data.projects[$task.project_key].name 
+                            foreach ($task in $global:Data.Tasks) {
+                                if ($task -and -not $task.Completed -and ($task.DueDate -eq $today -or [string]::IsNullOrEmpty($task.DueDate))) {
+                                    $project = if ($global:Data.Projects -and $task.ProjectKey) { 
+                                        $global:Data.Projects[$task.ProjectKey].Name 
                                     } else { 
                                         "None" 
                                     }
                                     
                                     $taskData += @{
-                                        Priority = $task.priority ?? "Medium"
-                                        Task = $task.description ?? $task.title ?? "Untitled"
+                                        Priority = $task.Priority ?? "Medium"
+                                        Task = $task.Description
                                         Project = $project
                                     }
                                 }
@@ -335,23 +307,23 @@ function global:Get-DashboardScreen {
                         if ($global:Data) {
                             $today = (Get-Date).ToString("yyyy-MM-dd")
                             
-                            if ($global:Data.time_entries) {
-                                $todayEntries = @($global:Data.time_entries | Where-Object { $_ -and $_.date -eq $today })
-                                $stats.todayHours = [Math]::Round(($todayEntries | Measure-Object -Property hours -Sum).Sum, 2)
+                            if ($global:Data.TimeEntries) {
+                                $todayEntries = @($global:Data.TimeEntries | Where-Object { $_ -and $_.Date -eq $today })
+                                $stats.todayHours = [Math]::Round(($todayEntries | Measure-Object -Property Hours -Sum).Sum, 2)
                                 
                                 $weekStart = (Get-Date).AddDays(-[int](Get-Date).DayOfWeek).Date
-                                $weekEntries = @($global:Data.time_entries | Where-Object { 
-                                    $_ -and $_.date -and ([DateTime]::Parse($_.date) -ge $weekStart)
+                                $weekEntries = @($global:Data.TimeEntries | Where-Object { 
+                                    $_ -and $_.Date -and ([DateTime]::Parse($_.Date) -ge $weekStart)
                                 })
-                                $stats.weekHours = [Math]::Round(($weekEntries | Measure-Object -Property hours -Sum).Sum, 2)
+                                $stats.weekHours = [Math]::Round(($weekEntries | Measure-Object -Property Hours -Sum).Sum, 2)
                             }
                             
-                            if ($global:Data.tasks) {
-                                $stats.activeTasks = @($global:Data.tasks | Where-Object { $_ -and -not $_.completed }).Count
+                            if ($global:Data.Tasks) {
+                                $stats.activeTasks = @($global:Data.Tasks | Where-Object { $_ -and -not $_.Completed }).Count
                             }
                             
-                            if ($global:Data.active_timers) {
-                                $stats.runningTimers = $global:Data.active_timers.Count
+                            if ($global:Data.ActiveTimers) {
+                                $stats.runningTimers = $global:Data.ActiveTimers.Count
                             }
                         }
                         
@@ -360,20 +332,13 @@ function global:Get-DashboardScreen {
                 }
                 
                 # Initial data load
-                & $services.Store.Dispatch -self $services.Store -actionName "DASHBOARD_REFRESH"
+                $services.Store.Dispatch("DASHBOARD_REFRESH")
                 
-                # Set initial focus on quick actions
-                if ($quickActions.IsFocusable -and (Get-Command Request-Focus -ErrorAction SilentlyContinue)) {
-                    Request-Focus -Component $quickActions
-                } elseif (Get-Command Set-ComponentFocus -ErrorAction SilentlyContinue) {
-                    Set-ComponentFocus -Component $quickActions
-                }
-                
-                # Set up auto-refresh timer and store the subscription for cleanup
+                # Set up auto-refresh timer
                 $self._refreshTimer = [System.Timers.Timer]::new(5000)  # 5 seconds
-                $self._timerSubscription = Register-ObjectEvent -InputObject $self._refreshTimer -EventName Elapsed -Action {
+                Register-ObjectEvent -InputObject $self._refreshTimer -EventName Elapsed -Action {
                     if ($global:Services -and $global:Services.Store) {
-                        & $global:Services.Store.Dispatch -self $global:Services.Store -actionName "DASHBOARD_REFRESH"
+                        $global:Services.Store.Dispatch("DASHBOARD_REFRESH")
                     }
                 }
                 $self._refreshTimer.Start()
@@ -394,18 +359,10 @@ function global:Get-DashboardScreen {
                 $currentTime = Get-Date -Format 'dddd, MMMM dd, yyyy HH:mm:ss'
                 Write-BufferString -X 2 -Y 1 -Text "PMC Terminal Dashboard - $currentTime" -ForegroundColor $headerColor
                 
-                # Debug logging
-                Write-Log -Level Debug -Message "Dashboard Render: Starting"
-                Write-Log -Level Debug -Message "  rootPanel exists: $($null -ne $self.Components.rootPanel)"
-                if ($self.Components.rootPanel) {
-                    Write-Log -Level Debug -Message "  rootPanel visible: $($self.Components.rootPanel.Visible)"
-                    Write-Log -Level Debug -Message "  rootPanel has Render: $($null -ne $self.Components.rootPanel.Render)"
-                }
-                
                 # Active timer indicator
                 $store = $global:Services.Store
                 if ($store) {
-                    $timers = & $store.GetState -self $store -path "stats.runningTimers"
+                    $timers = $store.GetState("stats.runningTimers")
                     if ($timers -gt 0) {
                         $timerText = "● TIMER ACTIVE"
                         $timerX = $global:TuiState.BufferWidth - $timerText.Length - 2
@@ -415,10 +372,7 @@ function global:Get-DashboardScreen {
                 
                 # Render the root panel (which renders all children)
                 if ($self.Components.rootPanel -and $self.Components.rootPanel.Render) {
-                    Write-Log -Level Debug -Message "Dashboard Render: Calling rootPanel.Render"
                     & $self.Components.rootPanel.Render -self $self.Components.rootPanel
-                } else {
-                    Write-Log -Level Warning -Message "Dashboard Render: rootPanel or its Render method not found"
                 }
                 
                 # Status bar
@@ -442,15 +396,15 @@ function global:Get-DashboardScreen {
                 }
                 
                 # Check keybinding service
-                $action = & $services.Keybindings.HandleKey -self $services.Keybindings -KeyInfo $Key
+                $action = $services.Keybindings.HandleKey($Key)
                 
                 switch ($action) {
                     "App.Refresh" { 
-                        & $services.Store.Dispatch -self $services.Store -actionName "DASHBOARD_REFRESH"
+                        $services.Store.Dispatch("DASHBOARD_REFRESH")
                         return $true
                     }
                     "App.DebugLog" {
-                        & $services.Navigation.GoTo -self $services.Navigation -Path "/log"
+                        $services.Navigation.GoTo("/log")
                         return $true
                     }
                     "App.Quit" {
@@ -466,7 +420,7 @@ function global:Get-DashboardScreen {
                     $index = [int]$Key.KeyChar.ToString() - 1
                     $routes = @("/time-entry", "/timer/start", "/tasks", "/projects", "/reports", "/settings")
                     if ($index -ge 0 -and $index -lt $routes.Count) {
-                        & $services.Navigation.GoTo -self $services.Navigation -Path $routes[$index]
+                        $services.Navigation.GoTo($routes[$index])
                         return $true
                     }
                 }
@@ -484,21 +438,17 @@ function global:Get-DashboardScreen {
             
             Write-Log -Level Debug -Message "Dashboard screen exiting"
             
-            # Properly stop the timer AND unregister the event handler
+            # Stop refresh timer
             if ($self._refreshTimer) {
                 $self._refreshTimer.Stop()
                 $self._refreshTimer.Dispose()
-            }
-            if ($self._timerSubscription) {
-                Unregister-Event -SubscriptionId $self._timerSubscription.Id -ErrorAction SilentlyContinue
-                $self._timerSubscription = $null
             }
             
             # Unsubscribe from store updates
             $services = $global:Services
             if ($services -and $services.Store) {
                 foreach ($subId in $self._subscriptions) {
-                    & $services.Store.Unsubscribe -self $services.Store -subId $subId
+                    $services.Store.Unsubscribe($subId)
                 }
             }
         }
@@ -516,7 +466,7 @@ function global:Get-DashboardScreen {
             # Refresh data
             $services = $global:Services
             if ($services -and $services.Store) {
-                & $services.Store.Dispatch -self $services.Store -actionName "DASHBOARD_REFRESH"
+                $services.Store.Dispatch("DASHBOARD_REFRESH")
             }
             
             Request-TuiRefresh

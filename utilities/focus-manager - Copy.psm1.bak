@@ -211,8 +211,7 @@ function global:Get-FocusHistory {
     return $script:Focus.History
 }
 
-# --- FIX: REMOVED 'private:' ---
-function Get-FocusScope {
+function private:Get-FocusScope {
     param($Component)
     
     $current = $Component
@@ -259,8 +258,7 @@ function global:Pop-FocusScope {
     return $poppedScope
 }
 
-# --- FIX: REMOVED 'private:' ---
-function Update-TabOrder {
+function private:Update-TabOrder {
     param($FocusedComponent)
     
     # If component is already in tab order, no need to update
@@ -272,8 +270,7 @@ function Update-TabOrder {
     Register-ScreenForFocus -Screen $global:TuiState.CurrentScreen
 }
 
-# --- FIX: REMOVED 'private:' ---
-function Register-ScreenForFocus {
+function private:Register-ScreenForFocus {
     param($Screen)
     
     $script:Focus.TabOrder = @()
@@ -336,7 +333,7 @@ function Register-ScreenForFocus {
     Write-Log -Level Debug -Message "Registered $($script:Focus.TabOrder.Count) focusable components"
     
     # Focus first component if none focused
-    if ($script:Focus.TabOrder.Count -gt 0 -and -not ($script:Focus.FocusedComponent -in $script:Focus.TabOrder)) {
+    if ($script:Focus.TabOrder.Count -gt 0 -and -not $script:Focus.FocusedComponent) {
         Request-Focus -Component $script:Focus.TabOrder[0] -Reason "InitialFocus"
     } elseif ($script:Focus.TabOrder.Count -eq 0) {
         Request-Focus -Component $null -Reason "NoFocusableComponents"

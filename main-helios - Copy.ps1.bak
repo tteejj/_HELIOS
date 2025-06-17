@@ -46,8 +46,8 @@ $script:ModulesToLoad = @(
 
 # Screen modules will be loaded dynamically
 $script:ScreenModules = @(
-    "dashboard-screen-helios",
-    "task-screen-helios",
+    "dashboard-screen-grid",
+    "task-screen",
     "timer-start-screen",
     "project-management-screen",
     "timer-management-screen",
@@ -164,8 +164,8 @@ function Initialize-PMCServices {
         $initialData = if ($global:Data) { $global:Data } else { @{} }
         $services.Store = Initialize-AppStore -InitialData $initialData -EnableDebugLogging $false
         
-        # Register store actions using the v3.0 call pattern
-        & $services.Store.RegisterAction -self $services.Store -actionName "LOAD_DASHBOARD_DATA" -scriptBlock {
+        # Register store actions
+        & $services.Store.RegisterAction -actionName "LOAD_DASHBOARD_DATA" -scriptBlock {
             param($Context)
             
             # Load quick actions
@@ -193,7 +193,7 @@ function Initialize-PMCServices {
             $Context.UpdateState(@{ stats = @{ todayHours = [Math]::Round($todayHours, 2) } })
         }
         
-        & $services.Store.RegisterAction -self $services.Store -actionName "TASKS_LOAD" -scriptBlock {
+        & $services.Store.RegisterAction -actionName "TASKS_LOAD" -scriptBlock {
             param($Context)
             
             $tasks = @()
@@ -222,8 +222,8 @@ function Initialize-PMCServices {
         # Initialize Keybinding Service
         $services.Keybindings = Initialize-KeybindingService -EnableChords $false
         
-        # Register global keybinding handlers using the v3.0 call pattern
-        & $services.Keybindings.RegisterGlobalHandler -self $services.Keybindings -ActionName "App.Help" -Handler {
+        # Register global keybinding handlers
+        & $services.Keybindings.RegisterGlobalHandler -ActionName "App.Help" -Handler {
             Show-AlertDialog -Title "Help" -Message "PMC Terminal v4.2`n`nPress F1 for help`nPress Escape to go back`nPress Q to quit"
         }
         
@@ -291,10 +291,10 @@ function Start-PMCTerminal {
         Clear-Host
         
         # Navigate to initial screen
-        if ($args -contains "-demo" -and (& $services.Navigation.IsValidRoute -self $services.Navigation -Path "/demo")) {
-            & $services.Navigation.GoTo -self $services.Navigation -Path "/demo"
+        if ($args -contains "-demo" -and $services.Navigation.IsValidRoute("/demo")) {
+            $services.Navigation.GoTo("/demo")
         } else {
-            & $services.Navigation.GoTo -self $services.Navigation -Path "/dashboard"
+            $services.Navigation.GoTo("/dashboard")
         }
         
         # Start the main loop

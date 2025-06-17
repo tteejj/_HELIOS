@@ -66,7 +66,6 @@ function Initialize-NavigationService {
         
         GoTo = {
             param(
-                $self,
                 [string]$Path,
                 [hashtable]$Params = @{}
             )
@@ -77,21 +76,23 @@ function Initialize-NavigationService {
             }
             
             # Normalize path
-            if (-not $Path.StartsWith("/")) { $Path = "/$Path" }
+            if (-not $Path.StartsWith("/")) {
+                $Path = "/$Path"
+            }
             
             # Check if route exists
-            if (-not $self._routes.ContainsKey($Path)) {
-                $availableRoutes = ($self._routes.Keys | Sort-Object) -join ", "
+            if (-not $service._routes.ContainsKey($Path)) {
+                $availableRoutes = ($service._routes.Keys | Sort-Object) -join ", "
                 $msg = "Route not found: $Path. Available routes: $availableRoutes"
                 Write-Log -Level Error -Message $msg
                 Show-AlertDialog -Title "Navigation Error" -Message "The screen '$Path' does not exist."
                 return $false
             }
             
-            $route = $self._routes[$Path]
+            $route = $service._routes[$Path]
             
             # Run before navigation guards
-            foreach ($guard in $self._beforeNavigate) {
+            foreach ($guard in $service._beforeNavigate) {
                 $canNavigate = & $guard -Path $Path -Route $route -Params $Params
                 if (-not $canNavigate) {
                     Write-Log -Level Debug -Message "Navigation to '$Path' cancelled by guard"
@@ -100,23 +101,46 @@ function Initialize-NavigationService {
             }
             
             # Check authentication if required
-            if ($route.RequiresAuth -and -not (& $self._checkAuth -self $self)) {
+            if ($route.RequiresAuth -and -not $service._checkAuth()) {
                 Write-Log -Level Warning -Message "Navigation to '$Path' requires authentication"
                 Show-AlertDialog -Title "Access Denied" -Message "You must be logged in to access this screen."
                 return $false
             }
             
             try {
+                # Create screen instance
                 $screen = & $route.Factory
-                if (-not $screen) { throw "Screen factory returned null for route '$Path'" }
-                if ($screen.SetParams -and $Params.Count -gt 0) { & $screen.SetParams -self $screen -Params $Params }
                 
-                $self._history += @{ Path = $Path; Timestamp = [DateTime]::UtcNow; Params = $Params }
-                if ($EnableBreadcrumbs) { $self._breadcrumbs += @{ Path = $Path; Title = $route.Title ?? $Path } }
+                if (-not $screen) {
+                    throw "Screen factory returned null for route '$Path'"
+                }
                 
+                # Pass parameters to screen if it supports them
+                if ($screen.SetParams -and $Params.Count -gt 0) {
+                    & $screen.SetParams -self $screen -Params $Params
+                }
+                
+                # Update navigation state
+                $service._history += @{
+                    Path = $Path
+                    Timestamp = [DateTime]::UtcNow
+                    Params = $Params
+                }
+                
+                if ($EnableBreadcrumbs) {
+                    $service._breadcrumbs += @{
+                        Path = $Path
+                        Title = $route.Title ?? $Path
+                    }
+                }
+                
+                # Push screen
                 Push-Screen -Screen $screen
                 
-                foreach ($hook in $self._afterNavigate) { & $hook -Path $Path -Screen $screen }
+                # Run after navigation hooks
+                foreach ($hook in $service._afterNavigate) {
+                    & $hook -Path $Path -Screen $screen
+                }
                 
                 Write-Log -Level Info -Message "Navigated to: $Path"
                 return $true
@@ -129,68 +153,79 @@ function Initialize-NavigationService {
         }
         
         Back = { 
-            param($self, [int]$Steps = 1)
+            param([int]$Steps = 1)
+            
             for ($i = 0; $i -lt $Steps; $i++) {
                 if ($global:TuiState.ScreenStack.Count -le 1) {
                     Write-Log -Level Debug -Message "Cannot go back - at root screen"
                     return $false
                 }
+                
                 Pop-Screen
-                if ($EnableBreadcrumbs -and $self._breadcrumbs.Count -gt 0) {
-                    $self._breadcrumbs = $self._breadcrumbs[0..($self._breadcrumbs.Count - 2)]
+                
+                # Update breadcrumbs
+                if ($EnableBreadcrumbs -and $service._breadcrumbs.Count -gt 0) {
+                    $service._breadcrumbs = $service._breadcrumbs[0..($service._breadcrumbs.Count - 2)]
                 }
             }
+            
             return $true
         }
         
         GetCurrentPath = {
-            param($self)
-            if ($self._history.Count -eq 0) { return "/" }
-            return $self._history[-1].Path
+            if ($service._history.Count -eq 0) {
+                return "/"
+            }
+            return $service._history[-1].Path
         }
         
         GetBreadcrumbs = {
-            param($self)
-            return $self._breadcrumbs
+            return $service._breadcrumbs
         }
         
         AddRoute = {
-            param($self, [string]$Path, [hashtable]$RouteConfig)
-            if (-not $RouteConfig.Factory) { throw "Route must have a Factory scriptblock" }
-            $self._routes[$Path] = $RouteConfig
+            param(
+                [string]$Path,
+                [hashtable]$RouteConfig
+            )
+            
+            if (-not $RouteConfig.Factory) {
+                throw "Route must have a Factory scriptblock"
+            }
+            
+            $service._routes[$Path] = $RouteConfig
             Write-Log -Level Debug -Message "Added route: $Path"
         }
         
         RemoveRoute = {
-            param($self, [string]$Path)
-            $self._routes.Remove($Path)
+            param([string]$Path)
+            $service._routes.Remove($Path)
             Write-Log -Level Debug -Message "Removed route: $Path"
         }
         
         AddBeforeNavigateGuard = {
-            param($self, [scriptblock]$Guard)
-            $self._beforeNavigate += $Guard
+            param([scriptblock]$Guard)
+            $service._beforeNavigate += $Guard
         }
         
         AddAfterNavigateHook = {
-            param($self, [scriptblock]$Hook)
-            $self._afterNavigate += $Hook
+            param([scriptblock]$Hook)
+            $service._afterNavigate += $Hook
         }
         
         _checkAuth = {
-            param($self)
             # Placeholder for authentication check
+            # In real implementation, would check against auth service
             return $true
         }
         
         GetRoutes = {
-            param($self)
-            return $self._routes.Keys | Sort-Object
+            return $service._routes.Keys | Sort-Object
         }
         
         IsValidRoute = {
-            param($self, [string]$Path)
-            return $self._routes.ContainsKey($Path)
+            param([string]$Path)
+            return $service._routes.ContainsKey($Path)
         }
     }
     
