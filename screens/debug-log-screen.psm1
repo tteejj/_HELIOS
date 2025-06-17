@@ -2,6 +2,7 @@
 # Shows application log entries for debugging
 
 function global:Get-DebugLogScreen {
+    param([hashtable]$Services)
     $screen = @{
         Name = "DebugLogScreen"
         
@@ -18,6 +19,7 @@ function global:Get-DebugLogScreen {
         
         Init = {
             param($self)
+            $self._services = $Services # Store injected services
             
             # Get initial log entries
             if (Get-Command Get-LogEntries -ErrorAction SilentlyContinue) {

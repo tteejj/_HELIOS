@@ -2,6 +2,7 @@
 # Using programmatic pattern with component-based architecture
 
 function global:Get-DashboardScreen {
+    param([hashtable]$Services)
     $screen = @{
         Name = "DashboardScreen"
         
@@ -132,6 +133,7 @@ function global:Get-DashboardScreen {
         # 3. Init: One-time setup
         Init = {
             param($self)
+            $self._services = $Services # Store injected services
             
             Write-Log -Level Debug -Message "Dashboard Init started"
             

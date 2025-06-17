@@ -3,6 +3,7 @@
 # It is simplified, robust, and free of manual workarounds.
 
 function global:Get-TaskManagementScreen {
+    param([hashtable]$Services)
     $screen = @{
         Name = "TaskScreen"
         
@@ -243,12 +244,19 @@ HideForm = {
         # 3. INIT: One-time setup
         Init = {
             param($self)
+            $self._services = $Services # Store injected services
             
             # --- Data Loading ---
-            if ($global:Data -and $global:Data.Tasks -and $global:Data.Tasks.Count -gt 0) {
-                $self.State.tasks = @($global:Data.Tasks)
+            $storeTasks = $null
+            if ($self._services -and $self._services.Store) {
+                $storeTasks = & $self._services.Store.GetState -self $self._services.Store -path "tasks"
+            }
+
+            if ($storeTasks -and $storeTasks.Count -gt 0) {
+                $self.State.tasks = @($storeTasks)
             } else {
-                # Initialize with sample data if global data is empty
+                # Initialize with sample data if global data is empty or store is unavailable
+                Write-Log -Level Warning -Message "Tasks not found in store or store unavailable, using sample data."
                 $self.State.tasks = @(
                     @{ Id=[Guid]::NewGuid().ToString(); Title="Review TUI framework docs"; Description="Identify gaps"; Category="Work"; Priority="High"; Status="Active"; DueDate=(Get-Date).AddDays(2).ToString("yyyy-MM-dd"); Created=(Get-Date).AddDays(-3); Completed=$null },
                     @{ Id=[Guid]::NewGuid().ToString(); Title="Fix critical framework bugs"; Description="Address panel and focus issues"; Category="Urgent"; Priority="Critical"; Status="Active"; DueDate=(Get-Date).AddDays(1).ToString("yyyy-MM-dd"); Created=(Get-Date).AddDays(-1); Completed=$null },
@@ -273,7 +281,7 @@ HideForm = {
             & $self.RefreshTaskTable -screen $self # Initial data load
 
             # Create the form panel. It starts hidden and will contain all form elements.
-            $self.Components.formPanel = New-TuiPanel -Props @{
+            $self.Components.formPanel = New-TuiStackPanel -Props @{
                 X = 10; Y = 4; Width = 60; Height = 22
                 Layout = 'Stack'; Orientation = 'Vertical'; Spacing = 0; Padding = 1
                 ShowBorder = $true
@@ -352,7 +360,7 @@ HideForm = {
             })
             
             # Button panel
-            $buttonPanel = New-TuiPanel -Props @{ 
+            $buttonPanel = New-TuiStackPanel -Props @{
                 Layout = 'Stack'; Orientation = 'Horizontal'; Spacing = 2; Height = 3
                 ShowBorder = $false; Name = "buttonPanel"
             }
@@ -477,8 +485,13 @@ HideForm = {
         OnResume = {
             param($self)
             # Refresh data from global store in case it changed.
-            if ($global:Data -and $global:Data.Tasks) {
-                $self.State.tasks = @($global:Data.Tasks)
+            $storeTasks = $null
+            if ($self._services -and $self._services.Store) {
+                $storeTasks = & $self._services.Store.GetState -self $self._services.Store -path "tasks"
+            }
+
+            if ($storeTasks) {
+                $self.State.tasks = @($storeTasks)
                 & $self.RefreshTaskTable -screen $self
             }
         }

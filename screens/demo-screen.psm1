@@ -2,6 +2,7 @@
 # Demonstrates the TUI framework capabilities
 
 function global:Get-DemoScreen {
+    param([hashtable]$Services)
     $screen = @{
         Name = "DemoScreen"
         
@@ -27,6 +28,7 @@ function global:Get-DemoScreen {
         
         Init = {
             param($self)
+            $self._services = $Services # Store injected services
             
             # Use layout manager for organized positioning
             if (Get-Command New-TuiLayoutManager -ErrorAction SilentlyContinue) {

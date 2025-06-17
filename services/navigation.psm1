@@ -68,7 +68,8 @@ function Initialize-NavigationService {
             param(
                 $self,
                 [string]$Path,
-                [hashtable]$Params = @{}
+                [hashtable]$Params = @{},
+                [hashtable]$Services
             )
             
             if ([string]::IsNullOrWhiteSpace($Path)) {
@@ -107,7 +108,7 @@ function Initialize-NavigationService {
             }
             
             try {
-                $screen = & $route.Factory
+                $screen = & $route.Factory -Services $Services # Pass $Services to the screen factory
                 if (-not $screen) { throw "Screen factory returned null for route '$Path'" }
                 if ($screen.SetParams -and $Params.Count -gt 0) { & $screen.SetParams -self $screen -Params $Params }
                 

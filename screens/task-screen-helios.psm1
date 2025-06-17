@@ -2,6 +2,7 @@
 # Uses the new service architecture with app store, navigation, and layout panels
 
 function global:Get-TaskManagementScreen {
+    param([hashtable]$Services)
     $screen = @{
         Name = "TaskScreen"
         Components = @{}
@@ -11,14 +12,15 @@ function global:Get-TaskManagementScreen {
         
         Init = {
             param($self)
+            $self._services = $Services # Store injected services
             
             Write-Log -Level Debug -Message "Task screen Init started (Helios version)"
             
             try {
                 # Access services
-                $services = $global:Services
+                $services = $self._services
                 if (-not $services) {
-                    Write-Log -Level Error -Message "Services not initialized"
+                    Write-Log -Level Error -Message "Services not available via self._services in Init. Cannot proceed with TaskScreenHelios Init."
                     return
                 }
                 
@@ -72,11 +74,8 @@ function global:Get-TaskManagementScreen {
                     OnRowSelect = {
                         param($SelectedData, $SelectedIndex)
                         if ($SelectedData -and $SelectedData.Id) {
-                            # Access services from global registry
-                            $globalServices = $global:Services
-                            if ($globalServices -and $globalServices.Store) {
-                                & $globalServices.Store.Dispatch -self $globalServices.Store -actionName "TASK_TOGGLE_STATUS" -payload @{ TaskId = $SelectedData.Id }
-                            }
+                            # Use services stored in $self
+                            $self._services.Store.Dispatch("TASK_TOGGLE_STATUS", @{ TaskId = $SelectedData.Id })
                         }
                     }
                 }
@@ -110,153 +109,6 @@ function global:Get-TaskManagementScreen {
                 $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "taskSort" -handler {
                     param($data)
                     & $services.Store.Dispatch -self $services.Store -actionName "TASKS_REFRESH"
-                }
-                
-                # Register store actions
-                if (-not $services.Store._actions.ContainsKey("TASKS_REFRESH")) {
-                    & $services.Store.RegisterAction -self $services.Store -actionName "TASKS_REFRESH" -scriptBlock {
-                        param($Context)
-                        
-                        $filter = & $Context.GetState -path "taskFilter" ?? "all"
-                        $sort = & $Context.GetState -path "taskSort" ?? "priority"
-                        
-                        # Get raw tasks
-                        $tasks = @()
-                        if ($global:Data -and $global:Data.tasks) {
-                            $tasks = $global:Data.tasks
-                        }
-                        
-                        # Apply filter
-                        $filtered = switch ($filter) {
-                            "active" { $tasks | Where-Object { -not $_.completed } }
-                            "completed" { $tasks | Where-Object { $_.completed } }
-                            default { $tasks }
-                        }
-                        
-                        # Apply sort
-                        $sorted = switch ($sort) {
-                            "priority" {
-                                $filtered | Sort-Object @{
-                                    Expression = {
-                                        switch ($_.priority) {
-                                            "Critical" { 0 }
-                                            "High" { 1 }
-                                            "Medium" { 2 }
-                                            "Low" { 3 }
-                                            default { 4 }
-                                        }
-                                    }
-                                }, created
-                            }
-                            "dueDate" { $filtered | Sort-Object dueDate, priority }
-                            "created" { $filtered | Sort-Object created -Descending }
-                            default { $filtered }
-                        }
-                        
-                        # Transform for display
-                        $displayTasks = @($sorted | ForEach-Object {
-                            @{
-                                Id = $_.id ?? [Guid]::NewGuid().ToString()
-                                Status = if ($_.completed) { "✓" } else { " " }
-                                Priority = $_.priority ?? "Medium"
-                                Title = $_.title ?? "Untitled"
-                                Category = $_.category ?? "General"
-                                DueDate = if ($_.dueDate) { 
-                                    try { [DateTime]::Parse($_.dueDate).ToString("yyyy-MM-dd") } 
-                                    catch { $_.dueDate }
-                                } else { "" }
-                            }
-                        })
-                        
-                        $Context.UpdateState(@{ tasks = $displayTasks })
-                    }
-                    
-                    & $services.Store.RegisterAction -self $services.Store -actionName "TASK_TOGGLE_STATUS" -scriptBlock {
-                        param($Context, $Payload)
-                        
-                        if ($global:Data -and $global:Data.tasks -and $Payload.TaskId) {
-                            $task = $global:Data.tasks | Where-Object { $_.id -eq $Payload.TaskId }
-                            if ($task) {
-                                $task.completed = -not $task.completed
-                                $task.completedDate = if ($task.completed) { Get-Date } else { $null }
-                                
-                                # Save data
-                                if (Get-Command Save-UnifiedData -ErrorAction SilentlyContinue) {
-                                    Save-UnifiedData
-                                }
-                                
-                                # Refresh display
-                                & $Context.Dispatch -actionName "TASKS_REFRESH"
-                            }
-                        }
-                    }
-                    
-                    & $services.Store.RegisterAction -self $services.Store -actionName "TASK_CREATE" -scriptBlock {
-                        param($Context, $Payload)
-                        
-                        if (-not $global:Data) { $global:Data = @{} }
-                        if (-not $global:Data.tasks) { $global:Data.tasks = @() }
-                        
-                        $newTask = @{
-                            id = [Guid]::NewGuid().ToString()
-                            title = $Payload.Title
-                            description = $Payload.Description
-                            category = $Payload.Category
-                            priority = $Payload.Priority
-                            dueDate = $Payload.DueDate
-                            created = Get-Date
-                            completed = $false
-                        }
-                        
-                        $global:Data.tasks += $newTask
-                        
-                        # Save data
-                        if (Get-Command Save-UnifiedData -ErrorAction SilentlyContinue) {
-                            Save-UnifiedData
-                        }
-                        
-                        # Refresh display
-                        & $Context.Dispatch -actionName "TASKS_REFRESH"
-                    }
-                    
-                    & $services.Store.RegisterAction -self $services.Store -actionName "TASK_UPDATE" -scriptBlock {
-                        param($Context, $Payload)
-                        
-                        if ($global:Data -and $global:Data.tasks -and $Payload.TaskId) {
-                            $task = $global:Data.tasks | Where-Object { $_.id -eq $Payload.TaskId }
-                            if ($task) {
-                                $task.title = $Payload.Title
-                                $task.description = $Payload.Description
-                                $task.category = $Payload.Category
-                                $task.priority = $Payload.Priority
-                                $task.dueDate = $Payload.DueDate
-                                
-                                # Save data
-                                if (Get-Command Save-UnifiedData -ErrorAction SilentlyContinue) {
-                                    Save-UnifiedData
-                                }
-                                
-                                # Refresh display
-                                & $Context.Dispatch -actionName "TASKS_REFRESH"
-                            }
-                        }
-                    }
-                    
-                    & $services.Store.RegisterAction -self $services.Store -actionName "TASK_DELETE" -scriptBlock {
-                        param($Context, $Payload)
-                        
-                        if ($global:Data -and $global:Data.tasks -and $Payload.TaskId) {
-                            $global:Data.tasks = @($global:Data.tasks | Where-Object { $_.id -ne $Payload.TaskId })
-                            
-                            # Save data
-                            if (Get-Command Save-UnifiedData -ErrorAction SilentlyContinue) {
-                                Save-UnifiedData
-                            }
-                            
-                            # Refresh display
-                            & $Context.Dispatch -actionName "TASKS_REFRESH"
-                        }
-                    }
                 }
                 
                 # Initialize filter and sort state
@@ -407,23 +259,36 @@ function global:Get-TaskManagementScreen {
             $self.Components.formPanel.Title = if ($taskId) { " Edit Task " } else { " New Task " }
             
             # Populate form if editing
-            if ($taskId -and $global:Data -and $global:Data.tasks) {
-                $task = $global:Data.tasks | Where-Object { $_.id -eq $taskId }
+            $allTasks = $null
+            if ($self._services -and $self._services.Store) {
+                $allTasks = & $self._services.Store.GetState -self $self._services.Store -path 'tasks'
+            }
+
+            if ($taskId -and $allTasks) {
+                $task = $allTasks | Where-Object { $_.Id -eq $taskId } # Assuming Id is the correct property name from store
                 if ($task) {
-                    $self._formFields.Title.Text = $task.title ?? ""
-                    $self._formFields.Description.Text = $task.description ?? ""
-                    $self._formFields.Category.Value = $task.category ?? "Work"
-                    $self._formFields.Priority.Value = $task.priority ?? "Medium"
-                    if ($task.dueDate) {
+                    $self._formFields.Title.Text = $task.Title ?? ""
+                    $self._formFields.Description.Text = $task.Description ?? "" # Assuming Description if available
+                    $self._formFields.Category.Value = $task.Category ?? "Work"
+                    $self._formFields.Priority.Value = $task.Priority ?? "Medium"
+                    if ($task.DueDate) {
                         try {
-                            $self._formFields.DueDate.Value = [DateTime]::Parse($task.dueDate)
+                            $self._formFields.DueDate.Value = [DateTime]::Parse($task.DueDate)
                         } catch {
                             $self._formFields.DueDate.Value = (Get-Date).AddDays(7)
                         }
                     }
+                } else {
+                    Write-Log -Level Warning -Message "Task with ID '$taskId' not found in store for editing."
+                    # Optionally clear form or show error
+                    $self._formFields.Title.Text = ""
+                    $self._formFields.Description.Text = ""
+                    $self._formFields.Category.Value = "Work"
+                    $self._formFields.Priority.Value = "Medium"
+                    $self._formFields.DueDate.Value = (Get-Date).AddDays(7)
                 }
             } else {
-                # Clear form for new task
+                # Clear form for new task or if tasks are not available from store
                 $self._formFields.Title.Text = ""
                 $self._formFields.Description.Text = ""
                 $self._formFields.Category.Value = "Work"
@@ -470,7 +335,7 @@ function global:Get-TaskManagementScreen {
                 Category = $self._formFields.Category.Value
                 Priority = $self._formFields.Priority.Value
                 DueDate = if ($self._formFields.DueDate.Value -is [DateTime]) {
-                    $self._formFields.DueDate.Value.ToString("yyyy-MM-dd")
+                    $self._formFields.DueDate.Value.ToString("yyyy-MM-dd") # Ensure date is stringified
                 } else {
                     $self._formFields.DueDate.Value
                 }
@@ -483,7 +348,13 @@ function global:Get-TaskManagementScreen {
             }
             
             # Dispatch appropriate action
-            $services = $global:Services
+            $services = $self._services # Ensure services are available
+            if (-not $services -or -not $services.Store) {
+                Write-Log -Level Error -Message "Store service not available in _SaveTask via self._services"
+                Show-AlertDialog -Title "Error" -Message "Cannot save task: Store service unavailable."
+                return
+            }
+
             if ($self._editingTaskId) {
                 $formData.TaskId = $self._editingTaskId
                 & $services.Store.Dispatch -self $services.Store -actionName "TASK_UPDATE" -payload $formData
@@ -534,8 +405,9 @@ function global:Get-TaskManagementScreen {
             param($self, $Key)
             
             try {
-                $services = $global:Services
+                $services = $self._services
                 if (-not $services) {
+                    Write-Log -Level Warning -Message "self._services not found in HandleInput for TaskScreenHelios"
                     return $false
                 }
                 
@@ -602,10 +474,9 @@ function global:Get-TaskManagementScreen {
             Write-Log -Level Debug -Message "Task screen exiting"
             
             # Unsubscribe from store
-            $services = $global:Services
-            if ($services -and $services.Store) {
+            if ($self._services -and $self._services.Store) {
                 foreach ($subId in $self._subscriptions) {
-                    & $services.Store.Unsubscribe -self $services.Store -subId $subId
+                    & $self._services.Store.Unsubscribe -self $self._services.Store -subId $subId
                 }
             }
         }
@@ -616,14 +487,13 @@ function global:Get-TaskManagementScreen {
             Write-Log -Level Debug -Message "Task screen resuming"
             
             # Force complete redraw
-            if ($global:TuiState -and $global:TuiState.RenderStats) {
+            if ($global:TuiState -and $global:TuiState.RenderStats) { # $global:TuiState is fine
                 $global:TuiState.RenderStats.FrameCount = 0
             }
             
             # Refresh data
-            $services = $global:Services
-            if ($services -and $services.Store) {
-                & $services.Store.Dispatch -self $services.Store -actionName "TASKS_REFRESH"
+            if ($self._services -and $self._services.Store) {
+                & $self._services.Store.Dispatch -self $self._services.Store -actionName "TASKS_REFRESH"
             }
             
             Request-TuiRefresh

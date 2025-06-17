@@ -2,6 +2,7 @@
 # Simple screen for starting/stopping timers
 
 function global:Get-TimerStartScreen {
+    param([hashtable]$Services)
     $screen = @{
         Name = "TimerStartScreen"
         
@@ -20,23 +21,33 @@ function global:Get-TimerStartScreen {
         # Init
         Init = {
             param($self)
+            $self._services = $Services # Store injected services
             
             # Calculate form position
             $formWidth = 50
             $formHeight = 15
             $formX = [Math]::Floor(($global:TuiState.BufferWidth - $formWidth) / 2)
             $formY = [Math]::Floor(($global:TuiState.BufferHeight - $formHeight) / 2)
+
+            # Access store
+            $store = $self._services.Store # Replaced global:Services
+            $storeActiveTimers = $null
+            $storeProjects = $null
+            if ($store) {
+                $storeActiveTimers = & $store.GetState -self $store -path 'active_timers'
+                $storeProjects = & $store.GetState -self $store -path 'projects'
+            }
             
-            # Check if there's an active timer
-            if ($global:Data -and $global:Data.ActiveTimers -and $global:Data.ActiveTimers.Count -gt 0) {
-                $activeTimer = $global:Data.ActiveTimers.GetEnumerator() | Select-Object -First 1
-                if ($activeTimer) {
-                    $self.State.ActiveTimer = $activeTimer.Value
-                    $self.State.ProjectKey = $activeTimer.Value.ProjectKey
-                    if ($global:Data.Projects -and $global:Data.Projects[$self.State.ProjectKey]) {
-                        $self.State.ProjectName = $global:Data.Projects[$self.State.ProjectKey].Name
+            # Check if there's an active timer from store
+            if ($storeActiveTimers -and $storeActiveTimers.Count -gt 0) {
+                $activeTimerEntry = $storeActiveTimers.GetEnumerator() | Select-Object -First 1
+                if ($activeTimerEntry) {
+                    $self.State.ActiveTimer = $activeTimerEntry.Value
+                    $self.State.ProjectKey = $activeTimerEntry.Value.ProjectKey
+                    if ($storeProjects -and $storeProjects.ContainsKey($self.State.ProjectKey)) {
+                        $self.State.ProjectName = $storeProjects[$self.State.ProjectKey].Name
                     }
-                    $self.State.Description = $activeTimer.Value.Description
+                    $self.State.Description = $activeTimerEntry.Value.Description
                 }
             }
             
@@ -48,15 +59,20 @@ function global:Get-TimerStartScreen {
                     if ($self.State.ActiveTimer) { return } # Can't change project while timer is running
                     
                     if (Get-Command Show-ListDialog -ErrorAction SilentlyContinue) {
-                        $projects = @()
-                        if ($global:Data -and $global:Data.Projects) {
-                            $projects = $global:Data.Projects.GetEnumerator() | ForEach-Object {
+                        $projectsForDialog = @()
+                        # Re-fetch projects from store in case they changed
+                        $currentStoreProjects = $null
+                        if ($self._services -and $self._services.Store) { # Replaced global:Services
+                            $currentStoreProjects = & $self._services.Store.GetState -self $self._services.Store -path 'projects'
+                        }
+                        if ($currentStoreProjects) {
+                            $projectsForDialog = $currentStoreProjects.GetEnumerator() | ForEach-Object {
                                 @{ Display = $_.Value.Name; Value = $_.Key }
                             } | Sort-Object Display
                         }
                         
-                        if ($projects.Count -gt 0) {
-                            Show-ListDialog -Title "Select Project" -Prompt "Choose a project:" -Items $projects -OnSelect {
+                        if ($projectsForDialog.Count -gt 0) {
+                            Show-ListDialog -Title "Select Project" -Prompt "Choose a project:" -Items $projectsForDialog -OnSelect {
                                 param($item)
                                 $self.State.ProjectKey = $item.Value
                                 $self.State.ProjectName = $item.Display
@@ -108,23 +124,20 @@ function global:Get-TimerStartScreen {
                             Created = Get-Date
                         }
                         
-                        # Add to data
-                        if ($global:Data) {
-                            if (-not $global:Data.TimeEntries) {
-                                $global:Data.TimeEntries = @()
+                        # Dispatch action to stop timer and create time entry
+                        if ($self._services -and $self._services.Store) { # Replaced global:Services
+                            $payload = @{
+                                TimeEntry = $timeEntry
+                                TimerIdToRemove = $self.State.ActiveTimer.Id
                             }
-                            $global:Data.TimeEntries += $timeEntry
-                            
-                            # Remove active timer
-                            $global:Data.ActiveTimers.Remove($self.State.ActiveTimer.Id)
-                            
-                            # Save data
-                            if (Get-Command Save-UnifiedData -ErrorAction SilentlyContinue) {
-                                Save-UnifiedData -Data $global:Data
-                            }
+                            & $self._services.Store.Dispatch -self $self._services.Store -actionName "STOP_TIMER_AND_CREATE_ENTRY" -payload $payload
+                        } else {
+                            Write-Log -Level Error -Message "Store service not available via self._services. Cannot stop timer."
+                            Show-AlertDialog -Title "Error" -Message "Failed to stop timer: Store unavailable."
+                            return # Do not proceed with UI changes if store op failed
                         }
                         
-                        # Reset state
+                        # Reset state (assuming action was successful, or optimistic update)
                         $self.State.ActiveTimer = $null
                         $self.Components.actionButton.Text = "Start Timer"
                         $self.Components.timerLabel.ForegroundColor = [ConsoleColor]::White
@@ -145,20 +158,16 @@ function global:Get-TimerStartScreen {
                             StartTime = Get-Date
                         }
                         
-                        # Add to active timers
-                        if ($global:Data) {
-                            if (-not $global:Data.ActiveTimers) {
-                                $global:Data.ActiveTimers = @{}
-                            }
-                            $global:Data.ActiveTimers[$timer.Id] = $timer
-                            
-                            # Save data
-                            if (Get-Command Save-UnifiedData -ErrorAction SilentlyContinue) {
-                                Save-UnifiedData -Data $global:Data
-                            }
+                        # Dispatch action to start timer
+                        if ($self._services -and $self._services.Store) { # Replaced global:Services
+                            & $self._services.Store.Dispatch -self $self._services.Store -actionName "START_TIMER" -payload $timer
+                        } else {
+                            Write-Log -Level Error -Message "Store service not available via self._services. Cannot start timer."
+                            Show-AlertDialog -Title "Error" -Message "Failed to start timer: Store unavailable."
+                            return # Do not proceed with UI changes if store op failed
                         }
                         
-                        $self.State.ActiveTimer = $timer
+                        $self.State.ActiveTimer = $timer # Optimistic update, ideally this comes from store subscription
                         $self.Components.actionButton.Text = "Stop Timer"
                         $self.Components.timerLabel.ForegroundColor = [ConsoleColor]::Green
                         

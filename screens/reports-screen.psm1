@@ -2,6 +2,7 @@
 # This is a placeholder screen that will be properly implemented later
 
 function global:Get-ReportsScreen {
+    param([hashtable]$Services)
     $screen = @{
         Name = "ReportsScreen"
         
@@ -16,6 +17,7 @@ function global:Get-ReportsScreen {
         # 3. Init: One-time setup
         Init = {
             param($self)
+            $self._services = $Services # Store injected services
             
             # Create a simple message label
             $self.Components.messageLabel = New-TuiLabel -Props @{

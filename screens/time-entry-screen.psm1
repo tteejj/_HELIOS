@@ -2,6 +2,7 @@
 # Using programmatic pattern with component-based architecture
 
 function global:Get-TimeEntryFormScreen {
+    param([hashtable]$Services)
     $screen = @{
         Name = "TimeEntryFormScreen"
         
@@ -21,13 +22,18 @@ function global:Get-TimeEntryFormScreen {
         # 3. Init: One-time setup
         Init = {
             param($self)
+            $self._services = $Services # Store injected services
             
             # Pre-populate with project from context if available
             if ($script:ContextData -and $script:ContextData.ProjectKey) {
                 $self.State.ProjectKey = $script:ContextData.ProjectKey
                 # Try to get project name
-                if ($global:Data -and $global:Data.Projects -and $global:Data.Projects[$self.State.ProjectKey]) {
-                    $self.State.ProjectName = $global:Data.Projects[$self.State.ProjectKey].Name
+                $storeProjects = $null
+                if ($self._services -and $self._services.Store) { # Replaced global:Services
+                    $storeProjects = & $self._services.Store.GetState -self $self._services.Store -path 'projects'
+                }
+                if ($storeProjects -and $storeProjects.ContainsKey($self.State.ProjectKey)) {
+                    $self.State.ProjectName = $storeProjects[$self.State.ProjectKey].Name
                 }
             }
             
@@ -44,15 +50,34 @@ function global:Get-TimeEntryFormScreen {
                 OnClick = {
                     # Show project selector dialog
                     if (Get-Command Show-ListDialog -ErrorAction SilentlyContinue) {
-                        # Get available projects
-                        $projects = @()
-                        if ($global:Data -and $global:Data.Projects) {
-                            $projects = $global:Data.Projects.GetEnumerator() | ForEach-Object {
+                        # Get available projects from store
+                        $storeProjects = $null
+                        if ($self._services -and $self._services.Store) { # Replaced global:Services
+                            $storeProjects = & $self._services.Store.GetState -self $self._services.Store -path 'projects'
+                        }
+                        $projectsForDialog = @()
+                        if ($storeProjects) {
+                            $projectsForDialog = $storeProjects.GetEnumerator() | ForEach-Object {
                                 @{ Display = $_.Value.Name; Value = $_.Key }
                             } | Sort-Object Display
                         }
                         
-                        if ($projects.Count -gt 0) {
+                        if ($projectsForDialog.Count -gt 0) {
+                            Show-ListDialog -Title "Select Project" -Prompt "Choose a project:" -Items $projectsForDialog -OnSelect {
+                                param($item)
+                                $self.State.ProjectKey = $item.Value
+                                $self.State.ProjectName = $item.Display
+                                $self.Components.projectButton.Text = $item.Display
+                                Request-TuiRefresh
+                            }
+                        } else {
+                            Show-AlertDialog -Title "No Projects" -Message "No projects available. Please create a project first."
+                        }
+                    }
+                }
+            }
+
+            # Hours input
                             Show-ListDialog -Title "Select Project" -Prompt "Choose a project:" -Items $projects -OnSelect {
                                 param($item)
                                 $self.State.ProjectKey = $item.Value
@@ -138,20 +163,16 @@ function global:Get-TimeEntryFormScreen {
                             Created = Get-Date
                         }
                         
-                        # Add to data
-                        if ($global:Data) {
-                            if (-not $global:Data.TimeEntries) {
-                                $global:Data.TimeEntries = @()
-                            }
-                            $global:Data.TimeEntries += $timeEntry
-                            
-                            # Save data
-                            if (Get-Command Save-UnifiedData -ErrorAction SilentlyContinue) {
-                                Save-UnifiedData -Data $global:Data
-                            }
+                        # Dispatch action to create time entry
+                        if ($self._services -and $self._services.Store) { # Replaced global:Services
+                            & $self._services.Store.Dispatch -self $self._services.Store -actionName "CREATE_TIME_ENTRY" -payload $timeEntry
+                        } else {
+                            Write-Log -Level Error -Message "Store service not available via self._services. Cannot save time entry."
+                            Show-AlertDialog -Title "Error" -Message "Failed to save time entry: Store unavailable."
+                            # Decide if we should Pop-Screen or allow retry, for now, we continue to pop
                         }
                         
-                        # Publish event
+                        # Publish event (This might be redundant if the store action handles events)
                         if (Get-Command Publish-Event -ErrorAction SilentlyContinue) {
                             Publish-Event -EventName "Data.Create.TimeEntry" -Data $timeEntry
                         }

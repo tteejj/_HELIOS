@@ -2,6 +2,7 @@
 # Demonstrates the new reactive state management pattern
 
 function global:Get-StateExampleScreen {
+    param([hashtable]$Services)
     $screen = @{
         Name = "StateExampleScreen"
         
@@ -11,6 +12,7 @@ function global:Get-StateExampleScreen {
         
         Init = {
             param($self)
+            $self._services = $Services # Store injected services
             
             # Create reactive state with initial values and actions
             $self.State = New-TuiState -InitialState @{
