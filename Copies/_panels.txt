@@ -237,6 +237,16 @@ function global:New-TuiStackPanel {
                 }
             }
             
+            # CRITICAL FIX: Apply calculated positions to child immediately
+            $child.X = $childLayout.X
+            $child.Y = $childLayout.Y
+            if ($childLayout.Width -ne $child.Width -and $child.PSObject.Properties['Width'].IsSettable) {
+                $child.Width = $childLayout.Width
+            }
+            if ($childLayout.Height -ne $child.Height -and $child.PSObject.Properties['Height'].IsSettable) {
+                $child.Height = $childLayout.Height
+            }
+            
             $layout.Children += $childLayout
             
             # Move to next position
@@ -461,6 +471,16 @@ function global:New-TuiGridPanel {
                 "Stretch" { $childHeight = $cellHeight }
             }
             
+            # CRITICAL FIX: Apply calculated positions to child immediately
+            $child.X = $childX
+            $child.Y = $childY
+            if ($child.PSObject.Properties['Width'] -and $child.Width -ne $childWidth) {
+                $child.Width = $childWidth
+            }
+            if ($child.PSObject.Properties['Height'] -and $child.Height -ne $childHeight) {
+                $child.Height = $childHeight
+            }
+            
             $layout.Children += @{
                 Component = $child
                 X = $childX
@@ -535,24 +555,8 @@ function global:New-TuiGridPanel {
             }
         }
         
-        # Apply layout to children (but don't render them - Z-Index renderer handles that)
-        foreach ($childLayout in $layout.Children) {
-            $child = $childLayout.Component
-            
-            # Apply calculated position and size
-            $child.X = $childLayout.X
-            $child.Y = $childLayout.Y
-            
-            # Only update size if property is settable
-            if ($child.PSObject.Properties['Width'] -and $child.Width -ne $childLayout.Width) {
-                $child.Width = $childLayout.Width
-            }
-            if ($child.PSObject.Properties['Height'] -and $child.Height -ne $childLayout.Height) {
-                $child.Height = $childLayout.Height
-            }
-            
-            # NOTE: Child rendering is now handled by the Z-Index renderer
-        }
+        # NOTE: Child positions already applied in CalculateLayout
+        # NOTE: Child rendering is now handled by the Z-Index renderer
     }
     
     return $panel

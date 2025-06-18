@@ -165,32 +165,174 @@ function Initialize-PMCServices {
         $services.Store = Initialize-AppStore -InitialData $initialData -EnableDebugLogging $false
         
         # Register store actions using the v3.0 call pattern
+        & $services.Store.RegisterAction -self $services.Store -actionName "DASHBOARD_REFRESH" -scriptBlock {
+            param($Context)
+            # Dispatch to load various dashboard data
+            & $Context.Dispatch -actionName "LOAD_DASHBOARD_DATA"
+            & $Context.Dispatch -actionName "TASKS_REFRESH"
+            & $Context.Dispatch -actionName "TIMERS_REFRESH"
+        }
+        
+        & $services.Store.RegisterAction -self $services.Store -actionName "TASKS_REFRESH" -scriptBlock {
+            param($Context)
+            # Ensure data structure exists
+            if (-not $global:Data) { $global:Data = @{} }
+            if (-not $global:Data.tasks) { $global:Data.tasks = @() }
+            
+            # Load tasks data
+            $tasks = @()
+            $todaysTasks = @()
+            $activeTasks = 0
+            
+            if ($global:Data.tasks) {
+                $tasks = $global:Data.tasks
+                $activeTasks = ($tasks | Where-Object { -not $_.completed }).Count
+                
+                # Get today's tasks
+                $today = (Get-Date).Date
+                $todaysTasks = $tasks | Where-Object {
+                    -not $_.completed -or ([DateTime]::Parse($_.updated_at).Date -eq $today)
+                } | Select-Object -First 10 | ForEach-Object {
+                    @{
+                        Priority = switch($_.priority) {
+                            "high" { "[HIGH]" }
+                            "medium" { "[MED]" }
+                            "low" { "[LOW]" }
+                            default { "[MED]" }
+                        }
+                        Task = $_.title
+                        Project = $_.project ?? "None"
+                    }
+                }
+            }
+            
+            $Context.UpdateState(@{ 
+                tasks = $tasks
+                todaysTasks = $todaysTasks
+                "stats.activeTasks" = $activeTasks
+            })
+        }
+        
+        & $services.Store.RegisterAction -self $services.Store -actionName "TIMERS_REFRESH" -scriptBlock {
+            param($Context)
+            # Ensure data structure exists
+            if (-not $global:Data) { $global:Data = @{} }
+            if (-not $global:Data.timers) { $global:Data.timers = @() }
+            
+            # Load active timers
+            $activeTimers = @()
+            $runningTimers = 0
+            
+            if ($global:Data.timers) {
+                $runningTimers = ($global:Data.timers | Where-Object { $_.is_running }).Count
+                $activeTimers = $global:Data.timers | Where-Object { $_.is_running } | ForEach-Object {
+                    $duration = if ($_.start_time) {
+                        $start = [DateTime]::Parse($_.start_time)
+                        $elapsed = (Get-Date) - $start
+                        "{0:hh\:mm\:ss}" -f $elapsed
+                    } else { "00:00:00" }
+                    
+                    @{
+                        Project = $_.project ?? "No Project"
+                        Time = $duration
+                    }
+                }
+            }
+            
+            $Context.UpdateState(@{
+                activeTimers = $activeTimers
+                "stats.runningTimers" = $runningTimers
+            })
+        }
+        
         & $services.Store.RegisterAction -self $services.Store -actionName "LOAD_DASHBOARD_DATA" -scriptBlock {
             param($Context)
             
             # Load quick actions
             $quickActions = @(
-                @{ Action = "[Enter] Start Timer" },
-                @{ Action = "[Space] Quick Timer" },
-                @{ Action = "[T] Tasks" },
-                @{ Action = "[P] Projects" },
-                @{ Action = "[R] Reports" },
-                @{ Action = "[S] Settings" }
+                @{ Action = "[1] New Time Entry" },
+                @{ Action = "[2] Start Timer" },
+                @{ Action = "[3] View Tasks" },
+                @{ Action = "[4] View Projects" },
+                @{ Action = "[5] Reports" },
+                @{ Action = "[6] Settings" }
             )
             $Context.UpdateState(@{ quickActions = $quickActions })
             
-            # Calculate today's hours
+            # Ensure data structure exists
+            if (-not $global:Data) { $global:Data = @{} }
+            if (-not $global:Data.time_entries) { $global:Data.time_entries = @() }
+            
+            # Calculate today's and week's hours
             $todayHours = 0
-            if ($global:Data -and $global:Data.time_entries) {
+            $weekHours = 0
+            if ($global:Data.time_entries) {
                 $today = (Get-Date).Date
-                $todayEntries = $global:Data.time_entries | Where-Object { 
-                    [DateTime]::Parse($_.start_time).Date -eq $today 
-                }
-                foreach ($entry in $todayEntries) {
-                    $todayHours += $entry.duration
+                $weekStart = $today.AddDays(-[int]$today.DayOfWeek)
+                
+                foreach ($entry in $global:Data.time_entries) {
+                    $entryDate = [DateTime]::Parse($_.start_time).Date
+                    if ($entryDate -eq $today) {
+                        $todayHours += $entry.duration
+                    }
+                    if ($entryDate -ge $weekStart -and $entryDate -le $today) {
+                        $weekHours += $entry.duration
+                    }
                 }
             }
-            $Context.UpdateState(@{ stats = @{ todayHours = [Math]::Round($todayHours, 2) } })
+            $Context.UpdateState(@{ 
+                "stats.todayHours" = [Math]::Round($todayHours, 2)
+                "stats.weekHours" = [Math]::Round($weekHours, 2)
+            })
+        }
+        
+        & $services.Store.RegisterAction -self $services.Store -actionName "TASK_CREATE" -scriptBlock {
+            param($Context, $Payload)
+            if ($global:Data -and $Payload.Title) {
+                if (-not $global:Data.tasks) { $global:Data.tasks = @() }
+                
+                $newTask = @{
+                    id = [Guid]::NewGuid().ToString()
+                    title = $Payload.Title
+                    description = $Payload.Description ?? ""
+                    completed = $false
+                    priority = "medium"
+                    created_at = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+                    updated_at = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+                }
+                
+                $global:Data.tasks += $newTask
+                Save-UnifiedData
+                & $Context.Dispatch -actionName "TASKS_REFRESH"
+            }
+        }
+        
+        & $services.Store.RegisterAction -self $services.Store -actionName "TASK_TOGGLE_STATUS" -scriptBlock {
+            param($Context, $Payload)
+            if ($global:Data -and $global:Data.tasks -and $Payload.TaskId) {
+                $task = $global:Data.tasks | Where-Object { $_.id -eq $Payload.TaskId }
+                if ($task) {
+                    $task.completed = -not $task.completed
+                    $task.updated_at = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+                    Save-UnifiedData
+                    & $Context.Dispatch -actionName "TASKS_REFRESH"
+                }
+            }
+        }
+        
+        & $services.Store.RegisterAction -self $services.Store -actionName "TASK_DELETE" -scriptBlock {
+            param($Context, $Payload)
+            if ($global:Data -and $global:Data.tasks -and $Payload.TaskId) {
+                $global:Data.tasks = $global:Data.tasks | Where-Object { $_.id -ne $Payload.TaskId }
+                Save-UnifiedData
+                & $Context.Dispatch -actionName "TASKS_REFRESH"
+            }
+        }
+        
+        & $services.Store.RegisterAction -self $services.Store -actionName "UPDATE_STATE" -scriptBlock {
+            param($Context, $Payload)
+            # Generic state update action
+            $Context.UpdateState($Payload)
         }
         
         & $services.Store.RegisterAction -self $services.Store -actionName "TASKS_LOAD" -scriptBlock {
@@ -292,9 +434,9 @@ function Start-PMCTerminal {
         
         # Navigate to initial screen
         if ($args -contains "-demo" -and (& $services.Navigation.IsValidRoute -self $services.Navigation -Path "/demo")) {
-            & $services.Navigation.GoTo -self $services.Navigation -Path "/demo"
+            & $services.Navigation.GoTo -self $services.Navigation -Path "/demo" -Services $services
         } else {
-            & $services.Navigation.GoTo -self $services.Navigation -Path "/dashboard"
+            & $services.Navigation.GoTo -self $services.Navigation -Path "/dashboard" -Services $services
         }
         
         # Start the main loop
