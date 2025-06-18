@@ -13,6 +13,7 @@ function New-BasePanel {
         Height = $Props.Height ?? 20
         Visible = $Props.Visible ?? $true
         IsFocusable = $Props.IsFocusable ?? $false
+        ZIndex = $Props.ZIndex ?? 0
         Children = @()
         Parent = $null
         LayoutProps = $Props.LayoutProps ?? @{}
@@ -297,10 +298,7 @@ function global:New-TuiStackPanel {
                 $child.Height = $childLayout.Height
             }
             
-            # Render child
-            if ($child.Render) {
-                & $child.Render -self $child
-            }
+            # NOTE: Child rendering is now handled by the Z-Index renderer
         }
     }
     
@@ -537,7 +535,7 @@ function global:New-TuiGridPanel {
             }
         }
         
-        # Render children
+        # Apply layout to children (but don't render them - Z-Index renderer handles that)
         foreach ($childLayout in $layout.Children) {
             $child = $childLayout.Component
             
@@ -553,10 +551,7 @@ function global:New-TuiGridPanel {
                 $child.Height = $childLayout.Height
             }
             
-            # Render child
-            if ($child.Render) {
-                & $child.Render -self $child
-            }
+            # NOTE: Child rendering is now handled by the Z-Index renderer
         }
     }
     

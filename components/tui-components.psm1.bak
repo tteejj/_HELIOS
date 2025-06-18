@@ -17,6 +17,7 @@ function global:New-TuiLabel {
         Width = $Props.Width ?? 10
         Height = $Props.Height ?? 1
         Visible = $Props.Visible ?? $true
+        ZIndex = $Props.ZIndex ?? 0
         Text = $Props.Text ?? ""
         ForegroundColor = $Props.ForegroundColor
         Name = $Props.Name
@@ -54,6 +55,7 @@ function global:New-TuiButton {
         Width = $Props.Width ?? 10
         Height = $Props.Height ?? 3
         Visible = $Props.Visible ?? $true
+        ZIndex = $Props.ZIndex ?? 0
         Text = $Props.Text ?? "Button"
         Name = $Props.Name
         
@@ -111,6 +113,7 @@ function global:New-TuiTextBox {
         Width = $Props.Width ?? 20
         Height = $Props.Height ?? 3
         Visible = $Props.Visible ?? $true
+        ZIndex = $Props.ZIndex ?? 0
         Text = $Props.Text ?? ""
         Placeholder = $Props.Placeholder ?? ""
         MaxLength = $Props.MaxLength ?? 100
@@ -257,6 +260,7 @@ function global:New-TuiCheckBox {
         Width = $Props.Width ?? 20
         Height = $Props.Height ?? 1
         Visible = $Props.Visible ?? $true
+        ZIndex = $Props.ZIndex ?? 0
         Text = $Props.Text ?? "Checkbox"
         Checked = $Props.Checked ?? $false
         Name = $Props.Name
@@ -307,6 +311,7 @@ function global:New-TuiDropdown {
         Width = $Props.Width ?? 20
         Height = $Props.Height ?? 3
         Visible = $Props.Visible ?? $true
+        ZIndex = $Props.ZIndex ?? 10
         Options = $Props.Options ?? @()
         Value = $Props.Value
         Placeholder = $Props.Placeholder ?? "Select..."
@@ -423,6 +428,7 @@ function global:New-TuiProgressBar {
         Width = $Props.Width ?? 20
         Height = $Props.Height ?? 1
         Visible = $Props.Visible ?? $true
+        ZIndex = $Props.ZIndex ?? 0
         Value = $Props.Value ?? 0
         Max = $Props.Max ?? 100
         ShowPercent = $Props.ShowPercent ?? $false
@@ -471,6 +477,7 @@ function global:New-TuiTextArea {
         Width = $Props.Width ?? 40
         Height = $Props.Height ?? 6
         Visible = $Props.Visible ?? $true
+        ZIndex = $Props.ZIndex ?? 0
         Text = $Props.Text ?? ""
         Placeholder = $Props.Placeholder ?? "Enter text..."
         WrapText = $Props.WrapText ?? $true
@@ -741,6 +748,7 @@ function global:New-TuiDatePicker {
         Width = $Props.Width ?? 20
         Height = $Props.Height ?? 3
         Visible = $Props.Visible ?? $true
+        ZIndex = $Props.ZIndex ?? 0
         Value = $Props.Value ?? (Get-Date)
         Format = $Props.Format ?? "yyyy-MM-dd"
         Name = $Props.Name
@@ -819,6 +827,7 @@ function global:New-TuiTimePicker {
         Width = $Props.Width ?? 15
         Height = $Props.Height ?? 3
         Visible = $Props.Visible ?? $true
+        ZIndex = $Props.ZIndex ?? 0
         Hour = $Props.Hour ?? 0
         Minute = $Props.Minute ?? 0
         Format24H = $Props.Format24H ?? $true
@@ -910,6 +919,7 @@ function global:New-TuiTable {
         Width = $Props.Width ?? 60
         Height = $Props.Height ?? 15
         Visible = $Props.Visible ?? $true
+        ZIndex = $Props.ZIndex ?? 0
         Columns = $Props.Columns ?? @()
         Rows = $Props.Rows ?? @()
         Name = $Props.Name
@@ -1087,6 +1097,7 @@ function global:New-TuiChart {
         Width = $Props.Width ?? 40
         Height = $Props.Height ?? 10
         Visible = $Props.Visible ?? $true
+        ZIndex = $Props.ZIndex ?? 0
         ChartType = $Props.ChartType ?? "Bar"
         Data = $Props.Data ?? @()
         ShowValues = $Props.ShowValues ?? $true
@@ -1167,9 +1178,6 @@ function global:New-TuiChart {
 #endregion
 
 #region Container Components
-
-# FILE: _tui-components.txt
-# ACTION: Replace the entire existing New-TuiPanel function with this code.
 
 function global:New-TuiPanel {
     param([hashtable]$Props = @{})

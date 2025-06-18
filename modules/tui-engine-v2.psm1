@@ -497,10 +497,13 @@ function global:Start-TuiLoop {
     }
 }
 
+# ==============================================================================
+# === CRITICAL FIX: NEW RENDER-FRAME IMPLEMENTATION ============================
+# ==============================================================================
 function Render-Frame {
     try {
         if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
-            Write-Log -Level Verbose -Message "Starting frame render"
+            Write-Log -Level Verbose -Message "Starting Z-Index frame render"
         }
         
         $bgColor = if (Get-Command -Name "Get-ThemeColor" -ErrorAction SilentlyContinue) {
@@ -512,37 +515,91 @@ function Render-Frame {
         # Always clear the back buffer completely
         Clear-BackBuffer -BackgroundColor $bgColor
         
-        # Render current screen
+        # 1. RENDER SCREEN CHROME (Header, Footer, etc.)
+        # This is for elements NOT in the component tree. The screen's Render method
+        # should ONLY draw these non-component elements.
         if ($script:TuiState.CurrentScreen -and $script:TuiState.CurrentScreen.Render) {
             try {
                 & $script:TuiState.CurrentScreen.Render -self $script:TuiState.CurrentScreen
             } catch {
-                $errorMessage = "Screen render error: $($_.Exception.Message)"
-                if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
-                    Write-Log -Level Error -Message $errorMessage -Data $_
+                Write-Log -Level Error -Message "Screen-level render error" -Data $_
+            }
+        }
+
+        # 2. COLLECT all visible components from the screen's Children and any active dialogs.
+        $renderQueue = [System.Collections.Generic.List[hashtable]]::new()
+        
+        # Debug: Log screen state
+        if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+            Write-Log -Level Debug -Message "Render-Frame: CurrentScreen=$($script:TuiState.CurrentScreen.Name), Children count=$($script:TuiState.CurrentScreen.Children.Count)"
+        }
+        
+        # Define collectComponents as a scriptblock variable that can reference itself
+        $script:collectComponents = {
+            param($component)
+            if (-not $component -or -not $component.Visible) { return }
+            
+            # Add the component itself to the queue
+            $renderQueue.Add($component)
+            
+            # Debug logging
+            if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+                Write-Log -Level Debug -Message "Collected component: Type=$($component.Type), Name=$($component.Name), Pos=($($component.X),$($component.Y)), ZIndex=$($component.ZIndex), Children=$($component.Children.Count)"
+            }
+            
+            # Process children if any
+            if ($component.Children -and $component.Children.Count -gt 0) {
+                # A panel must calculate its children's layout before they are collected
+                if ($component.CalculateLayout) {
+                    try { 
+                        & $component.CalculateLayout -self $component 
+                    }
+                    catch { 
+                        Write-Log -Level Error -Message "Layout failed for '$($component.Name)'" -Data $_ 
+                    }
                 }
-                # Draw error message on screen
-                Write-BufferString -X 2 -Y 2 -Text $errorMessage -ForegroundColor Red
+                
+                # Recursively collect each child
+                foreach ($child in $component.Children) {
+                    & $script:collectComponents $child
+                }
+            }
+        }
+
+        # Start collection from the screen's children
+        if ($script:TuiState.CurrentScreen -and $script:TuiState.CurrentScreen.Children) {
+            foreach ($child in $script:TuiState.CurrentScreen.Children) {
+                & $script:collectComponents -component $child
+            }
+        }
+
+        # Collect from the current dialog (which is a self-contained component tree)
+        if ((Get-Command -Name "Get-CurrentDialog" -ErrorAction SilentlyContinue)) {
+            $currentDialog = Get-CurrentDialog
+            if ($currentDialog) {
+                & $script:collectComponents -component $currentDialog
             }
         }
         
-        # Render dialogs on top
-        if (Get-Command -Name "Render-Dialogs" -ErrorAction SilentlyContinue) {
-            try {
-                Render-Dialogs
-            } catch {
-                Write-Warning "Dialog render error: $_"
+        # 3. SORT the render queue by ZIndex
+        $sortedQueue = $renderQueue | Sort-Object -Property ZIndex
+        
+        # 4. DRAW the sorted components
+        foreach ($componentToRender in $sortedQueue) {
+            if ($componentToRender.Render) {
+                try { & $componentToRender.Render -self $componentToRender }
+                catch { Write-Log -Level Error -Message "Component render error in '$($componentToRender.Name)'" -Data $_ }
             }
         }
         
-        # Perform optimized render
+        # 5. FINALIZE the frame
         Render-BufferOptimized
         
         # Force cursor to bottom-right to avoid interference
         [Console]::SetCursorPosition($script:TuiState.BufferWidth - 1, $script:TuiState.BufferHeight - 1)
         
     } catch {
-        Write-Warning "Frame render error: $_"
+        Write-Warning "Fatal Frame render error: $_"
     }
 }
 
@@ -664,7 +721,12 @@ function global:Push-Screen {
         
         if ($Screen.Init) { 
             try {
-                & $Screen.Init -self $Screen 
+                # Pass services if available on the screen object
+                if ($Screen._services) {
+                    & $Screen.Init -self $Screen -services $Screen._services
+                } else {
+                    & $Screen.Init -self $Screen
+                }
             } catch {
                 Write-Warning "Screen init error: $_"
             }

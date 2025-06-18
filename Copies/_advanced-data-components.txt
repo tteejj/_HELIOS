@@ -12,6 +12,7 @@ function global:New-TuiDataTable {
         Y = $Props.Y ?? 0
         Width = $Props.Width ?? 80
         Height = $Props.Height ?? 20
+        ZIndex = $Props.ZIndex ?? 0
         Title = $Props.Title
         ShowBorder = $Props.ShowBorder ?? $true  # <-- NEW: Controls whether component draws its own border
         Data = $Props.Data ?? @()
@@ -678,6 +679,7 @@ function global:New-TuiTreeView {
         Y = $Props.Y ?? 0
         Width = $Props.Width ?? 40
         Height = $Props.Height ?? 20
+        ZIndex = $Props.ZIndex ?? 0
         RootNode = $Props.RootNode ?? @{ Name = "Root"; Children = @(); Expanded = $true }
         SelectedNode = $null
         SelectedPath = @()

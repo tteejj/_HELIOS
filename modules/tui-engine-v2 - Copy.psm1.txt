@@ -18,6 +18,7 @@ $script:TuiState = @{
     RenderStats     = @{ LastFrameTime = 0; FrameCount = 0; TotalTime = 0; TargetFPS = 60 }
     Components      = @()
     Layouts         = @{}
+    DebugOverlayEnabled = $false
     FocusedComponent = $null
     
     # Thread-safe input queue and runspace management
@@ -90,6 +91,10 @@ function global:Initialize-TuiEngine {
     # Patch: Always set defaults if not passed in
     if (-not $Width) { $Width = [Console]::WindowWidth }
     if (-not $Height) { $Height = [Console]::WindowHeight - 1 }
+    
+    if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+        Write-Log -Level Info -Message "Initializing TUI Engine: ${Width}x${Height}"
+    }
 
    
 
@@ -118,8 +123,28 @@ function global:Initialize-TuiEngine {
         [Console]::Clear() # Clear console to remove initialization messages
         
         # Initialize subsystems with error handling
-        try { Initialize-LayoutEngines } catch { Write-Warning "Layout engines init failed: $_" }
-        try { Initialize-ComponentSystem } catch { Write-Warning "Component system init failed: $_" }
+        try { 
+            Initialize-LayoutEngines 
+            if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+                Write-Log -Level Debug -Message "Layout engines initialized"
+            }
+        } catch { 
+            Write-Warning "Layout engines init failed: $_" 
+            if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+                Write-Log -Level Error -Message "Layout engines init failed" -Data $_
+            }
+        }
+        try { 
+            Initialize-ComponentSystem 
+            if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+                Write-Log -Level Debug -Message "Component system initialized"
+            }
+        } catch { 
+            Write-Warning "Component system init failed: $_" 
+            if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+                Write-Log -Level Error -Message "Component system init failed" -Data $_
+            }
+        }
         
         # Track event handlers for cleanup (event system should already be initialized)
         $script:TuiState.EventHandlers = @{}
@@ -142,6 +167,10 @@ function global:Initialize-TuiEngine {
         
         # Export TuiState for global access
         $global:TuiState = $script:TuiState
+        
+        if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+            Write-Log -Level Info -Message "TUI Engine initialized successfully"
+        }
     }
     catch {
         # --- ENHANCED DIAGNOSTIC BLOCK ---
@@ -236,6 +265,10 @@ function Process-TuiInput {
     $processedAny = $false
     # Check if the queue exists before trying to use it.
     if (-not $script:TuiState.InputQueue) { return $false }
+    
+    if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+        Write-Log -Level Verbose -Message "Processing input queue"
+    }
 
     $keyInfo = $null
     
@@ -264,13 +297,100 @@ function Process-TuiInput {
     return $processedAny
 }
 
+###```focus adddition 
+function global:Set-ComponentFocus {
+    param(
+        [hashtable]$Component
+    )
+    
+    $oldFocusedComponent = $script:TuiState.FocusedComponent
+    
+    if ($null -ne $oldFocusedComponent -and $oldFocusedComponent -ne $Component) {
+        $oldFocusedComponent.IsFocused = $false
+        if ($oldFocusedComponent.OnBlur) {
+            try { & $oldFocusedComponent.OnBlur -self $oldFocusedComponent }
+            catch { Write-Log -Level Warning -Message "OnBlur error: $_" }
+        }
+    }
+
+    if ($null -eq $Component) {
+        $script:TuiState.FocusedComponent = $null
+        Request-TuiRefresh
+        return
+    }
+
+    if ($Component.IsFocusable -ne $true -or $Component.Visible -ne $true) {
+        return
+    }
+
+    $script:TuiState.FocusedComponent = $Component
+    $Component.IsFocused = $true
+    
+    if ($Component.OnFocus) {
+        try { & $Component.OnFocus -self $Component }
+        catch { Write-Log -Level Warning -Message "OnFocus error: $_" }
+    }
+    
+    Request-TuiRefresh
+}
+
+function global:Handle-TabNavigation {
+    param(
+        [bool]$Reverse = $false
+    )
+    
+    $currentScreen = $script:TuiState.CurrentScreen
+    if (-not $currentScreen) { return }
+
+    $focusable = @()
+    $FindFocusableIn = {
+        param($component)
+        if ($component -and $component.IsFocusable -eq $true -and $component.Visible -eq $true) {
+            $script:focusable += $component
+        }
+        if ($component -and $component.Children) {
+            foreach ($child in $component.Children) {
+                & $script:FindFocusableIn -component $child
+            }
+        }
+    }
+    
+    foreach ($compName in $currentScreen.Components.Keys) {
+        & $FindFocusableIn -component $currentScreen.Components[$compName]
+    }
+
+    if ($focusable.Count -eq 0) { return }
+
+    $sortedFocusable = $focusable | Sort-Object { $_.Y }, { $_.X }
+
+    $currentIndex = [array]::IndexOf($sortedFocusable, $script:TuiState.FocusedComponent)
+    
+    $nextIndex = 0
+    if ($currentIndex -ne -1) {
+        $direction = if ($Reverse) { -1 } else { 1 }
+        $nextIndex = ($currentIndex + $direction + $sortedFocusable.Count) % $sortedFocusable.Count
+    }
+
+    Set-ComponentFocus -Component $sortedFocusable[$nextIndex]
+}
+
+function global:Clear-ComponentFocus {
+    Set-ComponentFocus -Component $null
+}
+###```
+
 function Process-SingleKeyInput {
     param($keyInfo)
     
     try {
-        # Tab navigation handled globally
+        # Tab navigation handled by focus manager if available
         if ($keyInfo.Key -eq [ConsoleKey]::Tab) {
-            Handle-TabNavigation -Reverse ($keyInfo.Modifiers -band [ConsoleModifiers]::Shift)
+            if (Get-Command -Name "Move-Focus" -ErrorAction SilentlyContinue) {
+                Move-Focus -Reverse ($keyInfo.Modifiers -band [ConsoleModifiers]::Shift)
+            } else {
+                # Fallback to old tab navigation
+                Handle-TabNavigation -Reverse ($keyInfo.Modifiers -band [ConsoleModifiers]::Shift)
+            }
             return
         }
         
@@ -279,8 +399,14 @@ function Process-SingleKeyInput {
             return
         }
         
+        # Get focused component from focus manager if available
+        $focusedComponent = if (Get-Command -Name "Get-FocusedComponent" -ErrorAction SilentlyContinue) {
+            Get-FocusedComponent
+        } else {
+            $script:TuiState.FocusedComponent
+        }
+        
         # Focused component gets the next chance
-        $focusedComponent = $script:TuiState.FocusedComponent
         if ($focusedComponent -and $focusedComponent.HandleInput) {
             try {
                 if (& $focusedComponent.HandleInput -self $focusedComponent -Key $keyInfo) {
@@ -373,6 +499,10 @@ function global:Start-TuiLoop {
 
 function Render-Frame {
     try {
+        if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+            Write-Log -Level Verbose -Message "Starting Z-Index frame render"
+        }
+        
         $bgColor = if (Get-Command -Name "Get-ThemeColor" -ErrorAction SilentlyContinue) {
             Get-ThemeColor "Background"
         } else {
@@ -382,34 +512,52 @@ function Render-Frame {
         # Always clear the back buffer completely
         Clear-BackBuffer -BackgroundColor $bgColor
         
-        # Render current screen
-        if ($script:TuiState.CurrentScreen -and $script:TuiState.CurrentScreen.Render) {
-            try {
-                & $script:TuiState.CurrentScreen.Render -self $script:TuiState.CurrentScreen
-            } catch {
-                Write-Warning "Screen render error: $_"
-                # Draw error message on screen
-                Write-BufferString -X 2 -Y 2 -Text "Screen render error: $_" -ForegroundColor Red
+        # 1. COLLECT all visible components into a flat list
+        $renderQueue = [System.Collections.Generic.List[hashtable]]::new()
+        
+        $collectComponents = $null
+        $collectComponents = {
+            param($component)
+            if (-not $component -or -not $component.Visible) { return }
+            $renderQueue.Add($component)
+            if ($component.Children) {
+                # Before collecting children, ensure parent has calculated their layout
+                if ($component.CalculateLayout) {
+                    try { & $component.CalculateLayout -self $component }
+                    catch { Write-Log -Level Error -Message "Layout calculation failed for '$($component.Name)'" -Data $_ }
+                }
+                foreach ($child in $component.Children) {
+                    & $collectComponents $child
+                }
+            }
+        }.GetNewClosure()
+        
+        # 2. COLLECT from screen and dialogs
+        if ($script:TuiState.CurrentScreen) { & $collectComponents -component $script:TuiState.CurrentScreen }
+        if (Get-Command -Name "Get-CurrentDialog" -ErrorAction SilentlyContinue) {
+            $currentDialog = Get-CurrentDialog
+            if ($currentDialog) { & $collectComponents -component $currentDialog }
+        }
+        
+        # 3. SORT the render queue by ZIndex
+        $sortedQueue = $renderQueue | Sort-Object -Property ZIndex
+        
+        # 4. DRAW the components in the correct order
+        foreach ($componentToRender in $sortedQueue) {
+            if ($componentToRender.Render) {
+                try { & $componentToRender.Render -self $componentToRender }
+                catch { Write-Log -Level Error -Message "Render error in component '$($componentToRender.Name)'" -Data $_ }
             }
         }
         
-        # Render dialogs on top
-        if (Get-Command -Name "Render-Dialogs" -ErrorAction SilentlyContinue) {
-            try {
-                Render-Dialogs
-            } catch {
-                Write-Warning "Dialog render error: $_"
-            }
-        }
-        
-        # Perform optimized render
+        # 5. FINALIZE the frame
         Render-BufferOptimized
         
         # Force cursor to bottom-right to avoid interference
         [Console]::SetCursorPosition($script:TuiState.BufferWidth - 1, $script:TuiState.BufferHeight - 1)
         
     } catch {
-        Write-Warning "Frame render error: $_"
+        Write-Warning "Fatal Frame render error: $_"
     }
 }
 
@@ -457,7 +605,7 @@ function Cleanup-TuiEngine {
         if (-not $env:CI -and -not $PSScriptRoot) {
             try {
                 if ([System.Environment]::UserInteractive) {
-                    [Console]::Write("`e[0m")
+                    [Console]::Write("$([char]27)[0m")
                     [Console]::CursorVisible = $true
                     [Console]::Clear()
                     [Console]::ResetColor()
@@ -501,6 +649,10 @@ function global:Push-Screen {
     param([hashtable]$Screen)
     if (-not $Screen) { return }
     
+    if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+        Write-Log -Level Debug -Message "Pushing screen: $($Screen.Name)"
+    }
+    
     try {
         # Handle focus before switching screens
         if ($script:TuiState.FocusedComponent -and $script:TuiState.FocusedComponent.OnBlur) {
@@ -543,6 +695,10 @@ function global:Push-Screen {
 
 function global:Pop-Screen {
     if ($script:TuiState.ScreenStack.Count -eq 0) { return $false }
+    
+    if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+        Write-Log -Level Debug -Message "Popping screen"
+    }
     
     try {
         # Handle focus before switching screens
@@ -640,6 +796,14 @@ function global:Write-BufferString {
         # Pragmatic check for CJK/wide characters. A full implementation is library-dependent.
         if ($char -match '[\u1100-\u11FF\u2E80-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFFEF]') {
             $currentX += 2
+            # Also fill the next cell with a space for wide characters to prevent overlap
+            if ($currentX -lt $script:TuiState.BufferWidth -and $currentX -gt 0) {
+                $script:TuiState.BackBuffer[$Y, $currentX - 1] = @{ 
+                    Char = ' '
+                    FG = $ForegroundColor
+                    BG = $BackgroundColor 
+                }
+            }
         } else {
             $currentX++
         }
@@ -665,11 +829,13 @@ function global:Write-BufferBox {
     # Title
     if ($Title) {
         $titleText = " $Title "
-        if ($titleText.Length > ($Width - 2)) { 
-            $titleText = " $($Title.Substring(0, $Width - 5))... " 
+        if ($titleText.Length -gt ($Width - 2)) {
+            # FIX: Ensure the length for Substring is never negative.
+            $maxLength = [Math]::Max(0, $Width - 5)
+            $titleText = " $($Title.Substring(0, $maxLength))... "
         }
         $titleX = $X + [Math]::Floor(($Width - $titleText.Length) / 2)
-        Write-BufferString -X $titleX -Y $Y -Text $titleText -ForegroundColor $BorderColor -BackgroundColor $BackgroundColor
+       Write-BufferString -X $titleX -Y $Y -Text $titleText -ForegroundColor $BorderColor -BackgroundColor $BackgroundColor
     }
     
     # Sides and Fill
@@ -696,7 +862,7 @@ function global:Render-BufferOptimized {
         # Build ANSI output with change detection
         for ($y = 0; $y -lt $script:TuiState.BufferHeight; $y++) {
             # Position cursor at start of line
-            $outputBuilder.Append("`e[$($y + 1);1H") | Out-Null
+            $outputBuilder.Append("$([char]27)[$($y + 1);1H") | Out-Null
             
             for ($x = 0; $x -lt $script:TuiState.BufferWidth; $x++) {
                 $backCell = $script:TuiState.BackBuffer[$y, $x]
@@ -712,14 +878,14 @@ function global:Render-BufferOptimized {
                 
                 # Position cursor if we skipped cells
                 if ($x -gt 0 -and $outputBuilder.Length -gt 0) {
-                    $outputBuilder.Append("`e[$($y + 1);$($x + 1)H") | Out-Null
+                    $outputBuilder.Append("$([char]27)[$($y + 1);$($x + 1)H") | Out-Null
                 }
                 
                 # Update colors if changed
                 if ($backCell.FG -ne $lastFG -or $backCell.BG -ne $lastBG) {
                     $fgCode = Get-AnsiColorCode $backCell.FG
                     $bgCode = Get-AnsiColorCode $backCell.BG -IsBackground $true
-                    $outputBuilder.Append("`e[${fgCode};${bgCode}m") | Out-Null
+                    $outputBuilder.Append("$([char]27)[${fgCode};${bgCode}m") | Out-Null
                     $lastFG = $backCell.FG
                     $lastBG = $backCell.BG
                 }
@@ -737,7 +903,7 @@ function global:Render-BufferOptimized {
         }
         
         # Reset ANSI formatting at the end
-        $outputBuilder.Append("`e[0m") | Out-Null
+        $outputBuilder.Append("$([char]27)[0m") | Out-Null
         
         # Write to console
         if ($outputBuilder.Length -gt 0) {
@@ -859,10 +1025,8 @@ function global:Get-NextFocusableComponent {
     function Find-FocusableComponents {
         param($Component)
         
-        if ($Component.CanFocus -ne $false -and 
-            $Component.IsEnabled -ne $false -and 
-            $Component.Disabled -ne $true -and
-            $Component.IsVisible -ne $false -and
+        # Check using the correct properties that our components actually have
+        if ($Component.IsFocusable -eq $true -and 
             $Component.Visible -ne $false) {
             $focusableComponents += $Component
         }
@@ -920,12 +1084,19 @@ function global:Get-NextFocusableComponent {
 function global:Handle-TabNavigation {
     <#
     .SYNOPSIS
-    Handles Tab key navigation between components
+    Handles Tab key navigation between components  
     #>
     param([bool]$Reverse = $false)
     
+    if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+        Write-Log -Level Debug -Message "Handle-TabNavigation called, Reverse=$Reverse"
+    }
+    
     $next = Get-NextFocusableComponent -CurrentComponent $script:TuiState.FocusedComponent -Reverse $Reverse
     if ($next) {
+        if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+            Write-Log -Level Debug -Message "Setting focus to component: Type=$($next.Type), Name=$($next.Name)"
+        }
         Set-ComponentFocus -Component $next
     }
 }

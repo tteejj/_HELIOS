@@ -1,13 +1,20 @@
 # Task Management Screen - Helios Service-Based Version
 # Uses the new service architecture with app store, navigation, and layout panels
 
+<<<<<<< Updated upstream
 function global:Get-TaskManagementScreen {
+=======
+function Get-TaskManagementScreen {
+    param([hashtable]$Services)
+>>>>>>> Stashed changes
     $screen = @{
         Name = "TaskScreen"
         Components = @{}
         _subscriptions = @()
         _formVisible = $false
         _editingTaskId = $null
+        Visible = $true  # Screen must be visible for Z-Index renderer
+        ZIndex = 0  # Base layer for screens
         
         Init = {
             param($self)
@@ -630,12 +637,16 @@ function global:Get-TaskManagementScreen {
         }
     }
     
+    # Store the services on the screen object before returning
+    $screen._services = $Services
+    
     return $screen
 }
 
 # Alias for backward compatibility
-function global:Get-TaskScreen {
-    return Get-TaskManagementScreen
+function Get-TaskScreen {
+    param([hashtable]$Services)
+    return Get-TaskManagementScreen -Services $Services
 }
 
 Export-ModuleMember -Function Get-TaskManagementScreen, Get-TaskScreen

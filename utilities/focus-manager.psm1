@@ -321,7 +321,14 @@ function Register-ScreenForFocus {
         }
     }.GetNewClosure()
     
-    # Start from screen components
+    # Start from screen components and children
+    if ($Screen.Children) {
+        foreach ($comp in $Screen.Children) {
+            & $FindFocusable -component $comp
+        }
+    }
+    
+    # Also check legacy Components collection
     if ($Screen.Components) {
         foreach ($comp in $Screen.Components.Values) {
             & $FindFocusable -component $comp

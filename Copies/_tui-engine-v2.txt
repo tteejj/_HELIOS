@@ -500,7 +500,7 @@ function global:Start-TuiLoop {
 function Render-Frame {
     try {
         if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
-            Write-Log -Level Verbose -Message "Starting frame render"
+            Write-Log -Level Verbose -Message "Starting Z-Index frame render"
         }
         
         $bgColor = if (Get-Command -Name "Get-ThemeColor" -ErrorAction SilentlyContinue) {
@@ -512,37 +512,52 @@ function Render-Frame {
         # Always clear the back buffer completely
         Clear-BackBuffer -BackgroundColor $bgColor
         
-        # Render current screen
-        if ($script:TuiState.CurrentScreen -and $script:TuiState.CurrentScreen.Render) {
-            try {
-                & $script:TuiState.CurrentScreen.Render -self $script:TuiState.CurrentScreen
-            } catch {
-                $errorMessage = "Screen render error: $($_.Exception.Message)"
-                if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
-                    Write-Log -Level Error -Message $errorMessage -Data $_
+        # 1. COLLECT all visible components into a flat list
+        $renderQueue = [System.Collections.Generic.List[hashtable]]::new()
+        
+        $collectComponents = $null
+        $collectComponents = {
+            param($component)
+            if (-not $component -or -not $component.Visible) { return }
+            $renderQueue.Add($component)
+            if ($component.Children) {
+                # Before collecting children, ensure parent has calculated their layout
+                if ($component.CalculateLayout) {
+                    try { & $component.CalculateLayout -self $component }
+                    catch { Write-Log -Level Error -Message "Layout calculation failed for '$($component.Name)'" -Data $_ }
                 }
-                # Draw error message on screen
-                Write-BufferString -X 2 -Y 2 -Text $errorMessage -ForegroundColor Red
+                foreach ($child in $component.Children) {
+                    & $collectComponents $child
+                }
+            }
+        }.GetNewClosure()
+        
+        # 2. COLLECT from screen and dialogs
+        if ($script:TuiState.CurrentScreen) { & $collectComponents -component $script:TuiState.CurrentScreen }
+        if (Get-Command -Name "Get-CurrentDialog" -ErrorAction SilentlyContinue) {
+            $currentDialog = Get-CurrentDialog
+            if ($currentDialog) { & $collectComponents -component $currentDialog }
+        }
+        
+        # 3. SORT the render queue by ZIndex
+        $sortedQueue = $renderQueue | Sort-Object -Property ZIndex
+        
+        # 4. DRAW the components in the correct order
+        foreach ($componentToRender in $sortedQueue) {
+            if ($componentToRender.Render) {
+                try { & $componentToRender.Render -self $componentToRender }
+                catch { Write-Log -Level Error -Message "Render error in component '$($componentToRender.Name)'" -Data $_ }
             }
         }
         
-        # Render dialogs on top
-        if (Get-Command -Name "Render-Dialogs" -ErrorAction SilentlyContinue) {
-            try {
-                Render-Dialogs
-            } catch {
-                Write-Warning "Dialog render error: $_"
-            }
-        }
-        
-        # Perform optimized render
+        # 5. FINALIZE the frame
         Render-BufferOptimized
         
         # Force cursor to bottom-right to avoid interference
         [Console]::SetCursorPosition($script:TuiState.BufferWidth - 1, $script:TuiState.BufferHeight - 1)
         
     } catch {
-        Write-Warning "Frame render error: $_"
+        Write-Warning "Fatal Frame render error: $_"
     }
 }
 

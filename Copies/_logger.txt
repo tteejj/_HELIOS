@@ -63,7 +63,14 @@ function global:Write-Log {
             $dataStr = if ($Data -is [Exception]) {
                 "`n  Exception: $($Data.Message)`n  StackTrace: $($Data.StackTrace)"
             } else {
-                "`n  Data: $($Data | ConvertTo-Json -Compress -Depth 2)"
+                try {
+                    # Try to serialize with increased depth and error handling
+                    $json = $Data | ConvertTo-Json -Compress -Depth 5 -WarningAction SilentlyContinue -ErrorAction SilentlyContinue
+                    "`n  Data: $json"
+                } catch {
+                    # If serialization fails, use a simple string representation
+                    "`n  Data: $($Data.ToString())"
+                }
             }
             $logEntry += $dataStr
         }

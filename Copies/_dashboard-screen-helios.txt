@@ -1,11 +1,18 @@
 # Dashboard Screen - Helios Service-Based Version
 # Uses the new service architecture with app store and navigation
 
+<<<<<<< Updated upstream
 function global:Get-DashboardScreen {
+=======
+function Get-DashboardScreen {
+    param([hashtable]$Services)
+>>>>>>> Stashed changes
     $screen = @{
         Name = "DashboardScreen"
         Components = @{}
         _subscriptions = @()
+        Visible = $true  # Screen must be visible for Z-Index renderer
+        ZIndex = 0  # Base layer for screens
         
         Init = {
             param($self)
@@ -369,11 +376,25 @@ function global:Get-DashboardScreen {
                     Set-ComponentFocus -Component $quickActions
                 }
                 
-                # Set up auto-refresh timer and store the subscription for cleanup
+                # Set up auto-refresh timer with proper service access via MessageData
                 $self._refreshTimer = [System.Timers.Timer]::new(5000)  # 5 seconds
+<<<<<<< Updated upstream
                 $self._timerSubscription = Register-ObjectEvent -InputObject $self._refreshTimer -EventName Elapsed -Action {
                     if ($global:Services -and $global:Services.Store) {
                         & $global:Services.Store.Dispatch -self $global:Services.Store -actionName "DASHBOARD_REFRESH"
+=======
+                $self._timerSubscription = Register-ObjectEvent -InputObject $self._refreshTimer -EventName Elapsed -MessageData $services -Action {
+                    # Access services via $Event.MessageData (proper PowerShell pattern)
+                    $passedServices = $Event.MessageData
+                    if ($passedServices -and $passedServices.Store) {
+                        try {
+                            & $passedServices.Store.Dispatch -self $passedServices.Store -actionName "DASHBOARD_REFRESH"
+                        } catch {
+                            Write-Log -Level Error -Message "Timer DASHBOARD_REFRESH failed: $_"
+                        }
+                    } else {
+                        Write-Log -Level Error -Message "Timer for DASHBOARD_REFRESH: services not available via MessageData"
+>>>>>>> Stashed changes
                     }
                 }
                 $self._refreshTimer.Start()
@@ -522,6 +543,9 @@ function global:Get-DashboardScreen {
             Request-TuiRefresh
         }
     }
+    
+    # Store the services on the screen object before returning
+    $screen._services = $Services
     
     return $screen
 }
