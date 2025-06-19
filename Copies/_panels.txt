@@ -290,26 +290,25 @@ function global:New-TuiStackPanel {
             Write-BufferBox -X $self.X -Y $self.Y -Width $self.Width -Height $self.Height -BorderColor $borderColor -Title $self.Title
         }
         
-        # Calculate and apply layout
-        $layout = & $self.CalculateLayout -self $self
+        # FIX: Ensure layout is calculated before Z-Index renderer processes children
+        & $self.CalculateLayout -self $self
         
-        foreach ($childLayout in $layout.Children) {
-            $child = $childLayout.Component
-            
-            # Apply calculated position
-            $child.X = $childLayout.X
-            $child.Y = $childLayout.Y
-            
-            # Apply calculated size if child supports it
-            if ($childLayout.Width -ne $child.Width -and $child.PSObject.Properties['Width'].IsSettable) {
-                $child.Width = $childLayout.Width
-            }
-            if ($childLayout.Height -ne $child.Height -and $child.PSObject.Properties['Height'].IsSettable) {
-                $child.Height = $childLayout.Height
-            }
-            
-            # NOTE: Child rendering is now handled by the Z-Index renderer
-        }
+        # Child positions are now applied in CalculateLayout, and children are rendered by the Z-Index renderer.
+        # The loop below is no longer needed here as it was redundant.
+        # foreach ($childLayout in $layout.Children) {
+        #     $child = $childLayout.Component
+        #     # Apply calculated position
+        #     $child.X = $childLayout.X
+        #     $child.Y = $childLayout.Y
+        #     # Apply calculated size if child supports it
+        #     if ($childLayout.Width -ne $child.Width -and $child.PSObject.Properties['Width'].IsSettable) {
+        #         $child.Width = $childLayout.Width
+        #     }
+        #     if ($childLayout.Height -ne $child.Height -and $child.PSObject.Properties['Height'].IsSettable) {
+        #         $child.Height = $childLayout.Height
+        #     }
+        #     # NOTE: Child rendering is now handled by the Z-Index renderer
+        # }
     }
     
     return $panel
@@ -503,10 +502,7 @@ function global:New-TuiGridPanel {
         param($self)
         
         # Debug: Log panel state for debugging
-        if (-not (Get-Command Write-Log -ErrorAction SilentlyContinue)) {
-            # If Write-Log not available, use Write-Host for debugging
-            Write-Host "[DEBUG] GridPanel Render: Title='$($self.Title)', Visible=$($self.Visible), Pos=($($self.X),$($self.Y)), Size=$($self.Width)x$($self.Height), Children=$($self.Children.Count)" -ForegroundColor Yellow
-        } else {
+        if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
             Write-Log -Level Debug -Message "GridPanel Render called: Title='$($self.Title)', Visible=$($self.Visible), Position=($($self.X),$($self.Y)), Size=$($self.Width)x$($self.Height), Children=$($self.Children.Count)"
         }
         
@@ -528,7 +524,7 @@ function global:New-TuiGridPanel {
             Write-BufferBox -X $self.X -Y $self.Y -Width $self.Width -Height $self.Height -BorderColor $borderColor -Title $self.Title
         }
         
-        # Calculate layout
+        # FIX: Calculate layout to ensure child positions are set
         $layout = & $self.CalculateLayout -self $self
         Write-Log -Level Debug -Message "GridPanel '$($self.Title)' layout calculated: $($layout.Children.Count) children to render"
         

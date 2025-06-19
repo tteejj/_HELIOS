@@ -120,20 +120,8 @@ function global:New-TuiDataTable {
             # CRITICAL: Check if component is visible
             if ($self.Visible -eq $false) { return }
             
-            # Debug: Check data state for Quick Actions
-            if ($self.Title -eq "Quick Actions") {
-                Write-Log -Level Debug -Message "Rendering Quick Actions DataTable:"
-                Write-Log -Level Debug -Message "  Data count: $($self.Data.Count)"
-                Write-Log -Level Debug -Message "  ProcessedData count: $($self.ProcessedData.Count)"
-                if ($self.ProcessedData.Count -gt 0) {
-                    Write-Log -Level Debug -Message "  First row: $($self.ProcessedData[0] | ConvertTo-Json -Compress)"
-                }
-                $colInfo = $self.Columns | ForEach-Object { "$($_.Name):$($_.CalculatedWidth)" }
-                Write-Log -Level Debug -Message "  Columns: $($colInfo -join ', ')"
-            }
-            
-            # Process data first
-            & $self.ProcessData -self $self
+            # NOTE: ProcessData is now called by external code when data changes
+            # This prevents unnecessary recalculation on every render frame
             
             # Only draw border if ShowBorder is true
             $contentX = $self.X

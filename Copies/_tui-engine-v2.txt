@@ -537,7 +537,7 @@ function Render-Frame {
         # Define collectComponents as a scriptblock variable that can reference itself
         $script:collectComponents = {
             param($component)
-            if (-not $component -or -not $component.Visible) { return }
+            if (-not $component -or $component.Visible -eq $false) { return }
             
             # Add the component itself to the queue
             $renderQueue.Add($component)
@@ -1688,7 +1688,8 @@ $exportFunctions = @(
     'Register-Component', 'Set-ComponentFocus', 'Clear-ComponentFocus', 
     'Get-NextFocusableComponent', 'Handle-TabNavigation', 
     'New-Component', 'Apply-Layout',
-    'Get-WordWrappedLines', 'Subscribe-TuiEvent'
+    'Get-WordWrappedLines', 'Subscribe-TuiEvent',
+    'Render-Frame', 'Initialize-TuiEngine'
 )
 
 # Only export Get-ThemeColor if we defined it

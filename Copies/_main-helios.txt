@@ -289,8 +289,11 @@ function Initialize-PMCServices {
         & $services.Store.RegisterAction -self $services.Store -actionName "TASK_CREATE" -scriptBlock {
             param($Context, $Payload)
             if ($global:Data -and $Payload.Title) {
-                if (-not $global:Data.tasks) { $global:Data.tasks = @() }
+                # Get current state
+                $state = $Context.GetState()
+                $currentTasks = if ($state.tasks) { @($state.tasks) } else { @() }
                 
+                # Create new task
                 $newTask = @{
                     id = [Guid]::NewGuid().ToString()
                     title = $Payload.Title
@@ -301,8 +304,18 @@ function Initialize-PMCServices {
                     updated_at = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
                 }
                 
-                $global:Data.tasks += $newTask
+                # Create new array with the new task
+                $newTasks = $currentTasks + $newTask
+                
+                # Update store state
+                $Context.UpdateState(@{ tasks = $newTasks })
+                
+                # Update global data for persistence
+                if (-not $global:Data.tasks) { $global:Data.tasks = @() }
+                $global:Data.tasks = $newTasks
                 Save-UnifiedData
+                
+                # Refresh the display
                 & $Context.Dispatch -actionName "TASKS_REFRESH"
             }
         }
@@ -310,11 +323,39 @@ function Initialize-PMCServices {
         & $services.Store.RegisterAction -self $services.Store -actionName "TASK_TOGGLE_STATUS" -scriptBlock {
             param($Context, $Payload)
             if ($global:Data -and $global:Data.tasks -and $Payload.TaskId) {
-                $task = $global:Data.tasks | Where-Object { $_.id -eq $Payload.TaskId }
-                if ($task) {
-                    $task.completed = -not $task.completed
-                    $task.updated_at = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+                # Get current state
+                $state = $Context.GetState()
+                $tasks = if ($state.tasks) { @($state.tasks) } else { @() }
+                
+                # Create new array with updated task
+                $updatedTasks = @()
+                $found = $false
+                
+                foreach ($task in $tasks) {
+                    if ($task.id -eq $Payload.TaskId) {
+                        # Create a copy of the task with toggled status
+                        $updatedTask = @{}
+                        foreach ($key in $task.Keys) {
+                            $updatedTask[$key] = $task[$key]
+                        }
+                        $updatedTask.completed = -not $updatedTask.completed
+                        $updatedTask.updated_at = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+                        $updatedTasks += $updatedTask
+                        $found = $true
+                    } else {
+                        $updatedTasks += $task
+                    }
+                }
+                
+                if ($found) {
+                    # Update store state
+                    $Context.UpdateState(@{ tasks = $updatedTasks })
+                    
+                    # Update global data for persistence
+                    $global:Data.tasks = $updatedTasks
                     Save-UnifiedData
+                    
+                    # Refresh the display
                     & $Context.Dispatch -actionName "TASKS_REFRESH"
                 }
             }
@@ -323,8 +364,21 @@ function Initialize-PMCServices {
         & $services.Store.RegisterAction -self $services.Store -actionName "TASK_DELETE" -scriptBlock {
             param($Context, $Payload)
             if ($global:Data -and $global:Data.tasks -and $Payload.TaskId) {
-                $global:Data.tasks = $global:Data.tasks | Where-Object { $_.id -ne $Payload.TaskId }
+                # Get current state
+                $state = $Context.GetState()
+                $currentTasks = if ($state.tasks) { @($state.tasks) } else { @() }
+                
+                # Create new array without the deleted task
+                $newTasks = @($currentTasks | Where-Object { $_.id -ne $Payload.TaskId })
+                
+                # Update store state
+                $Context.UpdateState(@{ tasks = $newTasks })
+                
+                # Update global data for persistence
+                $global:Data.tasks = $newTasks
                 Save-UnifiedData
+                
+                # Refresh the display
                 & $Context.Dispatch -actionName "TASKS_REFRESH"
             }
         }

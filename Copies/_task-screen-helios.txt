@@ -1,4 +1,3 @@
-
 # Task Management Screen - Helios Service-Based Version (CORRECTED)
 # Conforms to Z-Index rendering and proper service injection patterns
 
@@ -21,16 +20,25 @@ function Get-TaskManagementScreen {
             Write-Log -Level Debug -Message "Task screen Init started (Helios version)"
             
             try {
-                # Store services passed to Init
-                if ($services) {
-                    $self._services = $services
-                } else {
-                    $services = $self._services
-                }
-                
+                # FIX: More robust services handling
                 if (-not $services) {
-                    Write-Log -Level Error -Message "Services not available for task screen"
-                    return
+                    # Try to get from self
+                    if ($self._services) {
+                        $services = $self._services
+                    }
+                    # Try to get from global as fallback
+                    elseif ($global:Services) {
+                        $services = $global:Services
+                        $self._services = $services
+                    }
+                    else {
+                        Write-Log -Level Error -Message "Services not available for task screen - no fallback found"
+                        return
+                    }
+                }
+                else {
+                    # Store the passed services
+                    $self._services = $services
                 }
                 
                 # Create root layout
@@ -74,7 +82,7 @@ function Get-TaskManagementScreen {
                 
                 $self._taskTable = $taskTable
                 
-                # Create form panel (initially hidden) and add it to the screen's children
+                # Create form panel (initially hidden)
                 & $self._CreateFormPanel -self $self
                 if ($self.Components.formPanel) {
                     $self.Children += $self.Components.formPanel # FIX: Add formPanel to Children array.

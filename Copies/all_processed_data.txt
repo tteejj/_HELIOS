@@ -289,8 +289,11 @@ function Initialize-PMCServices {
         & $services.Store.RegisterAction -self $services.Store -actionName "TASK_CREATE" -scriptBlock {
             param($Context, $Payload)
             if ($global:Data -and $Payload.Title) {
-                if (-not $global:Data.tasks) { $global:Data.tasks = @() }
+                # Get current state
+                $state = $Context.GetState()
+                $currentTasks = if ($state.tasks) { @($state.tasks) } else { @() }
                 
+                # Create new task
                 $newTask = @{
                     id = [Guid]::NewGuid().ToString()
                     title = $Payload.Title
@@ -301,8 +304,18 @@ function Initialize-PMCServices {
                     updated_at = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
                 }
                 
-                $global:Data.tasks += $newTask
+                # Create new array with the new task
+                $newTasks = $currentTasks + $newTask
+                
+                # Update store state
+                $Context.UpdateState(@{ tasks = $newTasks })
+                
+                # Update global data for persistence
+                if (-not $global:Data.tasks) { $global:Data.tasks = @() }
+                $global:Data.tasks = $newTasks
                 Save-UnifiedData
+                
+                # Refresh the display
                 & $Context.Dispatch -actionName "TASKS_REFRESH"
             }
         }
@@ -310,11 +323,39 @@ function Initialize-PMCServices {
         & $services.Store.RegisterAction -self $services.Store -actionName "TASK_TOGGLE_STATUS" -scriptBlock {
             param($Context, $Payload)
             if ($global:Data -and $global:Data.tasks -and $Payload.TaskId) {
-                $task = $global:Data.tasks | Where-Object { $_.id -eq $Payload.TaskId }
-                if ($task) {
-                    $task.completed = -not $task.completed
-                    $task.updated_at = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+                # Get current state
+                $state = $Context.GetState()
+                $tasks = if ($state.tasks) { @($state.tasks) } else { @() }
+                
+                # Create new array with updated task
+                $updatedTasks = @()
+                $found = $false
+                
+                foreach ($task in $tasks) {
+                    if ($task.id -eq $Payload.TaskId) {
+                        # Create a copy of the task with toggled status
+                        $updatedTask = @{}
+                        foreach ($key in $task.Keys) {
+                            $updatedTask[$key] = $task[$key]
+                        }
+                        $updatedTask.completed = -not $updatedTask.completed
+                        $updatedTask.updated_at = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+                        $updatedTasks += $updatedTask
+                        $found = $true
+                    } else {
+                        $updatedTasks += $task
+                    }
+                }
+                
+                if ($found) {
+                    # Update store state
+                    $Context.UpdateState(@{ tasks = $updatedTasks })
+                    
+                    # Update global data for persistence
+                    $global:Data.tasks = $updatedTasks
                     Save-UnifiedData
+                    
+                    # Refresh the display
                     & $Context.Dispatch -actionName "TASKS_REFRESH"
                 }
             }
@@ -323,8 +364,21 @@ function Initialize-PMCServices {
         & $services.Store.RegisterAction -self $services.Store -actionName "TASK_DELETE" -scriptBlock {
             param($Context, $Payload)
             if ($global:Data -and $global:Data.tasks -and $Payload.TaskId) {
-                $global:Data.tasks = $global:Data.tasks | Where-Object { $_.id -ne $Payload.TaskId }
+                # Get current state
+                $state = $Context.GetState()
+                $currentTasks = if ($state.tasks) { @($state.tasks) } else { @() }
+                
+                # Create new array without the deleted task
+                $newTasks = @($currentTasks | Where-Object { $_.id -ne $Payload.TaskId })
+                
+                # Update store state
+                $Context.UpdateState(@{ tasks = $newTasks })
+                
+                # Update global data for persistence
+                $global:Data.tasks = $newTasks
                 Save-UnifiedData
+                
+                # Refresh the display
                 & $Context.Dispatch -actionName "TASKS_REFRESH"
             }
         }
@@ -629,20 +683,8 @@ function global:New-TuiDataTable {
             # CRITICAL: Check if component is visible
             if ($self.Visible -eq $false) { return }
             
-            # Debug: Check data state for Quick Actions
-            if ($self.Title -eq "Quick Actions") {
-                Write-Log -Level Debug -Message "Rendering Quick Actions DataTable:"
-                Write-Log -Level Debug -Message "  Data count: $($self.Data.Count)"
-                Write-Log -Level Debug -Message "  ProcessedData count: $($self.ProcessedData.Count)"
-                if ($self.ProcessedData.Count -gt 0) {
-                    Write-Log -Level Debug -Message "  First row: $($self.ProcessedData[0] | ConvertTo-Json -Compress)"
-                }
-                $colInfo = $self.Columns | ForEach-Object { "$($_.Name):$($_.CalculatedWidth)" }
-                Write-Log -Level Debug -Message "  Columns: $($colInfo -join ', ')"
-            }
-            
-            # Process data first
-            & $self.ProcessData -self $self
+            # NOTE: ProcessData is now called by external code when data changes
+            # This prevents unnecessary recalculation on every render frame
             
             # Only draw border if ShowBorder is true
             $contentX = $self.X
@@ -3877,26 +3919,25 @@ function global:New-TuiStackPanel {
             Write-BufferBox -X $self.X -Y $self.Y -Width $self.Width -Height $self.Height -BorderColor $borderColor -Title $self.Title
         }
         
-        # Calculate and apply layout
-        $layout = & $self.CalculateLayout -self $self
+        # FIX: Ensure layout is calculated before Z-Index renderer processes children
+        & $self.CalculateLayout -self $self
         
-        foreach ($childLayout in $layout.Children) {
-            $child = $childLayout.Component
-            
-            # Apply calculated position
-            $child.X = $childLayout.X
-            $child.Y = $childLayout.Y
-            
-            # Apply calculated size if child supports it
-            if ($childLayout.Width -ne $child.Width -and $child.PSObject.Properties['Width'].IsSettable) {
-                $child.Width = $childLayout.Width
-            }
-            if ($childLayout.Height -ne $child.Height -and $child.PSObject.Properties['Height'].IsSettable) {
-                $child.Height = $childLayout.Height
-            }
-            
-            # NOTE: Child rendering is now handled by the Z-Index renderer
-        }
+        # Child positions are now applied in CalculateLayout, and children are rendered by the Z-Index renderer.
+        # The loop below is no longer needed here as it was redundant.
+        # foreach ($childLayout in $layout.Children) {
+        #     $child = $childLayout.Component
+        #     # Apply calculated position
+        #     $child.X = $childLayout.X
+        #     $child.Y = $childLayout.Y
+        #     # Apply calculated size if child supports it
+        #     if ($childLayout.Width -ne $child.Width -and $child.PSObject.Properties['Width'].IsSettable) {
+        #         $child.Width = $childLayout.Width
+        #     }
+        #     if ($childLayout.Height -ne $child.Height -and $child.PSObject.Properties['Height'].IsSettable) {
+        #         $child.Height = $childLayout.Height
+        #     }
+        #     # NOTE: Child rendering is now handled by the Z-Index renderer
+        # }
     }
     
     return $panel
@@ -4090,10 +4131,7 @@ function global:New-TuiGridPanel {
         param($self)
         
         # Debug: Log panel state for debugging
-        if (-not (Get-Command Write-Log -ErrorAction SilentlyContinue)) {
-            # If Write-Log not available, use Write-Host for debugging
-            Write-Host "[DEBUG] GridPanel Render: Title='$($self.Title)', Visible=$($self.Visible), Pos=($($self.X),$($self.Y)), Size=$($self.Width)x$($self.Height), Children=$($self.Children.Count)" -ForegroundColor Yellow
-        } else {
+        if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
             Write-Log -Level Debug -Message "GridPanel Render called: Title='$($self.Title)', Visible=$($self.Visible), Position=($($self.X),$($self.Y)), Size=$($self.Width)x$($self.Height), Children=$($self.Children.Count)"
         }
         
@@ -4115,7 +4153,7 @@ function global:New-TuiGridPanel {
             Write-BufferBox -X $self.X -Y $self.Y -Width $self.Width -Height $self.Height -BorderColor $borderColor -Title $self.Title
         }
         
-        # Calculate layout
+        # FIX: Calculate layout to ensure child positions are set
         $layout = & $self.CalculateLayout -self $self
         Write-Log -Level Debug -Message "GridPanel '$($self.Title)' layout calculated: $($layout.Children.Count) children to render"
         
@@ -5304,7 +5342,7 @@ function Render-Frame {
         # Define collectComponents as a scriptblock variable that can reference itself
         $script:collectComponents = {
             param($component)
-            if (-not $component -or -not $component.Visible) { return }
+            if (-not $component -or $component.Visible -eq $false) { return }
             
             # Add the component itself to the queue
             $renderQueue.Add($component)
@@ -6455,7 +6493,8 @@ $exportFunctions = @(
     'Register-Component', 'Set-ComponentFocus', 'Clear-ComponentFocus', 
     'Get-NextFocusableComponent', 'Handle-TabNavigation', 
     'New-Component', 'Apply-Layout',
-    'Get-WordWrappedLines', 'Subscribe-TuiEvent'
+    'Get-WordWrappedLines', 'Subscribe-TuiEvent',
+    'Render-Frame', 'Initialize-TuiEngine'
 )
 
 # Only export Get-ThemeColor if we defined it
@@ -8865,7 +8904,6 @@ Export-ModuleMember -Function @(
     'Get-WeekDates',
     'Get-WeekStart'
 ) -Variable @('Data')
-
 # Task Management Screen - Helios Service-Based Version (CORRECTED)
 # Conforms to Z-Index rendering and proper service injection patterns
 
@@ -8888,16 +8926,25 @@ function Get-TaskManagementScreen {
             Write-Log -Level Debug -Message "Task screen Init started (Helios version)"
             
             try {
-                # Store services passed to Init
-                if ($services) {
-                    $self._services = $services
-                } else {
-                    $services = $self._services
-                }
-                
+                # FIX: More robust services handling
                 if (-not $services) {
-                    Write-Log -Level Error -Message "Services not available for task screen"
-                    return
+                    # Try to get from self
+                    if ($self._services) {
+                        $services = $self._services
+                    }
+                    # Try to get from global as fallback
+                    elseif ($global:Services) {
+                        $services = $global:Services
+                        $self._services = $services
+                    }
+                    else {
+                        Write-Log -Level Error -Message "Services not available for task screen - no fallback found"
+                        return
+                    }
+                }
+                else {
+                    # Store the passed services
+                    $self._services = $services
                 }
                 
                 # Create root layout
@@ -8941,7 +8988,7 @@ function Get-TaskManagementScreen {
                 
                 $self._taskTable = $taskTable
                 
-                # Create form panel (initially hidden) and add it to the screen's children
+                # Create form panel (initially hidden)
                 & $self._CreateFormPanel -self $self
                 if ($self.Components.formPanel) {
                     $self.Children += $self.Components.formPanel # FIX: Add formPanel to Children array.
@@ -9148,16 +9195,25 @@ function Get-DashboardScreen {
             Write-Log -Level Debug -Message "Dashboard Init started (Helios version)"
             
             try {
-                # Store services passed to Init
-                if ($services) {
-                    $self._services = $services
-                } else {
-                    $services = $self._services
-                }
-                
+                # FIX: More robust services handling
                 if (-not $services) {
-                    Write-Log -Level Error -Message "Services not available for dashboard screen"
-                    return
+                    # Try to get from self
+                    if ($self._services) {
+                        $services = $self._services
+                    }
+                    # Try to get from global as fallback
+                    elseif ($global:Services) {
+                        $services = $global:Services
+                        $self._services = $services
+                    }
+                    else {
+                        Write-Log -Level Error -Message "Services not available for dashboard screen - no fallback found"
+                        return
+                    }
+                }
+                else {
+                    # Store the passed services
+                    $self._services = $services
                 }
                 
                 # Create the main grid layout
@@ -9183,6 +9239,9 @@ function Get-DashboardScreen {
                     Padding = 1
                 }
                 
+                # Capture services in local variable for use in handler
+                $navigationServices = $services
+                
                 $quickActions = New-TuiDataTable -Props @{
                     Name = "quickActions"
                     IsFocusable = $true
@@ -9195,9 +9254,12 @@ function Get-DashboardScreen {
                         param($SelectedData, $SelectedIndex)
                         $routes = @("/time-entry", "/timer/start", "/tasks", "/projects", "/reports", "/settings")
                         if ($SelectedIndex -ge 0 -and $SelectedIndex -lt $routes.Count) {
-                            # Access services from the screen instance
-                            $screenServices = $self._services
-                            & $screenServices.Navigation.GoTo -self $screenServices.Navigation -Path $routes[$SelectedIndex] -Services $screenServices
+                            # Use captured services from local variable
+                            if ($navigationServices -and $navigationServices.Navigation) {
+                                & $navigationServices.Navigation.GoTo -self $navigationServices.Navigation -Path $routes[$SelectedIndex] -Services $navigationServices
+                            } else {
+                                Write-Log -Level Error -Message "Navigation services not available in OnRowSelect handler"
+                            }
                         }
                     }
                 }

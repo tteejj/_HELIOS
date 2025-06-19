@@ -1,0 +1,710 @@
+  Debug Log Viewer            Filter: All         Auto-scroll: True                                                                                                                                ┌─────────────────────────────────────────────────────────────────────────────────────  Log Entries (10)  ─────────────────────────────────────────────────────────────────────────────────────┐  │2025-06-18 21:55:39.479[Info   ] Logger initialized at C:\Users\jhnhe\AppData\Local\Temp\PMCTerminal\pmc_terminal_2025-06-18.log                                                              │  │2025-06-18 21:55:39.487[Info   ] PMC Terminal v4.2 'Helios' startup initiated                                                                                                                 │  │2025-06-18 21:55:39.495[Info   ] Loaded modules: logger, event-system, data-manager, theme-manager, tui-framework, tui-engine-v2, dialog-system, app-store, navigation, keybindings, layout-pane │2025-06-18 21:55:39.505[Info   ] Initializing TUI Engine: 194x46                                                                                                                              │  │2025-06-18 21:55:39.645[Info   ] TUI Engine initialized successfully                                                                                                                          │  │2025-06-18 21:55:39.658[Info   ] Focus Manager initialized                                                                                                                                    │  │2025-06-18 21:55:39.787[Error  ] Failed to create subscriptions: You cannot call a method on a null-valued expression.                                                                        │  │2025-06-18 21:55:39.798[Error  ] Failed to load dashboard data: Method invocation failed because [System.Collections.Hashtable] does not contain a method named 'UpdateState'.                │  │2025-06-18 21:55:39.853[Info   ] Navigated to: /dashboard                                                                                                                                     │  │2025-06-18 21:55:42.307[Info   ] Navigated to: /log                                                                                                                                           │  │                                                                                                      
+
+PS C:\Users\jhnhe\Documents\GitHub\_HELIOS> ./test-dashboard-fix.ps1
+Testing Dashboard Screen Fix...
+Navigating to dashboard...
+True
+True
+True
+
+Checking store state...
+QuickActions count: 0
+Today hours:
+Active tasks:
+
+Forcing dashboard refresh...
+
+Name                           Value
+----                           -----
+Success                        False
+Error                          Action name cannot be empty
+Success                        False
+Error                          Action name cannot be empty
+Success                        False
+Error                          Action name cannot be empty
+Success                        True
+
+Test complete. Check the dashboard display and log for errors.
+
+PS C:\Users\jhnhe\Documents\GitHub\_HELIOS> ./diagnose-scope-issues.ps1
+[Info] Starting Helios Scope Issue Diagnostic...
+[Info] Scanning directory: .
+[Info] Found 74 files to analyze
+
+
+========== DIAGNOSTIC REPORT ==========
+
+[CRITICAL] Local Variables in Handlers/Subscriptions:
+These variables may not be accessible when the handler executes:
+
+  File: advanced-data-components.psm1, Line: 43
+  Variable: $value used in OnRowSelect handler
+  Code: OnRowSelect = $Props.OnRowSelect
+        OnSelectionChange = $Props.OnSelectionChange
+
+  ...
+  FIX: Store as $self._value before creating the handler
+
+  File: advanced-data-components.psm1, Line: 557
+  Variable: $selectedData used in OnRowSelect handler
+  Code: OnRowSelect -and $self.ProcessedData.Count -gt 0) {
+                        $selectedData = if ($se...
+  FIX: Store as $self._selectedData before creating the handler
+
+  File: advanced-data-components.psm1, Line: 563
+  Variable: $true used in OnRowSelect handler
+  Code: OnRowSelect -SelectedData $selectedData -SelectedIndex $self.SelectedRow
+                    }
+   ...
+  FIX: Store as $self._true before creating the handler
+
+  File: advanced-input-components.psm1, Line: 184
+  Variable: $date used in OnChange handler
+  Code: OnChange) {
+                    & $self.OnChange -NewValue $date
+                }...
+  FIX: Store as $self._date before creating the handler
+
+  File: advanced-input-components.psm1, Line: 393
+  Variable: $selected used in OnChange handler
+  Code: OnChange) {
+                            & $self.OnChange -NewValue $selected.Value -Option $selected...
+  FIX: Store as $self._selected before creating the handler
+
+  File: advanced-input-components.psm1, Line: 669
+  Variable: $newValue used in OnChange handler
+  Code: OnChange) {
+                    & $this.OnChange -NewValue $newValue
+                }...
+  FIX: Store as $self._newValue before creating the handler
+
+  File: tui-components.psm1, Line: 90
+  Variable: $Props used in OnClick handler
+  Code: OnClick
+                }
+                Request-TuiRefresh
+                return $true
+      ...
+  FIX: Store as $self._Props before creating the handler
+
+  File: tui-components.psm1, Line: 288
+  Variable: $Props used in OnChange handler
+  Code: OnChange -NewValue $self.Checked
+                }
+                Request-TuiRefresh
+          ...
+  FIX: Store as $self._Props before creating the handler
+
+  File: tui-components.psm1, Line: 395
+  Variable: $selected used in OnChange handler
+  Code: OnChange) {
+                                & $self.OnChange -NewValue $selected.Value
+         ...
+  FIX: Store as $self._selected before creating the handler
+
+  File: tui-components.psm1, Line: 723
+  Variable: $Props used in OnChange handler
+  Code: OnChange -NewValue $self.Text
+            }
+            Request-TuiRefresh
+            return $t...
+  FIX: Store as $self._Props before creating the handler
+
+  File: tui-components.psm1, Line: 804
+  Variable: $date used in OnChange handler
+  Code: OnChange) {
+                    & $self.OnChange -NewValue $date
+                }...
+  FIX: Store as $self._date before creating the handler
+
+  File: tui-components.psm1, Line: 1057
+  Variable: $colName used in OnRowSelect handler
+  Code: OnRowSelect -Row $self.Rows[$self.SelectedRow] -Index $self.SelectedRow
+                    }
+  ...
+  FIX: Store as $self._colName before creating the handler
+
+  File: tui-engine-v2-backup.psm1, Line: 1052
+  Variable: $handlerId used in Subscribe handler
+  Code: Subscribe-TuiEvent {
+    param($EventName, $Handler)
+    if (Get-Command -Name "Subscribe-Event" -Er...
+  FIX: Store as $self._handlerId before creating the handler
+
+  File: data-manager.psm1, Line: 369
+  Variable: $timerKey used in Subscribe handler
+  Code: Subscribe-Event -EventName "Data.Timer.StopAll" -Handler {
+        param($EventData)
+
+      ...
+  FIX: Store as $self._timerKey before creating the handler
+
+  File: dialog-system.psm1, Line: 229
+  Variable: $dialogParams used in Subscribe handler
+  Code: Subscribes to high-level application events to show dialogs. #>
+
+    Subscribe-Event -EventName ...
+  FIX: Store as $self._dialogParams before creating the handler
+
+  File: dialog-system.psm1, Line: 237
+  Variable: $dialogParams used in Subscribe handler
+  Code: Subscribe-Event -EventName "Alert.Show" -Handler {
+        param($EventData)
+        $dialogParams =...
+  FIX: Store as $self._dialogParams before creating the handler
+
+  File: dialog-system.psm1, Line: 243
+  Variable: $dialogParams used in Subscribe handler
+  Code: Subscribe-Event -EventName "Input.Request" -Handler {
+        param($EventData)
+        $dialogParam...
+  FIX: Store as $self._dialogParams before creating the handler
+
+  File: event-system.psm1, Line: 69
+  Variable: $null used in Subscribe handler
+  Code: Subscribe-Event {
+    <#
+    .SYNOPSIS
+    Subscribes to an event with a handler
+
+    .PARAMETER...
+  FIX: Store as $self._null before creating the handler
+
+  File: event-system.psm1, Line: 107
+  Variable: $HandlerId used in Subscribe handler
+  Code: SubscribedAt = Get-Date
+        Source = $Source
+    }
+
+    $script:EventHandlers[$EventName] +=...
+  FIX: Store as $self._HandlerId before creating the handler
+
+  File: state-manager.psm1, Line: 24
+  Variable: $new used in Subscribe handler
+  Code: Subscribe('count', { param($new, $old) Write-Host "Count changed from $old to $new" }...
+  FIX: Store as $self._new before creating the handler
+
+  File: state-manager.psm1, Line: 66
+  Variable: $key used in Subscribe handler
+  Code: Subscribers($key, $value, $oldValue)
+        }
+    }
+
+    $stateObject | Add-Member -MemberType ...
+  FIX: Store as $self._key before creating the handler
+
+  File: state-manager.psm1, Line: 75
+  Variable: $key used in Subscribe handler
+  Code: Subscribe' -Value {
+        param(
+            [string]$key,
+            [scriptblock]$handler
+     ...
+  FIX: Store as $self._key before creating the handler
+
+  File: state-manager.psm1, Line: 129
+  Variable: $this used in Subscribe handler
+  Code: Subscribers($key, $this._data[$key], $null)
+            }
+        }
+    }
+
+    $stateObject | Ad...
+  FIX: Store as $self._this before creating the handler
+
+  File: state-manager.psm1, Line: 139
+  Variable: $oldValue used in Subscribe handler
+  Code: Subscribers' -Value {
+        param($key, $newValue, $oldValue)
+
+        # Notify specific k...
+  FIX: Store as $self._oldValue before creating the handler
+
+  File: state-manager.psm1, Line: 227
+  Variable: $computed used in Subscribe handler
+  Code: Subscribe to changes
+    foreach ($key in $Keys) {
+        $subId = $Source.Subscribe($key, {
+      ...
+  FIX: Store as $self._computed before creating the handler
+
+  File: tui-engine-v2.psm1, Line: 1421
+  Variable: $handlerId used in Subscribe handler
+  Code: Subscribe-TuiEvent {
+    param($EventName, $Handler)
+    if (Get-Command -Name "Subscribe-Event" -Er...
+  FIX: Store as $self._handlerId before creating the handler
+
+  File: tui-framework.psm1, Line: 105
+  Variable: $job used in Register-ObjectEvent handler
+  Code: Register-ObjectEvent to handle the timer tick
+        $timerEvent = Register-ObjectEvent -InputObjec...
+  FIX: Store as $self._job before creating the handler
+
+  File: tui-framework.psm1, Line: 277
+  Variable: $parentPath used in Subscribe handler
+  Code: Subscribers -Path $Path -OldValue $oldValue -NewValue $Value
+
+                # Also...
+  FIX: Store as $self._parentPath before creating the handler
+
+  File: tui-framework.psm1, Line: 284
+  Variable: $key used in Subscribe handler
+  Code: Subscribers -Path $parentPath -OldValue $null -NewValue (& $this.GetValue $parentPath)
+             ...
+  FIX: Store as $self._key before creating the handler
+
+  File: tui-framework.psm1, Line: 313
+  Variable: $this used in Subscribe handler
+  Code: Subscribers @change
+                    }
+                } finally {
+                    $this._pro...
+  FIX: Store as $self._this before creating the handler
+
+  File: tui-framework.psm1, Line: 322
+  Variable: $Path used in Subscribe handler
+  Code: Subscribe = {
+            param(
+                [string]$Path,
+                [scriptblock]$Handle...
+  FIX: Store as $self._Path before creating the handler
+
+  File: tui-framework.psm1, Line: 360
+  Variable: $Path used in Subscribe handler
+  Code: Subscribers = {
+            param([string]$Path, $OldValue, $NewValue)
+
+            # Ex...
+  FIX: Store as $self._Path before creating the handler
+
+  File: tui-framework.psm1, Line: 402
+  Variable: $true used in Subscribe handler
+  Code: Subscribers -Path $path -OldValue $oldValue -NewValue $newValue
+                }
+            }
+    ...
+  FIX: Store as $self._true before creating the handler
+
+  File: gtui.ps1, Line: 527
+  Variable: $projCombo used in OnClick handler
+  Code: OnClick {
+                try {
+                    $newProjectKey = if ($projCombo.SelectedIndex ...
+  FIX: Store as $self._projCombo before creating the handler
+
+  File: gtui.ps1, Line: 576
+  Variable: $rateField used in OnClick handler
+  Code: OnClick {
+                try {
+                    $projectData = @{
+                        Key...
+  FIX: Store as $self._rateField before creating the handler
+
+  File: gtui.ps1, Line: 673
+  Variable: $null used in OnClick handler
+  Code: OnClick {
+                if($script:UIState.SelectedTask){
+                    $script:App.Show...
+  FIX: Store as $self._null before creating the handler
+
+  File: gtui.ps1, Line: 726
+  Variable: $proj used in OnClick handler
+  Code: OnClick {
+                    if ($script:UIState.SelectedProjectKey) {
+                        $p...
+  FIX: Store as $self._proj before creating the handler
+
+  File: data-manager.psm1, Line: 367
+  Variable: $timer used in Subscribe handler
+  Code: Subscribe-Event -EventName "Timer.Stop" -Handler {
+        param($EventData)
+        $timerKey = $Ev...
+  FIX: Store as $self._timer before creating the handler
+
+  File: dialog-system.psm1, Line: 284
+  Variable: $dialog used in Subscribe handler
+  Code: Subscribe-Event -EventName "Screen.Pushed" -Handler {
+        $originalRender = $script:TuiState.Cur...
+  FIX: Store as $self._dialog before creating the handler
+
+  File: event-system.psm1, Line: 34
+  Variable: $Priority used in Subscribe handler
+  Code: Subscribe-Event {
+    param(
+        [string]$EventName,
+        [scriptblock]$Handler,
+        [s...
+  FIX: Store as $self._Priority before creating the handler
+
+  File: event-system.psm1, Line: 57
+  Variable: $SubscriberId used in Subscribe handler
+  Code: Subscribers[$EventName].Add($_) }
+
+    return $SubscriberId
+}
+
+function global:Unsubscribe-Event...
+  FIX: Store as $self._SubscriberId before creating the handler
+
+  File: event-system.psm1, Line: 74
+  Variable: $null used in Subscribe handler
+  Code: Subscribers[$EventName].Remove($sub) | Out-Null
+        }
+    }
+}
+
+function global:Publish-Event {
+ ...
+  FIX: Store as $self._null before creating the handler
+
+  File: event-system.psm1, Line: 90
+  Variable: $Data used in Subscribe handler
+  Code: Subscribers[$EventName])
+
+    $eventData = @{
+        Name = $EventName
+        Data = $Data
+  ...
+  FIX: Store as $self._Data before creating the handler
+
+  File: tui-components-extended.psm1, Line: 61
+  Variable: $date used in OnChange handler
+  Code: OnChange) {
+            & $self.OnChange -NewValue $date
+        }...
+  FIX: Store as $self._date before creating the handler
+
+  File: tui-components-extended.psm1, Line: 126
+  Variable: $minute used in OnChange handler
+  Code: OnChange) {
+            & $self.OnChange -NewHour $hour -NewMinute $minute
+        }...
+  FIX: Store as $self._minute before creating the handler
+
+  File: tui-components-extended.psm1, Line: 274
+  Variable: $colName used in OnRowSelect handler
+  Code: OnRowSelect -Row $self.Rows[$self.SelectedRow] -Index $self.SelectedRow
+                }
+          ...
+  FIX: Store as $self._colName before creating the handler
+
+  File: tui-components.psm1, Line: 148
+  Variable: $Props used in OnClick handler
+  Code: OnClick }
+            return $true
+        }
+        return $false
+    }
+    return $component
+}
+
+fu...
+  FIX: Store as $self._Props before creating the handler
+
+  File: tui-components.psm1, Line: 231
+  Variable: $cursorPos used in OnChange handler
+  Code: OnChange) {
+                & $self.OnChange -NewText $text -NewCursorPosition $cursorPos
+          ...
+  FIX: Store as $self._cursorPos before creating the handler
+
+  File: tui-components.psm1, Line: 324
+  Variable: $selected used in OnChange handler
+  Code: OnChange) {
+                            & $self.OnChange -NewValue $selected.Value
+                 ...
+  FIX: Store as $self._selected before creating the handler
+
+  File: tui-components.psm1, Line: 363
+  Variable: $Props used in OnChange handler
+  Code: OnChange -Checked $self.Checked }
+            Request-TuiRefresh
+            return $true
+        }
+...
+  FIX: Store as $self._Props before creating the handler
+
+  File: dashboard-screen-grid.psm1, Line: 165
+  Variable: $SelectedIndex used in OnRowSelect handler
+  Code: OnRowSelect = {
+                            param($SelectedData, $SelectedIndex)
+                 ...
+  FIX: Store as $self._SelectedIndex before creating the handler
+
+  File: dashboard-screen-helios.psm1, Line: 59
+  Variable: $screenObj used in OnRowSelect handler
+  Code: OnRowSelect = {
+                param($SelectedData, $SelectedIndex)
+                $routes = @("/t...
+  FIX: Store as $self._screenObj before creating the handler
+
+  File: dashboard-screen-helios.psm1, Line: 137
+  Variable: $screen used in Subscribe handler
+  Code: Subscribe to app store updates with proper error handling
+        try {
+            $self._subscript...
+  FIX: Store as $self._screen before creating the handler
+
+  File: dashboard-screen-helios.psm1, Line: 155
+  Variable: $screen used in Subscribe handler
+  Code: Subscribe -self $services.Store -path "activeTimers" -handler {
+                param($data)
+     ...
+  FIX: Store as $self._screen before creating the handler
+
+  File: dashboard-screen-helios.psm1, Line: 167
+  Variable: $screen used in Subscribe handler
+  Code: Subscribe -self $services.Store -path "todaysTasks" -handler {
+                param($data)
+      ...
+  FIX: Store as $self._screen before creating the handler
+
+  File: dashboard-screen-helios.psm1, Line: 179
+  Variable: $screen used in Subscribe handler
+  Code: Subscribe -self $services.Store -path "stats.todayHours" -handler {
+                param($data)
+ ...
+  FIX: Store as $self._screen before creating the handler
+
+  File: dashboard-screen-helios.psm1, Line: 191
+  Variable: $screen used in Subscribe handler
+  Code: Subscribe -self $services.Store -path "stats.weekHours" -handler {
+                param($data)
+  ...
+  FIX: Store as $self._screen before creating the handler
+
+  File: dashboard-screen-helios.psm1, Line: 203
+  Variable: $screen used in Subscribe handler
+  Code: Subscribe -self $services.Store -path "stats.activeTasks" -handler {
+                param($data)
+...
+  FIX: Store as $self._screen before creating the handler
+
+  File: dashboard-screen-helios.psm1, Line: 215
+  Variable: $screen used in Subscribe handler
+  Code: Subscribe -self $services.Store -path "stats.runningTimers" -handler {
+                param($data)...
+  FIX: Store as $self._screen before creating the handler
+
+  File: dashboard-screen-helios.psm1, Line: 257
+  Variable: $passedServices used in Register-ObjectEvent handler
+  Code: Register-ObjectEvent -InputObject $self._refreshTimer -EventName Elapsed -MessageData $timerServices...
+  FIX: Store as $self._passedServices before creating the handler
+
+  File: demo-screen.psm1, Line: 46
+  Variable: $NewValue used in OnChange handler
+  Code: OnChange = { param($NewValue) $self.State.textValue = $NewValue }...
+  FIX: Store as $self._NewValue before creating the handler
+
+  File: demo-screen.psm1, Line: 61
+  Variable: $NewValue used in OnChange handler
+  Code: OnChange = { param($NewValue) $self.State.checkboxValue = $NewValue }...
+  FIX: Store as $self._NewValue before creating the handler
+
+  File: demo-screen.psm1, Line: 72
+  Variable: $NewValue used in OnChange handler
+  Code: OnChange = { param($NewValue) $self.State.selectedDropdown = $NewValue }...
+  FIX: Store as $self._NewValue before creating the handler
+
+  File: demo-screen.psm1, Line: 91
+  Variable: $NewValue used in OnChange handler
+  Code: OnChange = { param($NewValue) $self.State.selectedDate = $NewValue }...
+  FIX: Store as $self._NewValue before creating the handler
+
+  File: demo-screen.psm1, Line: 98
+  Variable: $NewMinute used in OnChange handler
+  Code: OnChange = {
+                    param($NewHour, $NewMinute)
+                    $self.State.sel...
+  FIX: Store as $self._NewMinute before creating the handler
+
+  File: demo-screen.psm1, Line: 112
+  Variable: $NewValue used in OnChange handler
+  Code: OnChange = { param($NewValue) $self.State.numberValue = $NewValue }...
+  FIX: Store as $self._NewValue before creating the handler
+
+  File: demo-screen.psm1, Line: 122
+  Variable: $NewValue used in OnChange handler
+  Code: OnChange = { param($NewValue) $self.State.sliderValue = $NewValue }...
+  FIX: Store as $self._NewValue before creating the handler
+
+  File: demo-screen.psm1, Line: 135
+  Variable: $NewValue used in OnChange handler
+  Code: OnChange = { param($NewValue) $self.State.textAreaContent = $NewValue }...
+  FIX: Store as $self._NewValue before creating the handler
+
+  File: demo-screen.psm1, Line: 152
+  Variable: $Row used in OnRowSelect handler
+  Code: OnRowSelect = {
+                    param($Row, $Index)
+                    Show-AlertDialog -Titl...
+  FIX: Store as $self._Row before creating the handler
+
+  File: state-example-screen.psm1, Line: 67
+  Variable: $newValue used in Subscribe handler
+  Code: Subscribe('counter', {
+                param($newValue)
+                $self.Components.counterLa...
+  FIX: Store as $self._newValue before creating the handler
+
+  File: state-example-screen.psm1, Line: 73
+  Variable: $newValue used in Subscribe handler
+  Code: Subscribe('message', {
+                param($newValue)
+                $self.Components.messageLa...
+  FIX: Store as $self._newValue before creating the handler
+
+  File: state-example-screen.psm1, Line: 80
+  Variable: $change used in Subscribe handler
+  Code: Subscribe('*', {
+                param($change)
+                Write-Log -Level Debug -Message "S...
+  FIX: Store as $self._change before creating the handler
+
+  File: task-screen-helios.psm1, Line: 75
+  Variable: $parent used in OnRowSelect handler
+  Code: OnRowSelect = {
+                        param($SelectedData, $SelectedIndex)
+                       ...
+  FIX: Store as $self._parent before creating the handler
+
+  File: task-screen-helios.psm1, Line: 113
+  Variable: $storeRef used in Subscribe handler
+  Code: Subscribe -self $services.Store -path "taskFilter" -handler {
+                    param($data)
+   ...
+  FIX: Store as $self._storeRef before creating the handler
+
+  File: task-screen-helios.psm1, Line: 119
+  Variable: $storeRef used in Subscribe handler
+  Code: Subscribe -self $services.Store -path "taskSort" -handler {
+                    param($data)
+     ...
+  FIX: Store as $self._storeRef before creating the handler
+
+  File: time-entry-screen.psm1, Line: 44
+  Variable: $projects used in OnClick handler
+  Code: OnClick = {
+                    # Show project selector dialog
+                    if (Get-Command...
+  FIX: Store as $self._projects before creating the handler
+
+  File: time-entry-screen.psm1, Line: 75
+  Variable: $NewValue used in OnChange handler
+  Code: OnChange = {
+                    param($NewValue)
+                    $self.State.Hours = $NewValu...
+  FIX: Store as $self._NewValue before creating the handler
+
+  File: time-entry-screen.psm1, Line: 90
+  Variable: $NewValue used in OnChange handler
+  Code: OnChange = {
+                    param($NewValue)
+                    $self.State.Description = $N...
+  FIX: Store as $self._NewValue before creating the handler
+
+  File: time-entry-screen.psm1, Line: 101
+  Variable: $NewValue used in OnChange handler
+  Code: OnChange = {
+                    param($NewValue)
+                    $self.State.Date = $NewValue...
+  FIX: Store as $self._NewValue before creating the handler
+
+  File: timer-start-screen.psm1, Line: 78
+  Variable: $NewValue used in OnChange handler
+  Code: OnChange = {
+                    param($NewValue)
+                    $self.State.Description = $N...
+  FIX: Store as $self._NewValue before creating the handler
+
+  File: timer-start-screen.psm1, Line: 95
+  Variable: $hours used in OnClick handler
+  Code: OnClick = {
+                    if ($self.State.ActiveTimer) {
+                        # Stop time...
+  FIX: Store as $self._hours before creating the handler
+
+  File: app-store.psm1, Line: 30
+  Variable: $handler used in Subscribe handler
+  Code: Subscribe = {
+            param($self, [string]$path, [scriptblock]$handler)
+            if (-no...
+  FIX: Store as $self._handler before creating the handler
+
+  File: app-store.psm1, Line: 33
+  Variable: $subId used in Subscribe handler
+  Code: Subscribe -Path $path -Handler $handler)
+        }
+
+        Unsubscribe = {
+           ...
+  FIX: Store as $self._subId before creating the handler
+
+  File: focus-manager.psm1, Line: 361
+  Variable: $null used in Subscribe handler
+  Code: Subscribe-Event -EventName "Screen.Popped" -Handler {
+            param($Event)
+            # Clear ...
+  FIX: Store as $self._null before creating the handler
+
+  File: focus-manager.psm1, Line: 373
+  Variable: $component used in Subscribe handler
+  Code: Subscribe-Event -EventName "Component.VisibilityChanged" -Handler {
+            param($Event)
+      ...
+  FIX: Store as $self._component before creating the handler
+
+[WARNING] Missing Service Null Checks:
+These service usages don't have null checks:
+  File: dashboard-screen-helios.psm1, Line: 139 - $services.Store
+  File: dashboard-screen-helios.psm1, Line: 139 - $services.Store
+  File: dashboard-screen-helios.psm1, Line: 155 - $services.Store
+  File: dashboard-screen-helios.psm1, Line: 155 - $services.Store
+  File: dashboard-screen-helios.psm1, Line: 167 - $services.Store
+  ... and 87 more
+
+[WARNING] Direct Global Access:
+These should use service injection instead:
+  $global:DebugCallStack - should be accessed via services
+  $global:DebugOutput - should be accessed via services
+  $global:ErrorFound - should be accessed via services
+  $global:Services - should be accessed via services
+
+[ERROR] Incorrect Self References in Component Handlers:
+In component handlers, $self refers to the component, not the screen:
+
+  File: demo-screen.psm1, Line: 180
+  Handler: OnClick
+  Code: OnClick = {
+                    $self.State.progressValue = [Math]::Min(100, $self.State.progressVa...
+
+  File: demo-screen.psm1, Line: 190
+  Handler: OnClick
+  Code: OnClick = {
+                    $self.State.progressValue = [Math]::Max(0, $self.State.progressValu...
+
+  File: time-entry-screen.psm1, Line: 75
+  Handler: OnChange
+  Code: OnChange = {
+                    param($NewValue)
+                    $self.State.Hours = $NewValu...
+
+  File: timer-start-screen.psm1, Line: 95
+  Handler: OnClick
+  Code: OnClick = {
+                    if ($self.State.ActiveTimer) {
+                        # Stop time...
+
+========== SUMMARY ==========
+Total Issues Found: 203
+
+[RECOMMENDATION] The primary fix is to ensure all components and data
+needed by handlers are stored as properties on $self before creating
+the handlers. This ensures they remain accessible when handlers execute.
+
+========== DASHBOARD SPECIFIC CHECK ==========
+[OK] quickActions appears to be properly stored
+
+========== END OF DIAGNOSTIC ==========
+PS C:\Users\jhnhe\Documents\GitHub\_HELIOS>
