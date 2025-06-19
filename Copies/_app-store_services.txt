@@ -75,10 +75,37 @@ function Initialize-AppStore {
             try {
                 $previousState = & $self.GetState -self $self
                 
+                # Fix: Capture store reference for use in scriptblocks
+                $storeRef = $self
+                
                 $actionContext = @{
-                    GetState = { & $self.GetState -self $self }
-                    UpdateState = { param($updates) & $self._updateState -self $self -updates $updates }
-                    Dispatch = { param($name, $p) & $self.Dispatch -self $self -actionName $name -payload $p }
+                    GetState = { 
+                        if ($storeRef) {
+                            & $storeRef.GetState -self $storeRef
+                        } else {
+                            Write-Log -Level Error -Message "Store reference lost in GetState"
+                            return @{}
+                        }
+                    }.GetNewClosure()
+                    
+                    UpdateState = { 
+                        param($updates) 
+                        if ($storeRef -and $updates) {
+                            & $storeRef._updateState -self $storeRef -updates $updates
+                        } else {
+                            Write-Log -Level Error -Message "Store reference lost in UpdateState or updates null"
+                        }
+                    }.GetNewClosure()
+                    
+                    Dispatch = { 
+                        param($name, $p) 
+                        if ($storeRef) {
+                            & $storeRef.Dispatch -self $storeRef -actionName $name -payload $p
+                        } else {
+                            Write-Log -Level Error -Message "Store reference lost in Dispatch"
+                            return @{ Success = $false; Error = "Store reference lost" }
+                        }
+                    }.GetNewClosure()
                 }
                 
                 & $self._actions[$actionName] -Context $actionContext -Payload $payload
@@ -113,13 +140,13 @@ function Initialize-AppStore {
     # Register built-in actions
     & $store.RegisterAction -self $store -actionName "RESET_STATE" -scriptBlock {
         param($Context, $Payload)
-        $Context.UpdateState($InitialData)
+        & $Context.UpdateState $InitialData
     }
     
     & $store.RegisterAction -self $store -actionName "UPDATE_STATE" -scriptBlock {
         param($Context, $Payload)
         if ($Payload -is [hashtable]) {
-            $Context.UpdateState($Payload)
+            & $Context.UpdateState $Payload
         }
     }
     

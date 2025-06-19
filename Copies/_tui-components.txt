@@ -1,4 +1,3 @@
-
 # TUI Component Library - COMPLIANT VERSION
 # Stateful component factories following the canonical architecture
 # LEGACY New-TuiPanel has been REMOVED.

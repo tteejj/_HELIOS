@@ -168,9 +168,9 @@ function Initialize-PMCServices {
         & $services.Store.RegisterAction -self $services.Store -actionName "DASHBOARD_REFRESH" -scriptBlock {
             param($Context)
             # Dispatch to load various dashboard data
-            & $Context.Dispatch -actionName "LOAD_DASHBOARD_DATA"
-            & $Context.Dispatch -actionName "TASKS_REFRESH"
-            & $Context.Dispatch -actionName "TIMERS_REFRESH"
+            & $Context.Dispatch "LOAD_DASHBOARD_DATA"
+            & $Context.Dispatch "TASKS_REFRESH"
+            & $Context.Dispatch "TIMERS_REFRESH"
         }
         
         # PASTE THIS CODE over the existing TASKS_REFRESH action in Initialize-PMCServices
@@ -215,11 +215,11 @@ function Initialize-PMCServices {
         }
     }
     
-    $Context.UpdateState(@{ 
+    & $Context.UpdateState @{ 
         tasks = $tasksForTable        # Mapped for Task Screen table
         todaysTasks = $dashboardTasks # Mapped for Dashboard table
         "stats.activeTasks" = $activeTasks
-    })
+    }
 }
         
         & $services.Store.RegisterAction -self $services.Store -actionName "TIMERS_REFRESH" -scriptBlock {
@@ -248,10 +248,10 @@ function Initialize-PMCServices {
                 }
             }
             
-            $Context.UpdateState(@{
+            & $Context.UpdateState @{
                 activeTimers = $activeTimers
                 "stats.runningTimers" = $runningTimers
-            })
+            }
         }
         
         & $services.Store.RegisterAction -self $services.Store -actionName "LOAD_DASHBOARD_DATA" -scriptBlock {
@@ -266,7 +266,7 @@ function Initialize-PMCServices {
                 @{ Action = "[5] Reports" },
                 @{ Action = "[6] Settings" }
             )
-            $Context.UpdateState(@{ quickActions = $quickActions })
+            & $Context.UpdateState @{ quickActions = $quickActions }
             
             # Ensure data structure exists
             if (-not $global:Data) { $global:Data = @{} }
@@ -291,17 +291,17 @@ function Initialize-PMCServices {
                     }
                 }
             }
-            $Context.UpdateState(@{ 
+            & $Context.UpdateState @{ 
                 "stats.todayHours" = [Math]::Round($todayHours, 2)
                 "stats.weekHours" = [Math]::Round($weekHours, 2)
-            })
+            }
         }
         
         & $services.Store.RegisterAction -self $services.Store -actionName "TASK_CREATE" -scriptBlock {
             param($Context, $Payload)
             if ($global:Data -and $Payload.Title) {
                 # Get current state
-                $state = $Context.GetState()
+                $state = & $Context.GetState
                 $currentTasks = if ($state.tasks) { @($state.tasks) } else { @() }
                 
                 # Create new task
@@ -319,7 +319,7 @@ function Initialize-PMCServices {
                 $newTasks = $currentTasks + $newTask
                 
                 # Update store state
-                $Context.UpdateState(@{ tasks = $newTasks })
+                & $Context.UpdateState @{ tasks = $newTasks }
                 
                 # Update global data for persistence
                 if (-not $global:Data.tasks) { $global:Data.tasks = @() }
@@ -327,7 +327,7 @@ function Initialize-PMCServices {
                 Save-UnifiedData
                 
                 # Refresh the display
-                & $Context.Dispatch -actionName "TASKS_REFRESH"
+                & $Context.Dispatch "TASKS_REFRESH"
             }
         }
         
@@ -335,7 +335,7 @@ function Initialize-PMCServices {
             param($Context, $Payload)
             if ($global:Data -and $global:Data.tasks -and $Payload.TaskId) {
                 # Get current state
-                $state = $Context.GetState()
+                $state = & $Context.GetState
                 $tasks = if ($state.tasks) { @($state.tasks) } else { @() }
                 
                 # Create new array with updated task
@@ -360,14 +360,14 @@ function Initialize-PMCServices {
                 
                 if ($found) {
                     # Update store state
-                    $Context.UpdateState(@{ tasks = $updatedTasks })
+                    & $Context.UpdateState @{ tasks = $updatedTasks }
                     
                     # Update global data for persistence
                     $global:Data.tasks = $updatedTasks
                     Save-UnifiedData
                     
                     # Refresh the display
-                    & $Context.Dispatch -actionName "TASKS_REFRESH"
+                    & $Context.Dispatch "TASKS_REFRESH"
                 }
             }
         }
@@ -376,28 +376,28 @@ function Initialize-PMCServices {
             param($Context, $Payload)
             if ($global:Data -and $global:Data.tasks -and $Payload.TaskId) {
                 # Get current state
-                $state = $Context.GetState()
+                $state = & $Context.GetState
                 $currentTasks = if ($state.tasks) { @($state.tasks) } else { @() }
                 
                 # Create new array without the deleted task
                 $newTasks = @($currentTasks | Where-Object { $_.id -ne $Payload.TaskId })
                 
                 # Update store state
-                $Context.UpdateState(@{ tasks = $newTasks })
+                & $Context.UpdateState @{ tasks = $newTasks }
                 
                 # Update global data for persistence
                 $global:Data.tasks = $newTasks
                 Save-UnifiedData
                 
                 # Refresh the display
-                & $Context.Dispatch -actionName "TASKS_REFRESH"
+                & $Context.Dispatch "TASKS_REFRESH"
             }
         }
         
         & $services.Store.RegisterAction -self $services.Store -actionName "UPDATE_STATE" -scriptBlock {
             param($Context, $Payload)
             # Generic state update action
-            $Context.UpdateState($Payload)
+            & $Context.UpdateState $Payload
         }
         
         & $services.Store.RegisterAction -self $services.Store -actionName "TASKS_LOAD" -scriptBlock {
@@ -413,7 +413,7 @@ function Initialize-PMCServices {
                     }
                 }
             }
-            $Context.UpdateState(@{ tasks = $tasks })
+            & $Context.UpdateState @{ tasks = $tasks }
         }
         
         if (-not $Silent) {

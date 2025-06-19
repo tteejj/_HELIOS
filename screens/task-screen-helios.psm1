@@ -104,20 +104,20 @@ function Get-TaskManagementScreen {
                 
                 # Subscribe to store updates
                 $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "tasks" -handler { 
-                    param($data) 
-                    if ($taskTable) {
-                        $taskTable.Data = $data.NewValue 
+                    param($NewValue, $OldValue, $Path) 
+                    if ($taskTable -and $NewValue) {
+                        $taskTable.Data = $NewValue 
                         & $taskTable.ProcessData -self $taskTable
                     }
                 }
                 $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "taskFilter" -handler { 
-                    param($data) 
+                    param($NewValue, $OldValue, $Path) 
                     if ($storeRef) {
                         & $storeRef.Dispatch -self $storeRef -actionName "TASKS_REFRESH" 
                     }
                 }
                 $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "taskSort" -handler { 
-                    param($data) 
+                    param($NewValue, $OldValue, $Path) 
                     if ($storeRef) {
                         & $storeRef.Dispatch -self $storeRef -actionName "TASKS_REFRESH" 
                     }

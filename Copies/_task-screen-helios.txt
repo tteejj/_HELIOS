@@ -61,6 +61,9 @@ function Get-TaskManagementScreen {
                     Height = ($global:TuiState.BufferHeight - 10)
                 }
                 
+                # Store services before creating components
+                $self._storeService = $services.Store
+                
                 $taskTable = New-TuiDataTable -Props @{
                     Name = "taskTable"; IsFocusable = $true; ShowBorder = $false
                     Columns = @(
@@ -72,7 +75,13 @@ function Get-TaskManagementScreen {
                     OnRowSelect = {
                         param($SelectedData, $SelectedIndex)
                         if ($SelectedData -and $SelectedData.Id) {
-                            & $services.Store.Dispatch -self $services.Store -actionName "TASK_TOGGLE_STATUS" -payload @{ TaskId = $SelectedData.Id }
+                            $parent = $this.Parent
+                            while ($parent -and -not $parent._storeService) {
+                                $parent = $parent.Parent
+                            }
+                            if ($parent -and $parent._storeService) {
+                                & $parent._storeService.Dispatch -self $parent._storeService -actionName "TASK_TOGGLE_STATUS" -payload @{ TaskId = $SelectedData.Id }
+                            }
                         }
                     }
                 }
@@ -88,10 +97,31 @@ function Get-TaskManagementScreen {
                     $self.Children += $self.Components.formPanel # FIX: Add formPanel to Children array.
                 }
                 
+                # Capture references for use in handlers
+                $screen = $self
+                $taskTable = $self._taskTable
+                $storeRef = $services.Store
+                
                 # Subscribe to store updates
-                $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "tasks" -handler { param($data) ; $self._taskTable.Data = $data.NewValue ; & $self._taskTable.ProcessData -self $self._taskTable }
-                $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "taskFilter" -handler { param($data) ; & $services.Store.Dispatch -self $services.Store -actionName "TASKS_REFRESH" }
-                $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "taskSort" -handler { param($data) ; & $services.Store.Dispatch -self $services.Store -actionName "TASKS_REFRESH" }
+                $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "tasks" -handler { 
+                    param($NewValue, $OldValue, $Path) 
+                    if ($taskTable -and $NewValue) {
+                        $taskTable.Data = $NewValue 
+                        & $taskTable.ProcessData -self $taskTable
+                    }
+                }
+                $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "taskFilter" -handler { 
+                    param($NewValue, $OldValue, $Path) 
+                    if ($storeRef) {
+                        & $storeRef.Dispatch -self $storeRef -actionName "TASKS_REFRESH" 
+                    }
+                }
+                $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "taskSort" -handler { 
+                    param($NewValue, $OldValue, $Path) 
+                    if ($storeRef) {
+                        & $storeRef.Dispatch -self $storeRef -actionName "TASKS_REFRESH" 
+                    }
+                }
                 
                 # Load initial data
                 & $services.Store.Dispatch -self $services.Store -actionName "TASKS_REFRESH"

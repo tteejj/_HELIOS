@@ -1,4 +1,4 @@
-# Dashboard Screen - Helios Service-Based Version (CORRECTED)
+# Dashboard Screen - Helios Service-Based Version (FIXED)
 # Conforms to Z-Index rendering and proper service injection patterns
 
 function Get-DashboardScreen {
@@ -13,188 +13,282 @@ function Get-DashboardScreen {
         ZIndex = 0
 
         Init = {
-            param($self, $services)
-            
-            Write-Log -Level Debug -Message "Dashboard Init started (Helios version)"
-            
-            try {
-                # FIX: More robust services handling
-                if (-not $services) {
-                    # Try to get from self
-                    if ($self._services) {
-                        $services = $self._services
-                    }
-                    # Try to get from global as fallback
-                    elseif ($global:Services) {
-                        $services = $global:Services
-                        $self._services = $services
-                    }
-                    else {
-                        Write-Log -Level Error -Message "Services not available for dashboard screen - no fallback found"
-                        return
-                    }
-                }
-                else {
-                    # Store the passed services
-                    $self._services = $services
-                }
-                
-                # Create the main grid layout
-                $rootPanel = New-TuiGridPanel -Props @{
-                    X = 1
-                    Y = 2
-                    Width = ($global:TuiState.BufferWidth - 2)
-                    Height = ($global:TuiState.BufferHeight - 4)
-                    ShowBorder = $false
-                    RowDefinitions = @("14", "1*")
-                    ColumnDefinitions = @("37", "42", "1*")
-                }
-                $self.Components.rootPanel = $rootPanel
-                $self.Children += $rootPanel # FIX: Add rootPanel to the Children array for the engine to find.
-                
-                Write-Log -Level Debug -Message "Dashboard: Created rootPanel, Children count=$($self.Children.Count)"
-
-                # --- Quick Actions Panel ---
-                $quickActionsPanel = New-TuiStackPanel -Props @{
-                    Name = "quickActionsPanel"
-                    Title = " Quick Actions "
-                    ShowBorder = $true
-                    Padding = 1
-                }
-                
-                # Capture services in local variable for use in handler
-                $navigationServices = $services
-                
-                $quickActions = New-TuiDataTable -Props @{
-                    Name = "quickActions"
-                    IsFocusable = $true
-                    ShowBorder = $false
-                    ShowHeader = $false
-                    ShowFooter = $false
-                    Columns = @( @{ Name = "Action"; Width = 32 } )
-                    Data = @() # Will be populated from store
-                    OnRowSelect = {
-                        param($SelectedData, $SelectedIndex)
-                        $routes = @("/time-entry", "/timer/start", "/tasks", "/projects", "/reports", "/settings")
-                        if ($SelectedIndex -ge 0 -and $SelectedIndex -lt $routes.Count) {
-                            # Use captured services from local variable
-                            if ($navigationServices -and $navigationServices.Navigation) {
-                                & $navigationServices.Navigation.GoTo -self $navigationServices.Navigation -Path $routes[$SelectedIndex] -Services $navigationServices
-                            } else {
-                                Write-Log -Level Error -Message "Navigation services not available in OnRowSelect handler"
-                            }
-                        }
-                    }
-                }
-                & $quickActionsPanel.AddChild -self $quickActionsPanel -Child $quickActions
-                & $rootPanel.AddChild -self $rootPanel -Child $quickActionsPanel -LayoutProps @{ "Grid.Row" = 0; "Grid.Column" = 0 }
-                
-                # --- Active Timers Panel ---
-                $timersPanel = New-TuiStackPanel -Props @{
-                    Name = "timersPanel"
-                    Title = " Active Timers "
-                    ShowBorder = $true
-                    Padding = 1
-                }
-                $activeTimers = New-TuiDataTable -Props @{
-                    Name = "activeTimers"
-                    IsFocusable = $true
-                    ShowBorder = $false
-                    ShowFooter = $false
-                    Columns = @( @{ Name = "Project"; Width = 20 }, @{ Name = "Time"; Width = 10 } )
-                    Data = @()
-                }
-                & $timersPanel.AddChild -self $timersPanel -Child $activeTimers
-                & $rootPanel.AddChild -self $rootPanel -Child $timersPanel -LayoutProps @{ "Grid.Row" = 0; "Grid.Column" = 1 }
-                
-                # --- Stats Panel ---
-                $statsPanel = New-TuiStackPanel -Props @{
-                    Name = "statsPanel"
-                    Title = " Stats "
-                    ShowBorder = $true
-                    Padding = 1
-                    Orientation = "Vertical"
-                    Spacing = 1
-                }
-                $todayLabel = New-TuiLabel -Props @{ Name = "todayHoursLabel"; Text = "Today: 0h"; Height = 1 }
-                $weekLabel = New-TuiLabel -Props @{ Name = "weekHoursLabel"; Text = "Week: 0h"; Height = 1 }
-                $tasksLabel = New-TuiLabel -Props @{ Name = "activeTasksLabel"; Text = "Tasks: 0"; Height = 1 }
-                $timersLabel = New-TuiLabel -Props @{ Name = "runningTimersLabel"; Text = "Timers: 0"; Height = 1 }
-                & $statsPanel.AddChild -self $statsPanel -Child $todayLabel
-                & $statsPanel.AddChild -self $statsPanel -Child $weekLabel
-                & $statsPanel.AddChild -self $statsPanel -Child $tasksLabel
-                & $statsPanel.AddChild -self $statsPanel -Child $timersLabel
-                & $rootPanel.AddChild -self $rootPanel -Child $statsPanel -LayoutProps @{ "Grid.Row" = 0; "Grid.Column" = 2 }
-                
-                # --- Today's Tasks Panel ---
-                $tasksPanel = New-TuiStackPanel -Props @{
-                    Name = "tasksPanel"
-                    Title = " Today's Tasks "
-                    ShowBorder = $true
-                    Padding = 1
-                }
-                $todaysTasks = New-TuiDataTable -Props @{
-                    Name = "todaysTasks"
-                    IsFocusable = $true
-                    ShowBorder = $false
-                    ShowFooter = $false
-                    Columns = @( @{ Name = "Priority"; Width = 8 }, @{ Name = "Task"; Width = 45 }, @{ Name = "Project"; Width = 15 } )
-                    Data = @()
-                }
-                & $tasksPanel.AddChild -self $tasksPanel -Child $todaysTasks
-                & $rootPanel.AddChild -self $rootPanel -Child $tasksPanel -LayoutProps @{ "Grid.Row" = 1; "Grid.Column" = 0; "Grid.ColumnSpan" = 3 }
-                
-                # Store references for easy access
-                $self._activeTimers = $activeTimers
-                $self._todaysTasks = $todaysTasks
-                $self._todayLabel = $todayLabel
-                $self._weekLabel = $weekLabel
-                $self._tasksLabel = $tasksLabel
-                $self._timersLabel = $timersLabel
-                
-                # Subscribe to app store updates
-                $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "quickActions" -handler { param($data) ; $quickActions.Data = $data.NewValue ; & $quickActions.ProcessData -self $quickActions }
-                $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "activeTimers" -handler { param($data) ; $self._activeTimers.Data = $data.NewValue ; & $self._activeTimers.ProcessData -self $self._activeTimers }
-                $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "todaysTasks" -handler { param($data) ; $self._todaysTasks.Data = $data.NewValue ; & $self._todaysTasks.ProcessData -self $self._todaysTasks }
-                $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "stats.todayHours" -handler { param($data) ; $self._todayLabel.Text = "Today: $($data.NewValue)h" }
-                $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "stats.weekHours" -handler { param($data) ; $self._weekLabel.Text = "Week: $($data.NewValue)h" }
-                $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "stats.activeTasks" -handler { param($data) ; $self._tasksLabel.Text = "Tasks: $($data.NewValue)" }
-                $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "stats.runningTimers" -handler { param($data) ; $self._timersLabel.Text = "Timers: $($data.NewValue)" }
-                
-                # Initial data load - populate quick actions first
-                & $services.Store.Dispatch -self $services.Store -actionName "LOAD_DASHBOARD_DATA"
-                & $services.Store.Dispatch -self $services.Store -actionName "DASHBOARD_REFRESH"
-                
-                # Register screen with focus manager after all components are created
-                if (Get-Command -Name "Register-ScreenForFocus" -ErrorAction SilentlyContinue) {
-                    Register-ScreenForFocus -Screen $self
-                }
-                
-                # Set initial focus
-                Request-Focus -Component $quickActions
-                
-                # FIX: Set up auto-refresh timer with proper service access via MessageData
-                $self._refreshTimer = [System.Timers.Timer]::new(5000)
-                $self._timerSubscription = Register-ObjectEvent -InputObject $self._refreshTimer -EventName Elapsed -MessageData $services -Action {
-                    $passedServices = $Event.MessageData
-                    try {
-                        if ($passedServices -and $passedServices.Store) {
-                            & $passedServices.Store.Dispatch -self $passedServices.Store -actionName "DASHBOARD_REFRESH"
-                        } else {
-                            Write-Log -Level Error -Message "Timer event: services not available via MessageData"
-                        }
-                    } catch {
-                        Write-Log -Level Error -Message "Timer DASHBOARD_REFRESH failed: $_"
-                    }
-                }
-                $self._refreshTimer.Start()
-                
-                Write-Log -Level Debug -Message "Dashboard Init completed"
-                
-            } catch {
-                Write-Log -Level Error -Message "Dashboard Init error: $_" -Data $_
+    param($self, $services)
+    
+    Write-Log -Level Debug -Message "Dashboard Init started (Helios version)"
+    
+    try {
+        # FIX: More robust services handling
+        if (-not $services) {
+            if ($self._services) {
+                $services = $self._services
+            }
+            elseif ($global:Services) {
+                $services = $global:Services
+                $self._services = $services
+            }
+            else {
+                Write-Log -Level Error -Message "Services not available for dashboard screen - no fallback found"
+                return
             }
         }
+        else {
+            $self._services = $services
+        }
+        
+        # Create the main grid layout
+        $rootPanel = New-TuiGridPanel -Props @{
+            X = 1; Y = 2; Width = ($global:TuiState.BufferWidth - 2); Height = ($global:TuiState.BufferHeight - 4)
+            ShowBorder = $false; RowDefinitions = @("14", "1*"); ColumnDefinitions = @("37", "42", "1*")
+        }
+        $self.Components.rootPanel = $rootPanel
+        $self.Children += $rootPanel
+        
+        Write-Log -Level Debug -Message "Dashboard: Created rootPanel, Children count=$($self.Children.Count)"
+
+        # --- Quick Actions Panel ---
+        $quickActionsPanel = New-TuiStackPanel -Props @{ Name = "quickActionsPanel"; Title = " Quick Actions "; ShowBorder = $true; Padding = 1 }
+        
+        # Store services on self BEFORE creating components
+        $self._navigationServices = $services
+        
+        $quickActions = New-TuiDataTable -Props @{
+            Name = "quickActions"; IsFocusable = $true; ShowBorder = $false; ShowHeader = $false; ShowFooter = $false
+            Columns = @( @{ Name = "Action"; Width = 32 } )
+            Data = @();
+            OnRowSelect = {
+                param($SelectedData, $SelectedIndex)
+                $routes = @("/time-entry", "/timer/start", "/tasks", "/projects", "/reports", "/settings")
+                
+                # Try to find the screen object by going up the parent chain
+                $screenObj = $this
+                while ($screenObj -and -not $screenObj.Name -eq "DashboardScreen") {
+                    $screenObj = if ($screenObj.Parent) { $screenObj.Parent } else { $null }
+                }
+                
+                if ($SelectedIndex -ge 0 -and $SelectedIndex -lt $routes.Count) {
+                    if ($screenObj -and $screenObj._navigationServices -and $screenObj._navigationServices.Navigation) {
+                        & $screenObj._navigationServices.Navigation.GoTo -self $screenObj._navigationServices.Navigation -Path $routes[$SelectedIndex] -Services $screenObj._navigationServices
+                    } elseif ($global:Services -and $global:Services.Navigation) {
+                        # Fallback to global services if screen reference not found
+                        & $global:Services.Navigation.GoTo -self $global:Services.Navigation -Path $routes[$SelectedIndex] -Services $global:Services
+                    } else {
+                        Write-Log -Level Error -Message "Navigation services not available in OnRowSelect handler"
+                    }
+                }
+            }
+        }
+        & $quickActionsPanel.AddChild -self $quickActionsPanel -Child $quickActions
+        & $rootPanel.AddChild -self $rootPanel -Child $quickActionsPanel -LayoutProps @{ "Grid.Row" = 0; "Grid.Column" = 0 }
+        
+        # --- Active Timers Panel ---
+        $timersPanel = New-TuiStackPanel -Props @{ Name = "timersPanel"; Title = " Active Timers "; ShowBorder = $true; Padding = 1 }
+        $activeTimers = New-TuiDataTable -Props @{
+            Name = "activeTimers"; IsFocusable = $true; ShowBorder = $false; ShowFooter = $false
+            Columns = @( @{ Name = "Project"; Width = 20 }, @{ Name = "Time"; Width = 10 } ); Data = @()
+        }
+        & $timersPanel.AddChild -self $timersPanel -Child $activeTimers
+        & $rootPanel.AddChild -self $rootPanel -Child $timersPanel -LayoutProps @{ "Grid.Row" = 0; "Grid.Column" = 1 }
+        
+        # --- Stats Panel ---
+        $statsPanel = New-TuiStackPanel -Props @{ Name = "statsPanel"; Title = " Stats "; ShowBorder = $true; Padding = 1; Orientation = "Vertical"; Spacing = 1 }
+        $todayLabel = New-TuiLabel -Props @{ Name = "todayHoursLabel"; Text = "Today: 0h"; Height = 1 }
+        $weekLabel = New-TuiLabel -Props @{ Name = "weekHoursLabel"; Text = "Week: 0h"; Height = 1 }
+        $tasksLabel = New-TuiLabel -Props @{ Name = "activeTasksLabel"; Text = "Tasks: 0"; Height = 1 }
+        $timersLabel = New-TuiLabel -Props @{ Name = "runningTimersLabel"; Text = "Timers: 0"; Height = 1 }
+        & $statsPanel.AddChild -self $statsPanel -Child $todayLabel
+        & $statsPanel.AddChild -self $statsPanel -Child $weekLabel
+        & $statsPanel.AddChild -self $statsPanel -Child $tasksLabel
+        & $statsPanel.AddChild -self $statsPanel -Child $timersLabel
+        & $rootPanel.AddChild -self $rootPanel -Child $statsPanel -LayoutProps @{ "Grid.Row" = 0; "Grid.Column" = 2 }
+        
+        # --- Today's Tasks Panel ---
+        $tasksPanel = New-TuiStackPanel -Props @{ Name = "tasksPanel"; Title = " Today's Tasks "; ShowBorder = $true; Padding = 1 }
+        $todaysTasks = New-TuiDataTable -Props @{
+            Name = "todaysTasks"; IsFocusable = $true; ShowBorder = $false; ShowFooter = $false
+            Columns = @( @{ Name = "Priority"; Width = 8 }, @{ Name = "Task"; Width = 45 }, @{ Name = "Project"; Width = 15 } ); Data = @()
+        }
+        & $tasksPanel.AddChild -self $tasksPanel -Child $todaysTasks
+        & $rootPanel.AddChild -self $rootPanel -Child $tasksPanel -LayoutProps @{ "Grid.Row" = 1; "Grid.Column" = 0; "Grid.ColumnSpan" = 3 }
+        
+        # ---------------------------------------------------------------------------------
+        # THIS IS THE CRITICAL FIX: Storing references BEFORE creating subscriptions.
+        # ---------------------------------------------------------------------------------
+        $self._quickActions = $quickActions  # FIX: Added missing quickActions storage
+        $self._activeTimers = $activeTimers
+        $self._todaysTasks = $todaysTasks
+        $self._todayLabel = $todayLabel
+        $self._weekLabel = $weekLabel
+        $self._tasksLabel = $tasksLabel
+        $self._timersLabel = $timersLabel
+        
+        # Store components in hashtable for easy access
+        $self.Components.quickActions = $quickActions
+        $self.Components.activeTimers = $activeTimers
+        $self.Components.todaysTasks = $todaysTasks
+        $self.Components.todayLabel = $todayLabel
+        $self.Components.weekLabel = $weekLabel
+        $self.Components.tasksLabel = $tasksLabel
+        $self.Components.timersLabel = $timersLabel
+        
+        # Capture screen reference for use in handlers (CRITICAL FIX)
+        $screen = $self
+        
+        # Subscribe to app store updates with proper error handling
+        try {
+            # Test if Store.Subscribe exists and is callable
+            if (-not $services.Store.Subscribe) {
+                Write-Log -Level Error -Message "Store.Subscribe method not found"
+                return
+            }
+            
+            Write-Log -Level Debug -Message "Creating quickActions subscription..."
+            $subId = & $services.Store.Subscribe -self $services.Store -path "quickActions" -handler { 
+                param($NewValue, $OldValue, $Path) 
+                try {
+                    Write-Log -Level Debug -Message "quickActions handler triggered for path: $Path"
+                    if ($screen -and $screen._quickActions -and $NewValue) {
+                        $screen._quickActions.Data = $NewValue 
+                        & $screen._quickActions.ProcessData -self $screen._quickActions
+                        Write-Log -Level Debug -Message "quickActions updated with $($NewValue.Count) items"
+                    } else {
+                        Write-Log -Level Error -Message "quickActions component not accessible or NewValue is null"
+                    }
+                } catch {
+                    Write-Log -Level Error -Message "quickActions handler error: $_"
+                }
+            }
+            
+            if ($subId) {
+                $self._subscriptions += $subId
+                Write-Log -Level Debug -Message "quickActions subscription created: $subId"
+            } else {
+                Write-Log -Level Error -Message "quickActions subscription failed - no ID returned"
+            }
+            
+            $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "activeTimers" -handler { 
+                param($NewValue, $OldValue, $Path) 
+                try {
+                    if ($screen -and $screen._activeTimers -and $NewValue) {
+                        $screen._activeTimers.Data = $NewValue 
+                        & $screen._activeTimers.ProcessData -self $screen._activeTimers 
+                    }
+                } catch {
+                    Write-Log -Level Error -Message "activeTimers handler error: $_"
+                }
+            }
+            
+            $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "todaysTasks" -handler { 
+                param($NewValue, $OldValue, $Path) 
+                try {
+                    if ($screen -and $screen._todaysTasks -and $NewValue) {
+                        $screen._todaysTasks.Data = $NewValue 
+                        & $screen._todaysTasks.ProcessData -self $screen._todaysTasks 
+                    }
+                } catch {
+                    Write-Log -Level Error -Message "todaysTasks handler error: $_"
+                }
+            }
+            
+            $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "stats.todayHours" -handler { 
+                param($NewValue, $OldValue, $Path) 
+                try {
+                    if ($screen -and $screen._todayLabel -and $NewValue -ne $null) {
+                        $screen._todayLabel.Text = "Today: ${NewValue}h" 
+                        Request-TuiRefresh
+                    }
+                } catch {
+                    Write-Log -Level Error -Message "todayHours handler error: $_"
+                }
+            }
+            
+            $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "stats.weekHours" -handler { 
+                param($NewValue, $OldValue, $Path) 
+                try {
+                    if ($screen -and $screen._weekLabel -and $NewValue -ne $null) {
+                        $screen._weekLabel.Text = "Week: ${NewValue}h" 
+                        Request-TuiRefresh
+                    }
+                } catch {
+                    Write-Log -Level Error -Message "weekHours handler error: $_"
+                }
+            }
+            
+            $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "stats.activeTasks" -handler { 
+                param($NewValue, $OldValue, $Path) 
+                try {
+                    if ($screen -and $screen._tasksLabel -and $NewValue -ne $null) {
+                        $screen._tasksLabel.Text = "Tasks: $NewValue" 
+                        Request-TuiRefresh
+                    }
+                } catch {
+                    Write-Log -Level Error -Message "activeTasks handler error: $_"
+                }
+            }
+            
+            $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "stats.runningTimers" -handler { 
+                param($NewValue, $OldValue, $Path) 
+                try {
+                    if ($screen -and $screen._timersLabel -and $NewValue -ne $null) {
+                        $screen._timersLabel.Text = "Timers: $NewValue" 
+                        Request-TuiRefresh
+                    }
+                } catch {
+                    Write-Log -Level Error -Message "runningTimers handler error: $_"
+                }
+            }
+            
+            Write-Log -Level Debug -Message "Dashboard: Created $($self._subscriptions.Count) subscriptions"
+            
+        } catch {
+            Write-Log -Level Error -Message "Failed to create subscriptions: $_"
+        }
+        
+        # Initial data load with error handling
+        try {
+            $result = & $services.Store.Dispatch -self $services.Store -actionName "LOAD_DASHBOARD_DATA"
+            if (-not $result.Success) {
+                Write-Log -Level Error -Message "Failed to load dashboard data: $($result.Error)"
+            }
+            
+            $result = & $services.Store.Dispatch -self $services.Store -actionName "DASHBOARD_REFRESH"
+            if (-not $result.Success) {
+                Write-Log -Level Error -Message "Failed to refresh dashboard: $($result.Error)"
+            }
+        } catch {
+            Write-Log -Level Error -Message "Error dispatching initial actions: $_"
+        }
+        
+        if (Get-Command -Name "Register-ScreenForFocus" -ErrorAction SilentlyContinue) {
+            Register-ScreenForFocus -Screen $self
+        }
+        
+        Request-Focus -Component $quickActions
+        
+        # Set up refresh timer with proper service capture
+        $timerServices = $services
+        $self._refreshTimer = [System.Timers.Timer]::new(5000)
+        $self._timerSubscription = Register-ObjectEvent -InputObject $self._refreshTimer -EventName Elapsed -MessageData $timerServices -Action {
+            $passedServices = $Event.MessageData
+            try {
+                if ($passedServices -and $passedServices.Store) {
+                    & $passedServices.Store.Dispatch -self $passedServices.Store -actionName "DASHBOARD_REFRESH"
+                } else {
+                    Write-Log -Level Error -Message "Timer event: services not available via MessageData"
+                }
+            } catch {
+                Write-Log -Level Error -Message "Timer DASHBOARD_REFRESH failed: $_"
+            }
+        }
+        $self._refreshTimer.Start()
+        
+        Write-Log -Level Debug -Message "Dashboard Init completed successfully"
+        
+    } catch {
+        Write-Log -Level Error -Message "Dashboard Init error: $_" -Data $_
+        Write-Log -Level Error -Message "Stack trace: $($_.ScriptStackTrace)"
+    }
+}
         
         Render = {
             param($self)
