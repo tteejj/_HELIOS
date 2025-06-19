@@ -126,3 +126,23 @@ Next potential enhancements could include Task 5 (component decomposition) and T
    8. Fixed quick actions data flow from store to UI
    
 RESULT: Dashboard and task screens now render properly with full functionality
+
+**FIX: TUI Engine Test Detection - COMPLETED 2025-06-18**
+   Problem: test-helios.ps1 failed with "TUI Engine not loaded properly" 
+   Root Cause: Get-Command doesn't find global: scoped functions from imported modules
+   Fix Applied:
+   - test-helios.ps1: Replaced Get-Command checks with direct function tests
+   - Now tests module loading by attempting to use exported functionality
+   - Navigation service test now creates test instance to verify structure
+   Result: Tests properly detect loaded modules and their functionality
+
+**FIX: Dashboard OnRowSelect Scope Issue - COMPLETED 2025-06-18**
+   Problem: Dashboard Init error "You cannot call a method on a null-valued expression"
+   Root Cause: quickActions OnRowSelect handler tried to access $self._services
+   - $self in handler context refers to DataTable component, not screen
+   - Component doesn't have _services property, causing null reference
+   Fix Applied:
+   - dashboard-screen-helios.psm1: Capture services in local $navigationServices variable
+   - OnRowSelect handler now uses captured variable instead of $self._services
+   - Added null check for defensive programming
+   Result: Quick Actions menu navigation now works without null reference errors

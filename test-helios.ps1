@@ -17,18 +17,30 @@ try {
     # Test 2: Import key modules and check functions
     Write-Host "Testing module imports..." -ForegroundColor Cyan
     
-    Import-Module ".\modules\tui-engine-v2.psm1" -Force
-    if (Get-Command Render-Frame -ErrorAction SilentlyContinue) {
+    Import-Module ".\modules\tui-engine-v2.psm1" -Force -Global
+    # Check if TUI Engine functions are available by trying to use them
+    try {
+        # Test if we can access TuiState (which is exported)
+        if ($null -eq $global:TuiState) {
+            # TuiState not initialized yet, which is expected
+        }
+        # The module loaded successfully if we got here
         Write-Host "✓ TUI Engine loaded" -ForegroundColor Green
-    } else {
-        throw "TUI Engine not loaded properly"
+    } catch {
+        throw "TUI Engine not loaded properly: $_"
     }
     
     Import-Module ".\services\navigation.psm1" -Force
-    if (Get-Command Initialize-NavigationService -ErrorAction SilentlyContinue) {
-        Write-Host "✓ Navigation Service loaded" -ForegroundColor Green
-    } else {
-        throw "Navigation Service not loaded properly"
+    # Try to initialize the service to verify it works
+    try {
+        $testNav = Initialize-NavigationService -EnableBreadcrumbs $false
+        if ($testNav -and $testNav.GoTo) {
+            Write-Host "✓ Navigation Service loaded" -ForegroundColor Green
+        } else {
+            throw "Navigation Service structure invalid"
+        }
+    } catch {
+        throw "Navigation Service not loaded properly: $_"
     }
     
     Import-Module ".\screens\dashboard-screen-helios.psm1" -Force

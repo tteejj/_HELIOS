@@ -290,8 +290,8 @@ function global:New-TuiStackPanel {
             Write-BufferBox -X $self.X -Y $self.Y -Width $self.Width -Height $self.Height -BorderColor $borderColor -Title $self.Title
         }
         
-        # FIX: Ensure layout is calculated before Z-Index renderer processes children
-        & $self.CalculateLayout -self $self
+        # Calculate layout
+        # REMOVED: $layout = & $self.CalculateLayout -self $self
         
         # Child positions are now applied in CalculateLayout, and children are rendered by the Z-Index renderer.
         # The loop below is no longer needed here as it was redundant.
@@ -502,7 +502,10 @@ function global:New-TuiGridPanel {
         param($self)
         
         # Debug: Log panel state for debugging
-        if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+        if (-not (Get-Command Write-Log -ErrorAction SilentlyContinue)) {
+            # If Write-Log not available, use Write-Host for debugging
+            Write-Host "[DEBUG] GridPanel Render: Title='$($self.Title)', Visible=$($self.Visible), Pos=($($self.X),$($self.Y)), Size=$($self.Width)x$($self.Height), Children=$($self.Children.Count)" -ForegroundColor Yellow
+        } else {
             Write-Log -Level Debug -Message "GridPanel Render called: Title='$($self.Title)', Visible=$($self.Visible), Position=($($self.X),$($self.Y)), Size=$($self.Width)x$($self.Height), Children=$($self.Children.Count)"
         }
         
@@ -524,8 +527,8 @@ function global:New-TuiGridPanel {
             Write-BufferBox -X $self.X -Y $self.Y -Width $self.Width -Height $self.Height -BorderColor $borderColor -Title $self.Title
         }
         
-        # FIX: Calculate layout to ensure child positions are set
-        $layout = & $self.CalculateLayout -self $self
+        # Calculate layout
+        $layout = & $self.CalculateLayout -self $self # Keep this line as it calculates layout, but remove the redundant one below
         Write-Log -Level Debug -Message "GridPanel '$($self.Title)' layout calculated: $($layout.Children.Count) children to render"
         
         # Draw grid lines if requested

@@ -18,25 +18,16 @@ function Get-DashboardScreen {
             Write-Log -Level Debug -Message "Dashboard Init started (Helios version)"
             
             try {
-                # FIX: More robust services handling
-                if (-not $services) {
-                    # Try to get from self
-                    if ($self._services) {
-                        $services = $self._services
-                    }
-                    # Try to get from global as fallback
-                    elseif ($global:Services) {
-                        $services = $global:Services
-                        $self._services = $services
-                    }
-                    else {
-                        Write-Log -Level Error -Message "Services not available for dashboard screen - no fallback found"
-                        return
-                    }
-                }
-                else {
-                    # Store the passed services
+                # Store services passed to Init
+                if ($services) {
                     $self._services = $services
+                } else {
+                    $services = $self._services
+                }
+                
+                if (-not $services) {
+                    Write-Log -Level Error -Message "Services not available for dashboard screen"
+                    return
                 }
                 
                 # Create the main grid layout
@@ -62,9 +53,6 @@ function Get-DashboardScreen {
                     Padding = 1
                 }
                 
-                # Capture services in local variable for use in handler
-                $navigationServices = $services
-                
                 $quickActions = New-TuiDataTable -Props @{
                     Name = "quickActions"
                     IsFocusable = $true
@@ -77,12 +65,9 @@ function Get-DashboardScreen {
                         param($SelectedData, $SelectedIndex)
                         $routes = @("/time-entry", "/timer/start", "/tasks", "/projects", "/reports", "/settings")
                         if ($SelectedIndex -ge 0 -and $SelectedIndex -lt $routes.Count) {
-                            # Use captured services from local variable
-                            if ($navigationServices -and $navigationServices.Navigation) {
-                                & $navigationServices.Navigation.GoTo -self $navigationServices.Navigation -Path $routes[$SelectedIndex] -Services $navigationServices
-                            } else {
-                                Write-Log -Level Error -Message "Navigation services not available in OnRowSelect handler"
-                            }
+                            # Access services from the screen instance
+                            $screenServices = $self._services
+                            & $screenServices.Navigation.GoTo -self $screenServices.Navigation -Path $routes[$SelectedIndex] -Services $screenServices
                         }
                     }
                 }
