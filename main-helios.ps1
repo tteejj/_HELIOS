@@ -55,7 +55,8 @@ $script:ScreenModules = @(
     "settings-screen",
     "debug-log-screen",
     "demo-screen",
-    "time-entry-screen"
+    "time-entry-screen",
+    "simple-test-screen"
 )
 
 function Initialize-PMCModules {
@@ -426,6 +427,13 @@ function Initialize-PMCServices {
         $services.Navigation = Initialize-NavigationService -EnableBreadcrumbs $true
         if (-not $Silent) {
             Write-Host "  Navigation Service initialized" -ForegroundColor Gray
+        }
+        
+        # Add simple test screen route
+        & $services.Navigation.AddRoute -self $services.Navigation -Path "/test" -RouteConfig @{
+            Factory = { param($Services) Get-SimpleTestScreen -Services $Services }
+            Title = "Simple Test"
+            RequiresAuth = $false
         }
         
         # Initialize Keybinding Service

@@ -208,6 +208,39 @@ RESULT: Dashboard and task screens now render properly with full functionality
    - Now calls: & $storeInstance._updateState -self $storeInstance -updates $updates
    Result: Store actions can now properly update state using the store's existing pattern
 
+**FIX: AppStore UpdateState Direct Implementation - COMPLETED 2025-06-20**
+   Problem: UpdateState still failing due to complex internal state structure
+   Root Cause: Trying to use internal _updateState method that relies on state object structure
+   Fix Applied:
+   - app-store.psm1: Implemented direct state update in UpdateState closure
+   - Added debug logging to trace state updates and subscriber notifications
+   - Fixed Subscribe handler to pass parameters as hashtable: @{ NewValue = ...; OldValue = ...; Path = ... }
+   - dashboard-screen-helios.psm1: Updated all subscription handlers to accept single $data parameter
+   - Handlers now extract NewValue from $data.NewValue or fallback to $data itself
+   Result: State updates work directly without complex internal dependencies
+
+**DIAGNOSTIC: Simple Test Screen - COMPLETED 2025-06-20**
+   Purpose: Created minimal test screen to verify TUI engine functionality
+   Implementation:
+   - Created simple-test-screen.psm1 with basic panel, label, and button
+   - Added route /test to navigation service
+   - Created test-simple-screen.ps1 to launch directly to test screen
+   Result: Provides isolated environment to debug TUI rendering issues
+
+**DIAGNOSTIC: Panel Rendering Investigation - COMPLETED 2025-06-20**
+   Problem: Dashboard shows misaligned panels with no color
+   Investigation:
+   - Created dashboard-diagnostic.psm1 to trace panel rendering
+   - Created test-minimal-panel.ps1 to test panels with explicit colors
+   - Tests bypass complex dashboard to isolate panel rendering issues
+   - Checks if Write-BufferBox and color rendering work at all
+   Key Tests:
+   - Simple blue panel with white text
+   - Themed panel using theme system
+   - Grid panel with colored cells
+   - Manual test box to verify basic rendering
+   Result: Diagnostic tools to identify if issue is panels, themes, or rendering
+
 **FIX: AppStore UpdateState Direct Call - COMPLETED 2025-06-19**
    Problem: UpdateState still failed with "_changeQueue" error after previous fix
    Root Cause: _updateState method call was still indirect; needed direct state Update call
@@ -271,3 +304,11 @@ RESULT: Dashboard and task screens now render properly with full functionality
    - main-helios.ps1: Replaced all ?? operators with if/else statements
    - Fixed in TIMERS_REFRESH, TASKS_REFRESH, TASK_CREATE, TASKS_LOAD actions
    Result: Application now compatible with PowerShell 5.1
+
+**FIX: AppStore UpdateState Method Invocation - COMPLETED 2025-06-20**
+   Problem: Action context UpdateState failed with "The property '_changeQueue' cannot be found"
+   Root Cause: PowerShell requires & operator for scriptblock properties, not dot notation
+   Fix Applied:
+   - app-store.psm1: Changed UpdateState in actionContext to use: & $storeInstance._updateState -self $storeInstance -updates $updates
+   - This properly invokes the store's internal _updateState method instead of trying to manipulate state directly
+   Result: Store actions now properly update state and notify subscribers

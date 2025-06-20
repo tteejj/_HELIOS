@@ -48,7 +48,15 @@ function Get-DashboardScreen {
         Write-Log -Level Debug -Message "Dashboard: Created rootPanel, Children count=$($self.Children.Count)"
 
         # --- Quick Actions Panel ---
-        $quickActionsPanel = New-TuiStackPanel -Props @{ Name = "quickActionsPanel"; Title = " Quick Actions "; ShowBorder = $true; Padding = 1 }
+        # DIAGNOSTIC: Add explicit colors to ensure visibility
+        $quickActionsPanel = New-TuiStackPanel -Props @{ 
+            Name = "quickActionsPanel"
+            Title = " Quick Actions "
+            ShowBorder = $true
+            Padding = 1
+            ForegroundColor = [ConsoleColor]::White
+            BorderColor = [ConsoleColor]::Gray
+        }
         
         # Store services on self BEFORE creating components
         $self._navigationServices = $services
@@ -147,14 +155,18 @@ function Get-DashboardScreen {
             
             Write-Log -Level Debug -Message "Creating quickActions subscription..."
             $subId = & $services.Store.Subscribe -self $services.Store -path "quickActions" -handler { 
-                param($NewValue, $OldValue, $Path) 
+                param($data) 
                 try {
-                    Write-Log -Level Debug -Message "quickActions handler triggered for path: $Path"
+                    # Handle both parameter styles
+                    $newValue = if ($data.NewValue -ne $null) { $data.NewValue } else { $data }
+                    $path = if ($data.Path -ne $null) { $data.Path } else { "quickActions" }
+                    
+                    Write-Log -Level Debug -Message "quickActions handler triggered for path: $path"
                     if ($screen -and $screen._quickActions) {
-                        if ($NewValue -and $NewValue.Count -gt 0) {
-                            $screen._quickActions.Data = $NewValue 
+                        if ($newValue -and $newValue.Count -gt 0) {
+                            $screen._quickActions.Data = $newValue 
                             & $screen._quickActions.ProcessData -self $screen._quickActions
-                            Write-Log -Level Debug -Message "quickActions updated with $($NewValue.Count) items"
+                            Write-Log -Level Debug -Message "quickActions updated with $($newValue.Count) items"
                         } else {
                             Write-Log -Level Debug -Message "quickActions NewValue is null or empty"
                         }
@@ -174,10 +186,11 @@ function Get-DashboardScreen {
             }
             
             $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "activeTimers" -handler { 
-                param($NewValue, $OldValue, $Path) 
+                param($data) 
                 try {
-                    if ($screen -and $screen._activeTimers -and $NewValue) {
-                        $screen._activeTimers.Data = $NewValue 
+                    $newValue = if ($data.NewValue -ne $null) { $data.NewValue } else { $data }
+                    if ($screen -and $screen._activeTimers -and $newValue) {
+                        $screen._activeTimers.Data = $newValue 
                         & $screen._activeTimers.ProcessData -self $screen._activeTimers 
                     }
                 } catch {
@@ -186,10 +199,11 @@ function Get-DashboardScreen {
             }
             
             $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "todaysTasks" -handler { 
-                param($NewValue, $OldValue, $Path) 
+                param($data) 
                 try {
-                    if ($screen -and $screen._todaysTasks -and $NewValue) {
-                        $screen._todaysTasks.Data = $NewValue 
+                    $newValue = if ($data.NewValue -ne $null) { $data.NewValue } else { $data }
+                    if ($screen -and $screen._todaysTasks -and $newValue) {
+                        $screen._todaysTasks.Data = $newValue 
                         & $screen._todaysTasks.ProcessData -self $screen._todaysTasks 
                     }
                 } catch {
@@ -198,10 +212,11 @@ function Get-DashboardScreen {
             }
             
             $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "stats.todayHours" -handler { 
-                param($NewValue, $OldValue, $Path) 
+                param($data) 
                 try {
-                    if ($screen -and $screen._todayLabel -and $NewValue -ne $null) {
-                        $screen._todayLabel.Text = "Today: ${NewValue}h" 
+                    $newValue = if ($data.NewValue -ne $null) { $data.NewValue } else { $data }
+                    if ($screen -and $screen._todayLabel -and $newValue -ne $null) {
+                        $screen._todayLabel.Text = "Today: ${newValue}h" 
                         Request-TuiRefresh
                     }
                 } catch {
@@ -210,10 +225,11 @@ function Get-DashboardScreen {
             }
             
             $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "stats.weekHours" -handler { 
-                param($NewValue, $OldValue, $Path) 
+                param($data) 
                 try {
-                    if ($screen -and $screen._weekLabel -and $NewValue -ne $null) {
-                        $screen._weekLabel.Text = "Week: ${NewValue}h" 
+                    $newValue = if ($data.NewValue -ne $null) { $data.NewValue } else { $data }
+                    if ($screen -and $screen._weekLabel -and $newValue -ne $null) {
+                        $screen._weekLabel.Text = "Week: ${newValue}h" 
                         Request-TuiRefresh
                     }
                 } catch {
@@ -222,10 +238,11 @@ function Get-DashboardScreen {
             }
             
             $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "stats.activeTasks" -handler { 
-                param($NewValue, $OldValue, $Path) 
+                param($data) 
                 try {
-                    if ($screen -and $screen._tasksLabel -and $NewValue -ne $null) {
-                        $screen._tasksLabel.Text = "Tasks: $NewValue" 
+                    $newValue = if ($data.NewValue -ne $null) { $data.NewValue } else { $data }
+                    if ($screen -and $screen._tasksLabel -and $newValue -ne $null) {
+                        $screen._tasksLabel.Text = "Tasks: $newValue" 
                         Request-TuiRefresh
                     }
                 } catch {
@@ -234,10 +251,11 @@ function Get-DashboardScreen {
             }
             
             $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "stats.runningTimers" -handler { 
-                param($NewValue, $OldValue, $Path) 
+                param($data) 
                 try {
-                    if ($screen -and $screen._timersLabel -and $NewValue -ne $null) {
-                        $screen._timersLabel.Text = "Timers: $NewValue" 
+                    $newValue = if ($data.NewValue -ne $null) { $data.NewValue } else { $data }
+                    if ($screen -and $screen._timersLabel -and $newValue -ne $null) {
+                        $screen._timersLabel.Text = "Timers: $newValue" 
                         Request-TuiRefresh
                     }
                 } catch {

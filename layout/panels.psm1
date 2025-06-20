@@ -286,7 +286,24 @@ function global:New-TuiStackPanel {
         
         # Draw border if requested
         if ($self.ShowBorder) {
-            $borderColor = if ($self.ForegroundColor) { $self.ForegroundColor } else { Get-ThemeColor "Border" -Default Gray }
+            # DIAGNOSTIC: Force visible colors for debugging
+            $borderColor = if ($self.ForegroundColor) { 
+                $self.ForegroundColor 
+            } else { 
+                $themeColor = Get-ThemeColor "Border" -Default Gray
+                # If theme returns black on black background, force a visible color
+                if ($themeColor -eq [ConsoleColor]::Black -and $self.BackgroundColor -eq [ConsoleColor]::Black) {
+                    [ConsoleColor]::Gray
+                } else {
+                    $themeColor
+                }
+            }
+            
+            # Debug logging
+            if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+                Write-Log -Level Debug -Message "Drawing border at ($($self.X),$($self.Y)) size $($self.Width)x$($self.Height) color $borderColor"
+            }
+            
             Write-BufferBox -X $self.X -Y $self.Y -Width $self.Width -Height $self.Height -BorderColor $borderColor -Title $self.Title
         }
         
@@ -520,7 +537,24 @@ function global:New-TuiGridPanel {
         
         # Draw border if requested
         if ($self.ShowBorder) {
-            $borderColor = if ($self.ForegroundColor) { $self.ForegroundColor } else { Get-ThemeColor "Border" -Default Gray }
+            # DIAGNOSTIC: Force visible colors for debugging
+            $borderColor = if ($self.ForegroundColor) { 
+                $self.ForegroundColor 
+            } else { 
+                $themeColor = Get-ThemeColor "Border" -Default Gray
+                # If theme returns black on black background, force a visible color
+                if ($themeColor -eq [ConsoleColor]::Black -and $self.BackgroundColor -eq [ConsoleColor]::Black) {
+                    [ConsoleColor]::Gray
+                } else {
+                    $themeColor
+                }
+            }
+            
+            # Debug logging
+            if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+                Write-Log -Level Debug -Message "GridPanel drawing border at ($($self.X),$($self.Y)) size $($self.Width)x$($self.Height) color $borderColor"
+            }
+            
             Write-BufferBox -X $self.X -Y $self.Y -Width $self.Width -Height $self.Height -BorderColor $borderColor -Title $self.Title
         }
         

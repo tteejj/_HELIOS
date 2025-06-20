@@ -55,7 +55,8 @@ $script:ScreenModules = @(
     "settings-screen",
     "debug-log-screen",
     "demo-screen",
-    "time-entry-screen"
+    "time-entry-screen",
+    "simple-test-screen"
 )
 
 function Initialize-PMCModules {
@@ -173,54 +174,52 @@ function Initialize-PMCServices {
             & $Context.Dispatch "TIMERS_REFRESH"
         }
         
-        # PASTE THIS CODE over the existing TASKS_REFRESH action in Initialize-PMCServices
-
-& $services.Store.RegisterAction -self $services.Store -actionName "TASKS_REFRESH" -scriptBlock {
-    param($Context)
-    # Ensure data structure exists
-    if (-not $global:Data) { $global:Data = @{} }
-    if (-not $global:Data.tasks) { $global:Data.tasks = @() }
-    
-    # Load raw tasks data
-    $rawTasks = $global:Data.tasks
-    
-    # --- Data for Dashboard ---
-    $activeTasks = ($rawTasks | Where-Object { -not $_.completed }).Count
-    
-    $today = (Get-Date).Date
-    $dashboardTasks = $rawTasks | Where-Object {
-        -not $_.completed -or ([DateTime]::Parse($_.updated_at).Date -eq $today)
-    } | Select-Object -First 10 | ForEach-Object {
-        @{
-            Priority = switch($_.priority) {
-                "high" { "[HIGH]" }
-                "medium" { "[MED]" }
-                "low" { "[LOW]" }
-                default { "[MED]" }
+        & $services.Store.RegisterAction -self $services.Store -actionName "TASKS_REFRESH" -scriptBlock {
+            param($Context)
+            # Ensure data structure exists
+            if (-not $global:Data) { $global:Data = @{} }
+            if (-not $global:Data.tasks) { $global:Data.tasks = @() }
+            
+            # Load raw tasks data
+            $rawTasks = $global:Data.tasks
+            
+            # --- Data for Dashboard ---
+            $activeTasks = ($rawTasks | Where-Object { -not $_.completed }).Count
+            
+            $today = (Get-Date).Date
+            $dashboardTasks = $rawTasks | Where-Object {
+                -not $_.completed -or ([DateTime]::Parse($_.updated_at).Date -eq $today)
+            } | Select-Object -First 10 | ForEach-Object {
+                @{
+                    Priority = switch($_.priority) {
+                        "high" { "[HIGH]" }
+                        "medium" { "[MED]" }
+                        "low" { "[LOW]" }
+                        default { "[MED]" }
+                    }
+                    Task = $_.title
+                    Project = if ($_.project) { $_.project } else { "None" }
+                }
             }
-            Task = $_.title
-            Project = $_.project ?? "None"
-        }
-    }
 
-    # --- Data for Task Screen (mapped correctly) ---
-    $tasksForTable = $rawTasks | ForEach-Object {
-        @{
-            Id = $_.id # Pass the ID through for actions
-            Status = if ($_.completed) { "✓" } else { "○" }
-            Priority = $_.priority ?? "Medium"
-            Title = $_.title ?? "Untitled"
-            Category = $_.project ?? "General"
-            DueDate = if ($_.due_date) { ([DateTime]$_.due_date).ToString("yyyy-MM-dd") } else { "N/A" }
+            # --- Data for Task Screen (mapped correctly) ---
+            $tasksForTable = $rawTasks | ForEach-Object {
+                @{
+                    Id = $_.id # Pass the ID through for actions
+                    Status = if ($_.completed) { "✓" } else { "○" }
+                    Priority = if ($_.priority) { $_.priority } else { "Medium" }
+                    Title = if ($_.title) { $_.title } else { "Untitled" }
+                    Category = if ($_.project) { $_.project } else { "General" }
+                    DueDate = if ($_.due_date) { ([DateTime]$_.due_date).ToString("yyyy-MM-dd") } else { "N/A" }
+                }
+            }
+            
+            & $Context.UpdateState @{ 
+                tasks = $tasksForTable        # Mapped for Task Screen table
+                todaysTasks = $dashboardTasks # Mapped for Dashboard table
+                "stats.activeTasks" = $activeTasks
+            }
         }
-    }
-    
-    & $Context.UpdateState @{ 
-        tasks = $tasksForTable        # Mapped for Task Screen table
-        todaysTasks = $dashboardTasks # Mapped for Dashboard table
-        "stats.activeTasks" = $activeTasks
-    }
-}
         
         & $services.Store.RegisterAction -self $services.Store -actionName "TIMERS_REFRESH" -scriptBlock {
             param($Context)
@@ -242,7 +241,7 @@ function Initialize-PMCServices {
                     } else { "00:00:00" }
                     
                     @{
-                        Project = $_.project ?? "No Project"
+                        Project = if ($_.project) { $_.project } else { "No Project" }
                         Time = $duration
                     }
                 }
@@ -270,23 +269,27 @@ function Initialize-PMCServices {
             
             # Ensure data structure exists
             if (-not $global:Data) { $global:Data = @{} }
-            if (-not $global:Data.time_entries) { $global:Data.time_entries = @() }
+            if (-not $global:Data.ContainsKey('time_entries')) { $global:Data.time_entries = @() }
             
             # Calculate today's and week's hours
             $todayHours = 0
             $weekHours = 0
-            if ($global:Data.time_entries) {
+            if ($global:Data.time_entries -and $global:Data.time_entries.Count -gt 0) {
                 $today = (Get-Date).Date
                 $weekStart = $today.AddDays(-[int]$today.DayOfWeek)
                 
                 foreach ($entry in $global:Data.time_entries) {
                     if ($entry.start_time) {
-                        $entryDate = [DateTime]::Parse($entry.start_time).Date
-                        if ($entryDate -eq $today) {
-                            $todayHours += $entry.duration
-                        }
-                        if ($entryDate -ge $weekStart -and $entryDate -le $today) {
-                            $weekHours += $entry.duration
+                        try {
+                            $entryDate = [DateTime]::Parse($entry.start_time).Date
+                            if ($entryDate -eq $today -and $entry.duration) {
+                                $todayHours += $entry.duration
+                            }
+                            if ($entryDate -ge $weekStart -and $entryDate -le $today -and $entry.duration) {
+                                $weekHours += $entry.duration
+                            }
+                        } catch {
+                            # Skip entries with invalid dates
                         }
                     }
                 }
@@ -308,7 +311,7 @@ function Initialize-PMCServices {
                 $newTask = @{
                     id = [Guid]::NewGuid().ToString()
                     title = $Payload.Title
-                    description = $Payload.Description ?? ""
+                    description = if ($Payload.Description) { $Payload.Description } else { "" }
                     completed = $false
                     priority = "medium"
                     created_at = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
@@ -408,8 +411,8 @@ function Initialize-PMCServices {
                 $tasks = $global:Data.tasks | ForEach-Object {
                     @{
                         Status = if ($_.completed) { "✓" } else { "○" }
-                        Priority = $_.priority ?? "Medium"
-                        Title = $_.title ?? "Untitled"
+                        Priority = if ($_.priority) { $_.priority } else { "Medium" }
+                        Title = if ($_.title) { $_.title } else { "Untitled" }
                     }
                 }
             }
@@ -424,6 +427,13 @@ function Initialize-PMCServices {
         $services.Navigation = Initialize-NavigationService -EnableBreadcrumbs $true
         if (-not $Silent) {
             Write-Host "  Navigation Service initialized" -ForegroundColor Gray
+        }
+        
+        # Add simple test screen route
+        & $services.Navigation.AddRoute -self $services.Navigation -Path "/test" -RouteConfig @{
+            Factory = { param($Services) Get-SimpleTestScreen -Services $Services }
+            Title = "Simple Test"
+            RequiresAuth = $false
         }
         
         # Initialize Keybinding Service
@@ -3925,7 +3935,24 @@ function global:New-TuiStackPanel {
         
         # Draw border if requested
         if ($self.ShowBorder) {
-            $borderColor = if ($self.ForegroundColor) { $self.ForegroundColor } else { Get-ThemeColor "Border" -Default Gray }
+            # DIAGNOSTIC: Force visible colors for debugging
+            $borderColor = if ($self.ForegroundColor) { 
+                $self.ForegroundColor 
+            } else { 
+                $themeColor = Get-ThemeColor "Border" -Default Gray
+                # If theme returns black on black background, force a visible color
+                if ($themeColor -eq [ConsoleColor]::Black -and $self.BackgroundColor -eq [ConsoleColor]::Black) {
+                    [ConsoleColor]::Gray
+                } else {
+                    $themeColor
+                }
+            }
+            
+            # Debug logging
+            if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+                Write-Log -Level Debug -Message "Drawing border at ($($self.X),$($self.Y)) size $($self.Width)x$($self.Height) color $borderColor"
+            }
+            
             Write-BufferBox -X $self.X -Y $self.Y -Width $self.Width -Height $self.Height -BorderColor $borderColor -Title $self.Title
         }
         
@@ -4159,7 +4186,24 @@ function global:New-TuiGridPanel {
         
         # Draw border if requested
         if ($self.ShowBorder) {
-            $borderColor = if ($self.ForegroundColor) { $self.ForegroundColor } else { Get-ThemeColor "Border" -Default Gray }
+            # DIAGNOSTIC: Force visible colors for debugging
+            $borderColor = if ($self.ForegroundColor) { 
+                $self.ForegroundColor 
+            } else { 
+                $themeColor = Get-ThemeColor "Border" -Default Gray
+                # If theme returns black on black background, force a visible color
+                if ($themeColor -eq [ConsoleColor]::Black -and $self.BackgroundColor -eq [ConsoleColor]::Black) {
+                    [ConsoleColor]::Gray
+                } else {
+                    $themeColor
+                }
+            }
+            
+            # Debug logging
+            if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+                Write-Log -Level Debug -Message "GridPanel drawing border at ($($self.X),$($self.Y)) size $($self.Width)x$($self.Height) color $borderColor"
+            }
+            
             Write-BufferBox -X $self.X -Y $self.Y -Width $self.Width -Height $self.Height -BorderColor $borderColor -Title $self.Title
         }
         
@@ -9256,6 +9300,7 @@ function Get-DashboardScreen {
         $rootPanel = New-TuiGridPanel -Props @{
             X = 1; Y = 2; Width = ($global:TuiState.BufferWidth - 2); Height = ($global:TuiState.BufferHeight - 4)
             ShowBorder = $false; RowDefinitions = @("14", "1*"); ColumnDefinitions = @("37", "42", "1*")
+            ShowGridLines = $false  # Set to true to debug layout
         }
         $self.Components.rootPanel = $rootPanel
         $self.Children += $rootPanel
@@ -9263,28 +9308,47 @@ function Get-DashboardScreen {
         Write-Log -Level Debug -Message "Dashboard: Created rootPanel, Children count=$($self.Children.Count)"
 
         # --- Quick Actions Panel ---
-        $quickActionsPanel = New-TuiStackPanel -Props @{ Name = "quickActionsPanel"; Title = " Quick Actions "; ShowBorder = $true; Padding = 1 }
+        # DIAGNOSTIC: Add explicit colors to ensure visibility
+        $quickActionsPanel = New-TuiStackPanel -Props @{ 
+            Name = "quickActionsPanel"
+            Title = " Quick Actions "
+            ShowBorder = $true
+            Padding = 1
+            ForegroundColor = [ConsoleColor]::White
+            BorderColor = [ConsoleColor]::Gray
+        }
         
         # Store services on self BEFORE creating components
         $self._navigationServices = $services
         
+        # Capture services for use in handler
+        $capturedServices = $services
+        
         $quickActions = New-TuiDataTable -Props @{
             Name = "quickActions"; IsFocusable = $true; ShowBorder = $false; ShowHeader = $false; ShowFooter = $false
             Columns = @( @{ Name = "Action"; Width = 32 } )
-            Data = @();
+            Data = @(
+                @{ Action = "[1] New Time Entry" },
+                @{ Action = "[2] Start Timer" },
+                @{ Action = "[3] View Tasks" },
+                @{ Action = "[4] View Projects" },
+                @{ Action = "[5] Reports" },
+                @{ Action = "[6] Settings" }
+            )
             OnRowSelect = {
                 param($SelectedData, $SelectedIndex)
                 $routes = @("/time-entry", "/timer/start", "/tasks", "/projects", "/reports", "/settings")
                 
                 if ($SelectedIndex -ge 0 -and $SelectedIndex -lt $routes.Count) {
-                    if ($services -and $services.Navigation) {
-                        & $services.Navigation.GoTo -self $services.Navigation -Path $routes[$SelectedIndex] -Services $services
+                    if ($capturedServices -and $capturedServices.Navigation) {
+                        & $capturedServices.Navigation.GoTo -self $capturedServices.Navigation -Path $routes[$SelectedIndex] -Services $capturedServices
                     } else {
                         Write-Log -Level Error -Message "Navigation services not available in OnRowSelect handler"
                     }
                 }
             }
         }
+        & $quickActions.ProcessData -self $quickActions
         & $quickActionsPanel.AddChild -self $quickActionsPanel -Child $quickActions
         & $rootPanel.AddChild -self $rootPanel -Child $quickActionsPanel -LayoutProps @{ "Grid.Row" = 0; "Grid.Column" = 0 }
         
@@ -9351,15 +9415,23 @@ function Get-DashboardScreen {
             
             Write-Log -Level Debug -Message "Creating quickActions subscription..."
             $subId = & $services.Store.Subscribe -self $services.Store -path "quickActions" -handler { 
-                param($NewValue, $OldValue, $Path) 
+                param($data) 
                 try {
-                    Write-Log -Level Debug -Message "quickActions handler triggered for path: $Path"
-                    if ($screen -and $screen._quickActions -and $NewValue) {
-                        $screen._quickActions.Data = $NewValue 
-                        & $screen._quickActions.ProcessData -self $screen._quickActions
-                        Write-Log -Level Debug -Message "quickActions updated with $($NewValue.Count) items"
+                    # Handle both parameter styles
+                    $newValue = if ($data.NewValue -ne $null) { $data.NewValue } else { $data }
+                    $path = if ($data.Path -ne $null) { $data.Path } else { "quickActions" }
+                    
+                    Write-Log -Level Debug -Message "quickActions handler triggered for path: $path"
+                    if ($screen -and $screen._quickActions) {
+                        if ($newValue -and $newValue.Count -gt 0) {
+                            $screen._quickActions.Data = $newValue 
+                            & $screen._quickActions.ProcessData -self $screen._quickActions
+                            Write-Log -Level Debug -Message "quickActions updated with $($newValue.Count) items"
+                        } else {
+                            Write-Log -Level Debug -Message "quickActions NewValue is null or empty"
+                        }
                     } else {
-                        Write-Log -Level Error -Message "quickActions component not accessible or NewValue is null"
+                        Write-Log -Level Error -Message "quickActions component not accessible"
                     }
                 } catch {
                     Write-Log -Level Error -Message "quickActions handler error: $_"
@@ -9374,10 +9446,11 @@ function Get-DashboardScreen {
             }
             
             $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "activeTimers" -handler { 
-                param($NewValue, $OldValue, $Path) 
+                param($data) 
                 try {
-                    if ($screen -and $screen._activeTimers -and $NewValue) {
-                        $screen._activeTimers.Data = $NewValue 
+                    $newValue = if ($data.NewValue -ne $null) { $data.NewValue } else { $data }
+                    if ($screen -and $screen._activeTimers -and $newValue) {
+                        $screen._activeTimers.Data = $newValue 
                         & $screen._activeTimers.ProcessData -self $screen._activeTimers 
                     }
                 } catch {
@@ -9386,10 +9459,11 @@ function Get-DashboardScreen {
             }
             
             $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "todaysTasks" -handler { 
-                param($NewValue, $OldValue, $Path) 
+                param($data) 
                 try {
-                    if ($screen -and $screen._todaysTasks -and $NewValue) {
-                        $screen._todaysTasks.Data = $NewValue 
+                    $newValue = if ($data.NewValue -ne $null) { $data.NewValue } else { $data }
+                    if ($screen -and $screen._todaysTasks -and $newValue) {
+                        $screen._todaysTasks.Data = $newValue 
                         & $screen._todaysTasks.ProcessData -self $screen._todaysTasks 
                     }
                 } catch {
@@ -9398,10 +9472,11 @@ function Get-DashboardScreen {
             }
             
             $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "stats.todayHours" -handler { 
-                param($NewValue, $OldValue, $Path) 
+                param($data) 
                 try {
-                    if ($screen -and $screen._todayLabel -and $NewValue -ne $null) {
-                        $screen._todayLabel.Text = "Today: ${NewValue}h" 
+                    $newValue = if ($data.NewValue -ne $null) { $data.NewValue } else { $data }
+                    if ($screen -and $screen._todayLabel -and $newValue -ne $null) {
+                        $screen._todayLabel.Text = "Today: ${newValue}h" 
                         Request-TuiRefresh
                     }
                 } catch {
@@ -9410,10 +9485,11 @@ function Get-DashboardScreen {
             }
             
             $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "stats.weekHours" -handler { 
-                param($NewValue, $OldValue, $Path) 
+                param($data) 
                 try {
-                    if ($screen -and $screen._weekLabel -and $NewValue -ne $null) {
-                        $screen._weekLabel.Text = "Week: ${NewValue}h" 
+                    $newValue = if ($data.NewValue -ne $null) { $data.NewValue } else { $data }
+                    if ($screen -and $screen._weekLabel -and $newValue -ne $null) {
+                        $screen._weekLabel.Text = "Week: ${newValue}h" 
                         Request-TuiRefresh
                     }
                 } catch {
@@ -9422,10 +9498,11 @@ function Get-DashboardScreen {
             }
             
             $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "stats.activeTasks" -handler { 
-                param($NewValue, $OldValue, $Path) 
+                param($data) 
                 try {
-                    if ($screen -and $screen._tasksLabel -and $NewValue -ne $null) {
-                        $screen._tasksLabel.Text = "Tasks: $NewValue" 
+                    $newValue = if ($data.NewValue -ne $null) { $data.NewValue } else { $data }
+                    if ($screen -and $screen._tasksLabel -and $newValue -ne $null) {
+                        $screen._tasksLabel.Text = "Tasks: $newValue" 
                         Request-TuiRefresh
                     }
                 } catch {
@@ -9434,10 +9511,11 @@ function Get-DashboardScreen {
             }
             
             $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "stats.runningTimers" -handler { 
-                param($NewValue, $OldValue, $Path) 
+                param($data) 
                 try {
-                    if ($screen -and $screen._timersLabel -and $NewValue -ne $null) {
-                        $screen._timersLabel.Text = "Timers: $NewValue" 
+                    $newValue = if ($data.NewValue -ne $null) { $data.NewValue } else { $data }
+                    if ($screen -and $screen._timersLabel -and $newValue -ne $null) {
+                        $screen._timersLabel.Text = "Timers: $newValue" 
                         Request-TuiRefresh
                     }
                 } catch {
@@ -9453,6 +9531,9 @@ function Get-DashboardScreen {
         
         # Initial data load with error handling
         try {
+            # Small delay to ensure components are ready
+            Start-Sleep -Milliseconds 50
+            
             $result = & $services.Store.Dispatch -self $services.Store -actionName "LOAD_DASHBOARD_DATA"
             if (-not $result.Success) {
                 Write-Log -Level Error -Message "Failed to load dashboard data: $($result.Error)"
@@ -9470,7 +9551,10 @@ function Get-DashboardScreen {
             Register-ScreenForFocus -Screen $self
         }
         
+        # Set initial focus to quickActions
         Request-Focus -Component $quickActions
+        $quickActions.IsFocused = $true
+        Write-Log -Level Debug -Message "Set initial focus to quickActions"
         
         # Set up refresh timer with proper service capture
         $timerServices = $services
@@ -9538,6 +9622,16 @@ function Get-DashboardScreen {
                 $services = $self._services
                 if (-not $services) { return $false }
                 
+                # First, let focused component handle input
+                $focusedComponent = Get-FocusedComponent
+                if ($focusedComponent -and $focusedComponent.HandleInput) {
+                    $handled = & $focusedComponent.HandleInput -self $focusedComponent -Key $Key
+                    if ($handled) {
+                        Write-Log -Level Debug -Message "Input handled by focused component: $($focusedComponent.Name)"
+                        return $true
+                    }
+                }
+                
                 $action = & $services.Keybindings.HandleKey -self $services.Keybindings -KeyInfo $Key
                 
                 switch ($action) {
@@ -9545,6 +9639,13 @@ function Get-DashboardScreen {
                     "App.DebugLog" { & $services.Navigation.GoTo -self $services.Navigation -Path "/log" -Services $services; return $true }
                     "App.Quit" { return "Quit" }
                     "App.Back" { return "Quit" }
+                }
+                
+                # Tab navigation
+                if ($Key.Key -eq [ConsoleKey]::Tab) {
+                    $reverse = ($Key.Modifiers -band [ConsoleModifiers]::Shift) -ne 0
+                    Move-Focus -Reverse:$reverse
+                    return $true
                 }
                 
                 if ($Key.KeyChar -ge '1' -and $Key.KeyChar -le '6') {
@@ -9669,20 +9770,59 @@ function Initialize-AppStore {
         GetState = { 
             param($self, [string]$path = $null) 
             if ([string]::IsNullOrEmpty($path)) {
-                return (& $self._state.GetValue)
+                # Directly access state data
+                return $self._state._data
             }
-            return (& $self._state.GetValue -Path $path)
+            # Navigate path manually
+            $parts = $path -split '\.'
+            $current = $self._state._data
+            foreach ($part in $parts) {
+                if ($null -eq $current) { return $null }
+                $current = $current[$part]
+            }
+            return $current
         }
         
         Subscribe = { 
             param($self, [string]$path, [scriptblock]$handler) 
             if (-not $handler) { throw "Handler scriptblock is required for Subscribe" }
-            return (& $self._state.Subscribe -Path $path -Handler $handler)
+            
+            # Manually implement subscribe to avoid $this issues
+            $state = $self._state
+            $subId = [Guid]::NewGuid().ToString()
+            
+            if (-not $state._subscribers) { $state._subscribers = @{} }
+            if (-not $state._subscribers.ContainsKey($path)) {
+                $state._subscribers[$path] = @()
+            }
+            
+            $state._subscribers[$path] += @{
+                Id = $subId
+                Handler = $handler
+            }
+            
+            # Call handler with current value
+            $currentValue = & $self.GetState -self $self -path $path
+            try {
+                & $handler @{ NewValue = $currentValue; OldValue = $null; Path = $path }
+            } catch {
+                Write-Warning "State subscriber error: $_"
+            }
+            
+            return $subId
         }
         
         Unsubscribe = { 
             param($self, $subId) 
-            if ($subId) { & $self._state.Unsubscribe -SubscriptionId $subId }
+            if ($subId -and $self._state._subscribers) {
+                # Manually remove subscription
+                foreach ($path in @($self._state._subscribers.Keys)) {
+                    $self._state._subscribers[$path] = @($self._state._subscribers[$path] | Where-Object { $_.Id -ne $subId })
+                    if ($self._state._subscribers[$path].Count -eq 0) {
+                        $self._state._subscribers.Remove($path)
+                    }
+                }
+            }
         }
         
         RegisterAction = { 
@@ -9722,35 +9862,62 @@ function Initialize-AppStore {
             try {
                 $previousState = & $self.GetState -self $self
                 
-                # Capture the store instance for proper closure creation
+                # Create action context with fixed UpdateState
                 $storeInstance = $self
-                
                 $actionContext = @{
                     GetState = { 
                         param($path = $null) 
+                        $store = $storeInstance
                         if ($path) {
-                            return & $storeInstance.GetState -self $storeInstance -path $path
+                            return & $store.GetState -self $store -path $path
                         } else {
-                            return & $storeInstance.GetState -self $storeInstance
+                            return & $store.GetState -self $store
                         }
                     }.GetNewClosure()
                     
                     UpdateState = { 
                         param($updates) 
-                        # Use the store's internal _updateState method which knows how to call the state properly
-                        if ($storeInstance._updateState) {
-                            & $storeInstance._updateState -self $storeInstance -updates $updates
+                        $store = $storeInstance
+                        if (-not $updates -or $updates.Count -eq 0) { return }
+                        
+                        Write-Host "[DEBUG] UpdateState called with $($updates.Count) updates" -ForegroundColor Yellow
+                        
+                        # Direct state update without using internal methods
+                        $state = $store._state
+                        if (-not $state._data) { $state._data = @{} }
+                        
+                        foreach ($key in $updates.Keys) {
+                            $oldValue = $state._data[$key]
+                            $newValue = $updates[$key]
+                            $state._data[$key] = $newValue
+                            
+                            Write-Host "[DEBUG] Updated '$key': $oldValue -> $newValue" -ForegroundColor Yellow
+                            
+                            # Notify subscribers
+                            if ($state._subscribers -and $state._subscribers.ContainsKey($key)) {
+                                foreach ($sub in $state._subscribers[$key]) {
+                                    try {
+                                        Write-Host "[DEBUG] Notifying subscriber for '$key'" -ForegroundColor Yellow
+                                        & $sub.Handler @{ NewValue = $newValue; OldValue = $oldValue; Path = $key }
+                                    } catch {
+                                        Write-Warning "Subscriber notification error for '$key': $_"
+                                    }
+                                }
+                            }
                         }
                     }.GetNewClosure()
                     
                     Dispatch = { 
                         param($name, $p = $null) 
-                        return & $storeInstance.Dispatch -self $storeInstance -actionName $name -payload $p
+                        $store = $storeInstance
+                        return & $store.Dispatch -self $store -actionName $name -payload $p
                     }.GetNewClosure()
                 }
                 
+                # Execute the action
                 & $self._actions[$actionName] -Context $actionContext -Payload $payload
                 
+                # Update history
                 if ($self._history.Count -gt 100) { $self._history = $self._history[-100..-1] }
                 $self._history += @{ Action = $action; PreviousState = $previousState; NextState = (& $self.GetState -self $self) }
                 
@@ -9758,13 +9925,31 @@ function Initialize-AppStore {
             } 
             catch {
                 if ($self._enableDebugLogging) { Write-Log -Level Error -Message "Error in action handler '$actionName'" -Data $_ }
+                Write-Host "[DEBUG] Action dispatch error: $_" -ForegroundColor Red
                 return @{ Success = $false; Error = $_.ToString() }
             }
         }
         
         _updateState = { 
             param($self, [hashtable]$updates)
-            if ($updates) { & $self._state.Update -Updates $updates }
+            if ($updates -and $self._state) {
+                # Direct update implementation
+                $state = $self._state
+                foreach ($key in $updates.Keys) {
+                    $oldValue = $state._data[$key]
+                    $state._data[$key] = $updates[$key]
+                    
+                    if ($oldValue -ne $updates[$key] -and $state._subscribers -and $state._subscribers.ContainsKey($key)) {
+                        foreach ($sub in $state._subscribers[$key]) {
+                            try {
+                                & $sub.Handler @{ NewValue = $updates[$key]; OldValue = $oldValue; Path = $key }
+                            } catch {
+                                Write-Warning "State notification error: $_"
+                            }
+                        }
+                    }
+                }
+            }
         }
         
         GetHistory = { param($self) ; return $self._history }
@@ -9773,7 +9958,6 @@ function Initialize-AppStore {
             param($self, [int]$stepsBack = 1)
             if ($stepsBack -gt $self._history.Count) { throw "Cannot go back $stepsBack steps. Only $($self._history.Count) actions in history." }
             $targetState = $self._history[-$stepsBack].PreviousState
-            # This call is correct because it calls another method on the store itself.
             & $self._updateState -self $self -updates $targetState
         }
     }

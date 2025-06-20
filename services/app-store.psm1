@@ -56,7 +56,7 @@ function Initialize-AppStore {
             # Call handler with current value
             $currentValue = & $self.GetState -self $self -path $path
             try {
-                & $handler -NewValue $currentValue -OldValue $null -Path $path
+                & $handler @{ NewValue = $currentValue; OldValue = $null; Path = $path }
             } catch {
                 Write-Warning "State subscriber error: $_"
             }
@@ -114,41 +114,45 @@ function Initialize-AppStore {
             try {
                 $previousState = & $self.GetState -self $self
                 
-                # Capture the store instance for proper closure creation
+                # Create action context with fixed UpdateState
                 $storeInstance = $self
-                
                 $actionContext = @{
                     GetState = { 
                         param($path = $null) 
+                        $store = $storeInstance
                         if ($path) {
-                            return & $storeInstance.GetState -self $storeInstance -path $path
+                            return & $store.GetState -self $store -path $path
                         } else {
-                            return & $storeInstance.GetState -self $storeInstance
+                            return & $store.GetState -self $store
                         }
                     }.GetNewClosure()
                     
                     UpdateState = { 
                         param($updates) 
-                        # Directly update state data and notify subscribers
-                        if ($storeInstance._state -and $updates) {
-                            $state = $storeInstance._state
+                        $store = $storeInstance
+                        if (-not $updates -or $updates.Count -eq 0) { return }
+                        
+                        Write-Host "[DEBUG] UpdateState called with $($updates.Count) updates" -ForegroundColor Yellow
+                        
+                        # Direct state update without using internal methods
+                        $state = $store._state
+                        if (-not $state._data) { $state._data = @{} }
+                        
+                        foreach ($key in $updates.Keys) {
+                            $oldValue = $state._data[$key]
+                            $newValue = $updates[$key]
+                            $state._data[$key] = $newValue
                             
-                            # Update the data directly
-                            foreach ($key in $updates.Keys) {
-                                $oldValue = $state._data[$key]
-                                $state._data[$key] = $updates[$key]
-                                
-                                # Notify subscribers if value changed
-                                if ($oldValue -ne $updates[$key]) {
-                                    # Call NotifySubscribers for this path
-                                    if ($state._subscribers.ContainsKey($key)) {
-                                        foreach ($sub in $state._subscribers[$key]) {
-                                            try {
-                                                & $sub.Handler -NewValue $updates[$key] -OldValue $oldValue -Path $key
-                                            } catch {
-                                                Write-Warning "State notification error: $_"
-                                            }
-                                        }
+                            Write-Host "[DEBUG] Updated '$key': $oldValue -> $newValue" -ForegroundColor Yellow
+                            
+                            # Notify subscribers
+                            if ($state._subscribers -and $state._subscribers.ContainsKey($key)) {
+                                foreach ($sub in $state._subscribers[$key]) {
+                                    try {
+                                        Write-Host "[DEBUG] Notifying subscriber for '$key'" -ForegroundColor Yellow
+                                        & $sub.Handler @{ NewValue = $newValue; OldValue = $oldValue; Path = $key }
+                                    } catch {
+                                        Write-Warning "Subscriber notification error for '$key': $_"
                                     }
                                 }
                             }
@@ -157,12 +161,15 @@ function Initialize-AppStore {
                     
                     Dispatch = { 
                         param($name, $p = $null) 
-                        return & $storeInstance.Dispatch -self $storeInstance -actionName $name -payload $p
+                        $store = $storeInstance
+                        return & $store.Dispatch -self $store -actionName $name -payload $p
                     }.GetNewClosure()
                 }
                 
+                # Execute the action
                 & $self._actions[$actionName] -Context $actionContext -Payload $payload
                 
+                # Update history
                 if ($self._history.Count -gt 100) { $self._history = $self._history[-100..-1] }
                 $self._history += @{ Action = $action; PreviousState = $previousState; NextState = (& $self.GetState -self $self) }
                 
@@ -170,6 +177,7 @@ function Initialize-AppStore {
             } 
             catch {
                 if ($self._enableDebugLogging) { Write-Log -Level Error -Message "Error in action handler '$actionName'" -Data $_ }
+                Write-Host "[DEBUG] Action dispatch error: $_" -ForegroundColor Red
                 return @{ Success = $false; Error = $_.ToString() }
             }
         }
@@ -177,16 +185,16 @@ function Initialize-AppStore {
         _updateState = { 
             param($self, [hashtable]$updates)
             if ($updates -and $self._state) {
-                # Use the same direct update logic as UpdateState in action context
+                # Direct update implementation
                 $state = $self._state
                 foreach ($key in $updates.Keys) {
                     $oldValue = $state._data[$key]
                     $state._data[$key] = $updates[$key]
                     
-                    if ($oldValue -ne $updates[$key] -and $state._subscribers.ContainsKey($key)) {
+                    if ($oldValue -ne $updates[$key] -and $state._subscribers -and $state._subscribers.ContainsKey($key)) {
                         foreach ($sub in $state._subscribers[$key]) {
                             try {
-                                & $sub.Handler -NewValue $updates[$key] -OldValue $oldValue -Path $key
+                                & $sub.Handler @{ NewValue = $updates[$key]; OldValue = $oldValue; Path = $key }
                             } catch {
                                 Write-Warning "State notification error: $_"
                             }
@@ -202,7 +210,6 @@ function Initialize-AppStore {
             param($self, [int]$stepsBack = 1)
             if ($stepsBack -gt $self._history.Count) { throw "Cannot go back $stepsBack steps. Only $($self._history.Count) actions in history." }
             $targetState = $self._history[-$stepsBack].PreviousState
-            # This call is correct because it calls another method on the store itself.
             & $self._updateState -self $self -updates $targetState
         }
     }
