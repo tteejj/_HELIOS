@@ -13,13 +13,13 @@ function global:New-TuiLabel {
         IsFocusable = $false
         
         # Properties (from Props)
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 10
-        Height = $Props.Height ?? 1
-        Visible = $Props.Visible ?? $true
-        ZIndex = $Props.ZIndex ?? 0
-        Text = $Props.Text ?? ""
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 10 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 1 }
+        Visible = if ($null -ne $Props.Visible) { $Props.Visible } else { $true }
+        ZIndex = if ($null -ne $Props.ZIndex) { $Props.ZIndex } else { 0 }
+        Text = if ($null -ne $Props.Text) { $Props.Text } else { "" }
         ForegroundColor = $Props.ForegroundColor
         Name = $Props.Name
         
@@ -51,13 +51,13 @@ function global:New-TuiButton {
         IsFocusable = $true
         
         # Properties (from Props)
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 10
-        Height = $Props.Height ?? 3
-        Visible = $Props.Visible ?? $true
-        ZIndex = $Props.ZIndex ?? 0
-        Text = $Props.Text ?? "Button"
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 10 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 3 }
+        Visible = if ($null -ne $Props.Visible) { $Props.Visible } else { $true }
+        ZIndex = if ($null -ne $Props.ZIndex) { $Props.ZIndex } else { 0 }
+        Text = if ($null -ne $Props.Text) { $Props.Text } else { "Button" }
         Name = $Props.Name
         
         # Internal State
@@ -109,19 +109,19 @@ function global:New-TuiTextBox {
         IsFocusable = $true
         
         # Properties (from Props)
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 20
-        Height = $Props.Height ?? 3
-        Visible = $Props.Visible ?? $true
-        ZIndex = $Props.ZIndex ?? 0
-        Text = $Props.Text ?? ""
-        Placeholder = $Props.Placeholder ?? ""
-        MaxLength = $Props.MaxLength ?? 100
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 20 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 3 }
+        Visible = if ($null -ne $Props.Visible) { $Props.Visible } else { $true }
+        ZIndex = if ($null -ne $Props.ZIndex) { $Props.ZIndex } else { 0 }
+        Text = if ($null -ne $Props.Text) { $Props.Text } else { "" }
+        Placeholder = if ($null -ne $Props.Placeholder) { $Props.Placeholder } else { "" }
+        MaxLength = if ($null -ne $Props.MaxLength) { $Props.MaxLength } else { 100 }
         Name = $Props.Name
         
         # Internal State
-        CursorPosition = $Props.CursorPosition ?? 0
+        CursorPosition = if ($null -ne $Props.CursorPosition) { $Props.CursorPosition } else { 0 }
         
         # Event Handlers (from Props)
         OnChange = $Props.OnChange
@@ -256,14 +256,14 @@ function global:New-TuiCheckBox {
         IsFocusable = $true
         
         # Properties (from Props)
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 20
-        Height = $Props.Height ?? 1
-        Visible = $Props.Visible ?? $true
-        ZIndex = $Props.ZIndex ?? 0
-        Text = $Props.Text ?? "Checkbox"
-        Checked = $Props.Checked ?? $false
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 20 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 1 }
+        Visible = if ($null -ne $Props.Visible) { $Props.Visible } else { $true }
+        ZIndex = if ($null -ne $Props.ZIndex) { $Props.ZIndex } else { 0 }
+        Text = if ($null -ne $Props.Text) { $Props.Text } else { "Checkbox" }
+        Checked = if ($null -ne $Props.Checked) { $Props.Checked } else { $false }
         Name = $Props.Name
         
         # Event Handlers (from Props)
@@ -307,15 +307,15 @@ function global:New-TuiDropdown {
         IsFocusable = $true
         
         # Properties (from Props)
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 20
-        Height = $Props.Height ?? 3
-        Visible = $Props.Visible ?? $true
-        ZIndex = $Props.ZIndex ?? 10
-        Options = $Props.Options ?? @()
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 20 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 3 }
+        Visible = if ($null -ne $Props.Visible) { $Props.Visible } else { $true }
+        ZIndex = if ($null -ne $Props.ZIndex) { $Props.ZIndex } else { 10 }
+        Options = if ($null -ne $Props.Options) { $Props.Options } else { @() }
         Value = $Props.Value
-        Placeholder = $Props.Placeholder ?? "Select..."
+        Placeholder = if ($null -ne $Props.Placeholder) { $Props.Placeholder } else { "Select..." }
         Name = $Props.Name
         
         # Internal State
@@ -424,15 +424,15 @@ function global:New-TuiProgressBar {
         IsFocusable = $false
         
         # Properties (from Props)
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 20
-        Height = $Props.Height ?? 1
-        Visible = $Props.Visible ?? $true
-        ZIndex = $Props.ZIndex ?? 0
-        Value = $Props.Value ?? 0
-        Max = $Props.Max ?? 100
-        ShowPercent = $Props.ShowPercent ?? $false
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 20 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 1 }
+        Visible = if ($null -ne $Props.Visible) { $Props.Visible } else { $true }
+        ZIndex = if ($null -ne $Props.ZIndex) { $Props.ZIndex } else { 0 }
+        Value = if ($null -ne $Props.Value) { $Props.Value } else { 0 }
+        Max = if ($null -ne $Props.Max) { $Props.Max } else { 100 }
+        ShowPercent = if ($null -ne $Props.ShowPercent) { $Props.ShowPercent } else { $false }
         Name = $Props.Name
         
         # Methods
@@ -473,19 +473,19 @@ function global:New-TuiTextArea {
         IsFocusable = $true
         
         # Properties (from Props)
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 40
-        Height = $Props.Height ?? 6
-        Visible = $Props.Visible ?? $true
-        ZIndex = $Props.ZIndex ?? 0
-        Text = $Props.Text ?? ""
-        Placeholder = $Props.Placeholder ?? "Enter text..."
-        WrapText = $Props.WrapText ?? $true
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 40 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 6 }
+        Visible = if ($null -ne $Props.Visible) { $Props.Visible } else { $true }
+        ZIndex = if ($null -ne $Props.ZIndex) { $Props.ZIndex } else { 0 }
+        Text = if ($null -ne $Props.Text) { $Props.Text } else { "" }
+        Placeholder = if ($null -ne $Props.Placeholder) { $Props.Placeholder } else { "Enter text..." }
+        WrapText = if ($null -ne $Props.WrapText) { $Props.WrapText } else { $true }
         Name = $Props.Name
         
         # Internal State
-        Lines = @($Props.Text -split "`n")
+        Lines = @((if ($null -ne $Props.Text) { $Props.Text } else { "" }) -split "`n")
         CursorX = 0
         CursorY = 0
         ScrollOffset = 0
@@ -744,14 +744,14 @@ function global:New-TuiDatePicker {
         IsFocusable = $true
         
         # Properties (from Props)
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 20
-        Height = $Props.Height ?? 3
-        Visible = $Props.Visible ?? $true
-        ZIndex = $Props.ZIndex ?? 0
-        Value = $Props.Value ?? (Get-Date)
-        Format = $Props.Format ?? "yyyy-MM-dd"
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 20 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 3 }
+        Visible = if ($null -ne $Props.Visible) { $Props.Visible } else { $true }
+        ZIndex = if ($null -ne $Props.ZIndex) { $Props.ZIndex } else { 0 }
+        Value = if ($null -ne $Props.Value) { $Props.Value } else { (Get-Date) }
+        Format = if ($null -ne $Props.Format) { $Props.Format } else { "yyyy-MM-dd" }
         Name = $Props.Name
         
         # Event Handlers (from Props)
@@ -823,15 +823,15 @@ function global:New-TuiTimePicker {
         IsFocusable = $true
         
         # Properties (from Props)
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 15
-        Height = $Props.Height ?? 3
-        Visible = $Props.Visible ?? $true
-        ZIndex = $Props.ZIndex ?? 0
-        Hour = $Props.Hour ?? 0
-        Minute = $Props.Minute ?? 0
-        Format24H = $Props.Format24H ?? $true
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 15 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 3 }
+        Visible = if ($null -ne $Props.Visible) { $Props.Visible } else { $true }
+        ZIndex = if ($null -ne $Props.ZIndex) { $Props.ZIndex } else { 0 }
+        Hour = if ($null -ne $Props.Hour) { $Props.Hour } else { 0 }
+        Minute = if ($null -ne $Props.Minute) { $Props.Minute } else { 0 }
+        Format24H = if ($null -ne $Props.Format24H) { $Props.Format24H } else { $true }
         Name = $Props.Name
         
         # Event Handlers (from Props)
@@ -915,14 +915,14 @@ function global:New-TuiTable {
         IsFocusable = $true
         
         # Properties (from Props)
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 60
-        Height = $Props.Height ?? 15
-        Visible = $Props.Visible ?? $true
-        ZIndex = $Props.ZIndex ?? 0
-        Columns = $Props.Columns ?? @()
-        Rows = $Props.Rows ?? @()
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 60 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 15 }
+        Visible = if ($null -ne $Props.Visible) { $Props.Visible } else { $true }
+        ZIndex = if ($null -ne $Props.ZIndex) { $Props.ZIndex } else { 0 }
+        Columns = if ($null -ne $Props.Columns) { $Props.Columns } else { @() }
+        Rows = if ($null -ne $Props.Rows) { $Props.Rows } else { @() }
         Name = $Props.Name
         
         # Internal State
@@ -1093,15 +1093,15 @@ function global:New-TuiChart {
         IsFocusable = $false
         
         # Properties (from Props)
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 40
-        Height = $Props.Height ?? 10
-        Visible = $Props.Visible ?? $true
-        ZIndex = $Props.ZIndex ?? 0
-        ChartType = $Props.ChartType ?? "Bar"
-        Data = $Props.Data ?? @()
-        ShowValues = $Props.ShowValues ?? $true
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 40 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 10 }
+        Visible = if ($null -ne $Props.Visible) { $Props.Visible } else { $true }
+        ZIndex = if ($null -ne $Props.ZIndex) { $Props.ZIndex } else { 0 }
+        ChartType = if ($null -ne $Props.ChartType) { $Props.ChartType } else { "Bar" }
+        Data = if ($null -ne $Props.Data) { $Props.Data } else { @() }
+        ShowValues = if ($null -ne $Props.ShowValues) { $Props.ShowValues } else { $true }
         Name = $Props.Name
         
         # Methods

@@ -8,16 +8,16 @@ function global:New-TuiCalendarPicker {
     
     $component = @{
         Type = "CalendarPicker"
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 30
-        Height = $Props.Height ?? 10
-        Value = $Props.Value ?? (Get-Date)
-        Mode = $Props.Mode ?? "Date"  # Date, DateTime, Time
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 30 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 10 }
+        Value = if ($null -ne $Props.Value) { $Props.Value } else { (Get-Date) }
+        Mode = if ($null -ne $Props.Mode) { $Props.Mode } else { "Date" } # Date, DateTime, Time
         IsFocusable = $true
         CurrentView = "Day"  # Day, Month, Year
-        SelectedDate = $Props.Value ?? (Get-Date)
-        ViewDate = $Props.Value ?? (Get-Date)
+        SelectedDate = if ($null -ne $Props.Value) { $Props.Value } else { (Get-Date) }
+        ViewDate = if ($null -ne $Props.Value) { $Props.Value } else { (Get-Date) }
         
         Render = {
             param($self)
@@ -203,15 +203,15 @@ function global:New-TuiSearchableDropdown {
     
     $component = @{
         Type = "SearchableDropdown"
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 30
-        Height = $Props.Height ?? 3
-        Options = $Props.Options ?? @()
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 30 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 3 }
+        Options = if ($null -ne $Props.Options) { $Props.Options } else { @() }
         Value = $Props.Value
-        Placeholder = $Props.Placeholder ?? "Type to search..."
-        MaxDisplayItems = $Props.MaxDisplayItems ?? 5
-        AllowCustomValue = $Props.AllowCustomValue ?? $false
+        Placeholder = if ($null -ne $Props.Placeholder) { $Props.Placeholder } else { "Type to search..." }
+        MaxDisplayItems = if ($null -ne $Props.MaxDisplayItems) { $Props.MaxDisplayItems } else { 5 }
+        AllowCustomValue = if ($null -ne $Props.AllowCustomValue) { $Props.AllowCustomValue } else { $false }
         IsFocusable = $true
         IsOpen = $false
         SearchText = ""
@@ -448,14 +448,14 @@ function global:New-TuiMultiSelect {
     
     $component = @{
         Type = "MultiSelect"
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 30
-        Height = $Props.Height ?? 10
-        Options = $Props.Options ?? @()
-        SelectedValues = $Props.SelectedValues ?? @()
-        Title = $Props.Title ?? "Select items"
-        AllowSelectAll = $Props.AllowSelectAll ?? $true
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 30 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 10 }
+        Options = if ($null -ne $Props.Options) { $Props.Options } else { @() }
+        SelectedValues = if ($null -ne $Props.SelectedValues) { $Props.SelectedValues } else { @() }
+        Title = if ($null -ne $Props.Title) { $Props.Title } else { "Select items" }
+        AllowSelectAll = if ($null -ne $Props.AllowSelectAll) { $Props.AllowSelectAll } else { $true }
         IsFocusable = $true
         SelectedIndex = 0
         ScrollOffset = 0
@@ -593,17 +593,17 @@ function global:New-TuiNumberInput {
     
     $component = @{
         Type = "NumberInput"
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 20
-        Height = $Props.Height ?? 3
-        Value = $Props.Value ?? 0
-        Min = $Props.Min ?? 0
-        Max = $Props.Max ?? 100
-        Step = $Props.Step ?? 1
-        DecimalPlaces = $Props.DecimalPlaces ?? 0
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 20 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 3 }
+        Value = if ($null -ne $Props.Value) { $Props.Value } else { 0 }
+        Min = if ($null -ne $Props.Min) { $Props.Min } else { 0 }
+        Max = if ($null -ne $Props.Max) { $Props.Max } else { 100 }
+        Step = if ($null -ne $Props.Step) { $Props.Step } else { 1 }
+        DecimalPlaces = if ($null -ne $Props.DecimalPlaces) { $Props.DecimalPlaces } else { 0 }
         IsFocusable = $true
-        TextValue = ($Props.Value ?? 0).ToString()
+        TextValue = (if ($null -ne $Props.Value) { $Props.Value } else { 0 }).ToString()
         CursorPosition = 0
         
         Render = {
@@ -768,15 +768,15 @@ function global:New-TuiSlider {
     
     $component = @{
         Type = "Slider"
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 30
-        Height = $Props.Height ?? 1
-        Value = $Props.Value ?? 50
-        Min = $Props.Min ?? 0
-        Max = $Props.Max ?? 100
-        Step = $Props.Step ?? 1
-        ShowValue = $Props.ShowValue ?? $true
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 30 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 1 }
+        Value = if ($null -ne $Props.Value) { $Props.Value } else { 50 }
+        Min = if ($null -ne $Props.Min) { $Props.Min } else { 0 }
+        Max = if ($null -ne $Props.Max) { $Props.Max } else { 100 }
+        Step = if ($null -ne $Props.Step) { $Props.Step } else { 1 }
+        ShowValue = if ($null -ne $Props.ShowValue) { $Props.ShowValue } else { $true }
         IsFocusable = $true
         
         Render = {

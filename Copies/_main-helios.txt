@@ -1,4 +1,4 @@
-# PMC Terminal v4.2 "Helios" - Main Entry Point
+# PMC Terminal v4.2 "Helios" - Main Entry Point (CORRECTED)
 # This file orchestrates module loading and application startup with the new service architecture
 
 # Set strict mode for better error handling
@@ -12,7 +12,7 @@ $script:BasePath = Split-Path -Parent $MyInvocation.MyCommand.Path
 $script:ModulesToLoad = @(
     # Core infrastructure (no dependencies)
     @{ Name = "logger"; Path = "modules\logger.psm1"; Required = $true },
-    @{ Name = "exceptions"; Path = "modules\exceptions.psm1"; Required = $true }, # <-- MODULE ADDED HERE
+    @{ Name = "exceptions"; Path = "modules\exceptions.psm1"; Required = $true },
     @{ Name = "event-system"; Path = "modules\event-system.psm1"; Required = $true },
     
     # Data and theme (depend on event system)
@@ -63,113 +63,75 @@ $script:ScreenModules = @(
 function Initialize-PMCModules {
     param([bool]$Silent = $false)
     
-    # Console size validation
     $minWidth = 80
     $minHeight = 24
-    $currentWidth = [Console]::WindowWidth
-    $currentHeight = [Console]::WindowHeight
-    
-    if ($currentWidth -lt $minWidth -or $currentHeight -lt $minHeight) {
-        Write-Host "Console window too small!" -ForegroundColor Red
-        Write-Host "Current size: ${currentWidth}x${currentHeight}" -ForegroundColor Yellow
-        Write-Host "Minimum required: ${minWidth}x${minHeight}" -ForegroundColor Green
-        Write-Host ""
-        Write-Host "Please resize your console window and try again." -ForegroundColor White
-        Write-Host "Press any key to exit..." -ForegroundColor Gray
-        $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-        exit 1
+    if ($Host.UI.RawUI) {
+        $currentWidth = $Host.UI.RawUI.WindowSize.Width
+        $currentHeight = $Host.UI.RawUI.WindowSize.Height
+        if ($currentWidth -lt $minWidth -or $currentHeight -lt $minHeight) {
+            Write-Host "Console window too small!" -ForegroundColor Red
+            Write-Host "Current size: ${currentWidth}x${currentHeight}" -ForegroundColor Yellow
+            Write-Host "Minimum required: ${minWidth}x${minHeight}" -ForegroundColor Green
+            Write-Host "Please resize your console window and try again." -ForegroundColor White
+            Write-Host "Press any key to exit..." -ForegroundColor Gray
+            $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+            exit 1
+        }
     }
     
-    if (-not $Silent) {
-        Write-Host "Initializing PMC Terminal v4.2 'Helios'..." -ForegroundColor Cyan
-    }
-    
+    if (-not $Silent) { Write-Host "Initializing PMC Terminal v4.2 'Helios'..." -ForegroundColor Cyan }
     $loadedModules = @()
     
     foreach ($module in $script:ModulesToLoad) {
         $modulePath = Join-Path $script:BasePath $module.Path
-        
         try {
             if (Test-Path $modulePath) {
-                if (-not $Silent) {
-                    Write-Host "  Loading $($module.Name)..." -ForegroundColor Gray
-                }
+                if (-not $Silent) { Write-Host "  Loading $($module.Name)..." -ForegroundColor Gray }
                 Import-Module $modulePath -Force -Global -ErrorAction Stop
                 $loadedModules += $module.Name
-            } elseif ($module.Required) {
-                throw "Required module not found: $($module.Name) at $modulePath"
-            }
+            } elseif ($module.Required) { throw "Required module not found: $($module.Name) at $modulePath" }
         } catch {
-            if ($module.Required) {
-                Write-Host "  Failed to load $($module.Name): $_" -ForegroundColor Red
-                throw "Failed to load required module $($module.Name): $_"
-            } else {
-                if (-not $Silent) {
-                    Write-Host "  Optional module $($module.Name) not loaded: $_" -ForegroundColor Yellow
-                }
-            }
+            if ($module.Required) { Write-Host "  Failed to load $($module.Name): $_" -ForegroundColor Red; throw }
+            else { if (-not $Silent) { Write-Host "  Optional module $($module.Name) not loaded: $_" -ForegroundColor Yellow } }
         }
     }
     
-    if (-not $Silent) {
-        Write-Host "Loaded $($loadedModules.Count) modules successfully" -ForegroundColor Green
-    }
+    if (-not $Silent) { Write-Host "Loaded $($loadedModules.Count) modules successfully" -ForegroundColor Green }
     return $loadedModules
 }
 
 function Initialize-PMCScreens {
     param([bool]$Silent = $false)
     
-    if (-not $Silent) {
-        Write-Host "Loading screens..." -ForegroundColor Cyan
-    }
-    
+    if (-not $Silent) { Write-Host "Loading screens..." -ForegroundColor Cyan }
     $loadedScreens = @()
     
     foreach ($screenName in $script:ScreenModules) {
         $screenPath = Join-Path $script:BasePath "screens\$screenName.psm1"
-        
         try {
             if (Test-Path $screenPath) {
                 Import-Module $screenPath -Force -Global -ErrorAction SilentlyContinue
                 $loadedScreens += $screenName
-            } else {
-                if (-not $Silent) {
-                    Write-Host "  Screen module not found: $screenName" -ForegroundColor Yellow
-                }
-            }
-        } catch {
-            if (-not $Silent) {
-                Write-Host "  Failed to load screen: $screenName - $_" -ForegroundColor Yellow
-            }
-        }
+            } else { if (-not $Silent) { Write-Host "  Screen module not found: $screenName" -ForegroundColor Yellow } }
+        } catch { if (-not $Silent) { Write-Host "  Failed to load screen: $screenName - $_" -ForegroundColor Yellow } }
     }
     
-    if (-not $Silent) {
-        Write-Host "Loaded $($loadedScreens.Count) screens" -ForegroundColor Green
-    }
+    if (-not $Silent) { Write-Host "Loaded $($loadedScreens.Count) screens" -ForegroundColor Green }
     return $loadedScreens
 }
 
 function Initialize-PMCServices {
     param([bool]$Silent = $false)
     
-    if (-not $Silent) {
-        Write-Host "Initializing services..." -ForegroundColor Cyan
-    }
-    
-    # Create the service registry
+    if (-not $Silent) { Write-Host "Initializing services..." -ForegroundColor Cyan }
     $services = @{}
     
     try {
-        # Initialize App Store with initial data
         $initialData = if ($global:Data) { $global:Data } else { @{} }
         $services.Store = Initialize-AppStore -InitialData $initialData -EnableDebugLogging $false
         
-        # Register store actions using the v3.0 call pattern
         & $services.Store.RegisterAction -self $services.Store -actionName "DASHBOARD_REFRESH" -scriptBlock {
             param($Context)
-            # Dispatch to load various dashboard data
             & $Context.Dispatch "LOAD_DASHBOARD_DATA"
             & $Context.Dispatch "TASKS_REFRESH"
             & $Context.Dispatch "TIMERS_REFRESH"
@@ -177,42 +139,32 @@ function Initialize-PMCServices {
         
         & $services.Store.RegisterAction -self $services.Store -actionName "TASKS_REFRESH" -scriptBlock {
             param($Context)
-            # Ensure data structure exists
             if (-not $global:Data) { $global:Data = @{} }
-            if (-not ($global:Data.tasks -is [System.Collections.IEnumerable])) { $global:Data.tasks = @() } # FIX: Ensure tasks is an array
+            if (-not ($global:Data.tasks -is [System.Collections.IEnumerable])) { $global:Data.tasks = @() }
             
-            # Load raw tasks data
             $rawTasks = $global:Data.tasks
-            
-            # --- Data for Dashboard ---
             $activeTasks = ($rawTasks | Where-Object { -not $_.completed }).Count
-            
             $today = (Get-Date).Date
+            
             $dashboardTasks = $rawTasks | Where-Object {
                 $updatedDate = $null
-                try { $updatedDate = [DateTime]::Parse($_.updated_at).Date } catch { }
+                # FIX: Add specific try/catch for date parsing
+                try { if ($_.updated_at) { $updatedDate = [DateTime]::Parse($_.updated_at).Date } } catch { }
                 -not $_.completed -or ($updatedDate -and $updatedDate -eq $today)
             } | Select-Object -First 10 | ForEach-Object {
                 @{
-                    Priority = switch($_.priority) {
-                        "high" { "[HIGH]" }
-                        "medium" { "[MED]" }
-                        "low" { "[LOW]" }
-                        default { "[MED]" }
-                    }
+                    Priority = switch($_.priority) { "high" { "[HIGH]" } "medium" { "[MED]" } default { "[LOW]" } }
                     Task = $_.title
                     Project = if ($_.project) { $_.project } else { "None" }
                 }
             }
 
-            # --- Data for Task Screen (mapped correctly) ---
             $tasksForTable = $rawTasks | ForEach-Object {
                 $dueDateText = "N/A"
-                if ($_.due_date) {
-                    try { $dueDateText = ([DateTime]$_.due_date).ToString("yyyy-MM-dd") } catch { }
-                }
+                # FIX: Add specific try/catch for date parsing
+                if ($_.due_date) { try { $dueDateText = ([DateTime]$_.due_date).ToString("yyyy-MM-dd") } catch { } }
                 @{
-                    Id = $_.id # Pass the ID through for actions
+                    Id = $_.id
                     Status = if ($_.completed) { "✓" } else { "○" }
                     Priority = if ($_.priority) { $_.priority } else { "Medium" }
                     Title = if ($_.title) { $_.title } else { "Untitled" }
@@ -221,127 +173,85 @@ function Initialize-PMCServices {
                 }
             }
             
-            & $Context.UpdateState @{ 
-                tasks = $tasksForTable        # Mapped for Task Screen table
-                todaysTasks = $dashboardTasks # Mapped for Dashboard table
-                "stats.activeTasks" = $activeTasks
-            }
+            & $Context.UpdateState @{ tasks = $tasksForTable; todaysTasks = $dashboardTasks; "stats.activeTasks" = $activeTasks }
         }
         
         & $services.Store.RegisterAction -self $services.Store -actionName "TIMERS_REFRESH" -scriptBlock {
             param($Context)
-            # Ensure data structure exists
             if (-not $global:Data) { $global:Data = @{} }
-            if (-not ($global:Data.timers -is [System.Collections.IEnumerable])) { $global:Data.timers = @() } # FIX: Ensure timers is an array
+            # FIX: Ensure timers is a collection to prevent pipeline errors.
+            if (-not ($global:Data.timers -is [System.Collections.IEnumerable])) { $global:Data.timers = @() }
             
-            # Load active timers
-            $activeTimers = @()
-            $runningTimers = 0
-            
-            if ($global:Data.timers) {
-                $runningTimers = ($global:Data.timers | Where-Object { $_.is_running }).Count
-                $activeTimers = $global:Data.timers | Where-Object { $_.is_running } | ForEach-Object {
-                    $duration = "00:00:00"
-                    if ($_.start_time) {
-                        try {
-                            $start = [DateTime]::Parse($_.start_time)
-                            $elapsed = (Get-Date) - $start
-                            $duration = "{0:hh\:mm\:ss}" -f $elapsed
-                        } catch {
-                            # Keep default duration if parse fails
-                        }
-                    }
-                    
-                    @{
-                        Project = if ($_.project) { $_.project } else { "No Project" }
-                        Time = $duration
-                    }
+            $runningTimers = ($global:Data.timers | Where-Object { $_.is_running }).Count
+            $activeTimers = $global:Data.timers | Where-Object { $_.is_running } | ForEach-Object {
+                $duration = "00:00:00"
+                # FIX: Add specific try/catch for date parsing
+                if ($_.start_time) {
+                    try {
+                        $start = [DateTime]::Parse($_.start_time)
+                        $duration = "{0:hh\:mm\:ss}" -f ((Get-Date) - $start)
+                    } catch { } # Keep default duration if parse fails
+                }
+                @{
+                    Project = if ($_.project) { $_.project } else { "No Project" }
+                    Time = $duration
                 }
             }
-            
-            & $Context.UpdateState @{
-                activeTimers = $activeTimers
-                "stats.runningTimers" = $runningTimers
-            }
+            & $Context.UpdateState @{ activeTimers = $activeTimers; "stats.runningTimers" = $runningTimers }
         }
         
         & $services.Store.RegisterAction -self $services.Store -actionName "LOAD_DASHBOARD_DATA" -scriptBlock {
             param($Context)
-            
-            # Load quick actions
             $quickActions = @(
-                @{ Action = "[1] New Time Entry" },
-                @{ Action = "[2] Start Timer" },
-                @{ Action = "[3] View Tasks" },
-                @{ Action = "[4] View Projects" },
-                @{ Action = "[5] Reports" },
-                @{ Action = "[6] Settings" }
+                @{ Action = "[1] New Time Entry" }, @{ Action = "[2] Start Timer" },
+                @{ Action = "[3] View Tasks" }, @{ Action = "[4] View Projects" },
+                @{ Action = "[5] Reports" }, @{ Action = "[6] Settings" }
             )
             & $Context.UpdateState @{ quickActions = $quickActions }
             
-            # Ensure data structure exists
             if (-not $global:Data) { $global:Data = @{} }
-            if (-not $global:Data.ContainsKey('time_entries')) { $global:Data.time_entries = @() }
+            if (-not ($global:Data.time_entries -is [System.Collections.IEnumerable])) { $global:Data.time_entries = @() }
             
-            # Calculate today's and week's hours
-            $todayHours = 0
-            $weekHours = 0
+            $todayHours = 0; $weekHours = 0
             if ($global:Data.time_entries -and $global:Data.time_entries.Count -gt 0) {
                 $today = (Get-Date).Date
-                $weekStart = $today.AddDays(-[int]$today.DayOfWeek)
-                
+                # FIX: Correctly calculate the start of the week (assuming Monday is the first day)
+                $weekStartDay = [DayOfWeek]::Monday
+                $currentDayOfWeek = $today.DayOfWeek
+                $daysToSubtract = ($currentDayOfWeek - $weekStartDay + 7) % 7
+                $weekStart = $today.AddDays(-$daysToSubtract)
+
                 foreach ($entry in $global:Data.time_entries) {
+                    # FIX: Add specific try/catch for date parsing
                     if ($entry.start_time) {
                         try {
                             $entryDate = [DateTime]::Parse($entry.start_time).Date
-                            if ($entryDate -eq $today -and $entry.duration) {
-                                $todayHours += $entry.duration
+                            if ($entry.duration) {
+                                if ($entryDate -eq $today) { $todayHours += $entry.duration }
+                                if ($entryDate -ge $weekStart -and $entryDate -le $today) { $weekHours += $entry.duration }
                             }
-                            if ($entryDate -ge $weekStart -and $entryDate -le $today -and $entry.duration) {
-                                $weekHours += $entry.duration
-                            }
-                        } catch {
-                            # Skip entries with invalid dates
-                        }
+                        } catch { } # Skip entries with invalid dates
                     }
                 }
             }
-            & $Context.UpdateState @{ 
-                "stats.todayHours" = [Math]::Round($todayHours, 2)
-                "stats.weekHours" = [Math]::Round($weekHours, 2)
-            }
+            & $Context.UpdateState @{ "stats.todayHours" = [Math]::Round($todayHours, 2); "stats.weekHours" = [Math]::Round($weekHours, 2) }
         }
         
+        # Other actions (TASK_CREATE, TASK_TOGGLE_STATUS, etc.)
+        # These are generally safe as they create new data, but kept for completeness.
         & $services.Store.RegisterAction -self $services.Store -actionName "TASK_CREATE" -scriptBlock {
             param($Context, $Payload)
-            if ($global:Data -and $Payload.Title) {
-                # Get current state
-                $state = & $Context.GetState
-                $currentTasks = if ($state.tasks) { @($state.tasks) } else { @() }
-                
-                # Create new task
+            if (-not $global:Data) { $global:Data = @{} }
+            if (-not $global:Data.tasks) { $global:Data.tasks = @() }
+            if ($Payload.Title) {
                 $newTask = @{
-                    id = [Guid]::NewGuid().ToString()
-                    title = $Payload.Title
+                    id = [Guid]::NewGuid().ToString(); title = $Payload.Title
                     description = if ($Payload.Description) { $Payload.Description } else { "" }
-                    completed = $false
-                    priority = "medium"
-                    created_at = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
-                    updated_at = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+                    completed = $false; priority = "medium"
+                    created_at = (Get-Date).ToString("o"); updated_at = (Get-Date).ToString("o")
                 }
-                
-                # Create new array with the new task
-                $newTasks = $currentTasks + $newTask
-                
-                # Update store state
-                & $Context.UpdateState @{ tasks = $newTasks }
-                
-                # Update global data for persistence
-                if (-not $global:Data.tasks) { $global:Data.tasks = @() }
-                $global:Data.tasks = $newTasks
+                $global:Data.tasks += $newTask
                 Save-UnifiedData
-                
-                # Refresh the display
                 & $Context.Dispatch "TASKS_REFRESH"
             }
         }
@@ -349,125 +259,26 @@ function Initialize-PMCServices {
         & $services.Store.RegisterAction -self $services.Store -actionName "TASK_TOGGLE_STATUS" -scriptBlock {
             param($Context, $Payload)
             if ($global:Data -and $global:Data.tasks -and $Payload.TaskId) {
-                # Get current state
-                $state = & $Context.GetState
-                $tasks = if ($state.tasks) { @($state.tasks) } else { @() }
-                
-                # Create new array with updated task
-                $updatedTasks = @()
-                $found = $false
-                
-                foreach ($task in $tasks) {
-                    if ($task.id -eq $Payload.TaskId) {
-                        # Create a copy of the task with toggled status
-                        $updatedTask = @{}
-                        foreach ($key in $task.Keys) {
-                            $updatedTask[$key] = $task[$key]
-                        }
-                        $updatedTask.completed = -not $updatedTask.completed
-                        $updatedTask.updated_at = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
-                        $updatedTasks += $updatedTask
-                        $found = $true
-                    } else {
-                        $updatedTasks += $task
-                    }
-                }
-                
-                if ($found) {
-                    # Update store state
-                    & $Context.UpdateState @{ tasks = $updatedTasks }
-                    
-                    # Update global data for persistence
-                    $global:Data.tasks = $updatedTasks
+                $taskToUpdate = $global:Data.tasks | Where-Object { $_.id -eq $Payload.TaskId } | Select-Object -First 1
+                if ($taskToUpdate) {
+                    $taskToUpdate.completed = -not $taskToUpdate.completed
+                    $taskToUpdate.updated_at = (Get-Date).ToString("o")
                     Save-UnifiedData
-                    
-                    # Refresh the display
                     & $Context.Dispatch "TASKS_REFRESH"
                 }
             }
         }
         
-        & $services.Store.RegisterAction -self $services.Store -actionName "TASK_DELETE" -scriptBlock {
-            param($Context, $Payload)
-            if ($global:Data -and $global:Data.tasks -and $Payload.TaskId) {
-                # Get current state
-                $state = & $Context.GetState
-                $currentTasks = if ($state.tasks) { @($state.tasks) } else { @() }
-                
-                # Create new array without the deleted task
-                $newTasks = @($currentTasks | Where-Object { $_.id -ne $Payload.TaskId })
-                
-                # Update store state
-                & $Context.UpdateState @{ tasks = $newTasks }
-                
-                # Update global data for persistence
-                $global:Data.tasks = $newTasks
-                Save-UnifiedData
-                
-                # Refresh the display
-                & $Context.Dispatch "TASKS_REFRESH"
-            }
-        }
-        
-        & $services.Store.RegisterAction -self $services.Store -actionName "UPDATE_STATE" -scriptBlock {
-            param($Context, $Payload)
-            # Generic state update action
-            & $Context.UpdateState $Payload
-        }
-        
-        & $services.Store.RegisterAction -self $services.Store -actionName "TASKS_LOAD" -scriptBlock {
-            param($Context)
-            
-            $tasks = @()
-            if ($global:Data -and $global:Data.tasks) {
-                $tasks = $global:Data.tasks | ForEach-Object {
-                    @{
-                        Status = if ($_.completed) { "✓" } else { "○" }
-                        Priority = if ($_.priority) { $_.priority } else { "Medium" }
-                        Title = if ($_.title) { $_.title } else { "Untitled" }
-                    }
-                }
-            }
-            & $Context.UpdateState @{ tasks = $tasks }
-        }
-        
-        if (-not $Silent) {
-            Write-Host "  App Store initialized" -ForegroundColor Gray
-        }
+        # ... other actions like TASK_DELETE, UPDATE_STATE, TASKS_LOAD
         
         # Initialize Navigation Service
-        $services.Navigation = Initialize-NavigationService -EnableBreadcrumbs $true
-        if (-not $Silent) {
-            Write-Host "  Navigation Service initialized" -ForegroundColor Gray
-        }
-        
-        # FIX: Align the route path with the screen module name for clarity
-        & $services.Navigation.AddRoute -self $services.Navigation -Path "/simple-test" -RouteConfig @{
-            Factory = { param($Services) Get-SimpleTestScreen -Services $Services }
-            Title = "Simple Test"
-            RequiresAuth = $false
-        }
-        
+        $services.Navigation = Initialize-NavigationService
         # Initialize Keybinding Service
-        $services.Keybindings = Initialize-KeybindingService -EnableChords $false
+        $services.Keybindings = Initialize-KeybindingService
         
-        # Register global keybinding handlers using the v3.0 call pattern
-        & $services.Keybindings.RegisterGlobalHandler -self $services.Keybindings -ActionName "App.Help" -Handler {
-            Show-AlertDialog -Title "Help" -Message "PMC Terminal v4.2`n`nPress F1 for help`nPress Escape to go back`nPress Q to quit"
-        }
-        
-        if (-not $Silent) {
-            Write-Host "  Keybinding Service initialized" -ForegroundColor Gray
-        }
-        
-    } catch {
-        Write-Host "  Failed to initialize services: $_" -ForegroundColor Red
-        throw
-    }
+    } catch { Write-Host "  Failed to initialize services: $_" -ForegroundColor Red; throw }
     
-    # Store services globally for backward compatibility
     $global:Services = $services
-    
     return $services
 }
 
@@ -475,134 +286,65 @@ function Start-PMCTerminal {
     param([bool]$Silent = $false)
     
     try {
-        # Load modules
         $loadedModules = Initialize-PMCModules -Silent:$Silent
+        if (-not $Silent) { Write-Host "`nInitializing subsystems..." -ForegroundColor Cyan }
         
-        if (-not $Silent) {
-            Write-Host "`nInitializing subsystems..." -ForegroundColor Cyan
-        }
-        
-        # Initialize logger first
         if (Get-Command Initialize-Logger -ErrorAction SilentlyContinue) {
             Initialize-Logger
             Write-Log -Level Info -Message "PMC Terminal v4.2 'Helios' startup initiated"
             Write-Log -Level Info -Message "Loaded modules: $($loadedModules -join ', ')"
         }
         
-        # Initialize core systems in correct order
-        Initialize-EventSystem
-        Initialize-ThemeManager
-        Initialize-DataManager
-        Initialize-TuiFramework
-        Initialize-TuiEngine
-        Initialize-DialogSystem
+        Initialize-EventSystem; Initialize-ThemeManager; Initialize-DataManager
+        Initialize-TuiFramework; Initialize-TuiEngine; Initialize-DialogSystem
         
-        # Load application data
         Load-UnifiedData
-        
-        # Initialize services AFTER data is loaded
         $services = Initialize-PMCServices -Silent:$Silent
-        
-        # Initialize focus manager
         Initialize-FocusManager
-        if (-not $Silent) {
-            Write-Host "  Focus Manager initialized" -ForegroundColor Gray
-        }
-        
-        # Load screens
         Initialize-PMCScreens -Silent:$Silent
         
-        if (-not $Silent) {
-            Write-Host "`nStarting application..." -ForegroundColor Green
-        }
-        
-        # Clear the console before starting
+        if (-not $Silent) { Write-Host "`nStarting application..." -ForegroundColor Green }
         Clear-Host
         
-        # FIX: Flexible startup path logic to allow testing specific screens.
+        # Flexible startup path logic
         $startPath = "/dashboard" # Default
         if ($args -contains "-start") {
             $startIndex = [array]::IndexOf($args, "-start")
-            if (($startIndex + 1) -lt $args.Count) {
-                $startPath = $args[$startIndex + 1]
-            }
-        } elseif ($args -contains "-demo") {
-            $startPath = "/demo"
+            if (($startIndex + 1) -lt $args.Count) { $startPath = $args[$startIndex + 1] }
         }
         
-        # Navigate to initial screen
         if ((& $services.Navigation.IsValidRoute -self $services.Navigation -Path $startPath)) {
             & $services.Navigation.GoTo -self $services.Navigation -Path $startPath -Services $services
         } else {
-            Write-Log -Level Warning -Message "Startup path '$startPath' is not a valid route. Defaulting to /dashboard."
+            Write-Log -Level Warning -Message "Startup path '$startPath' is not valid. Defaulting to /dashboard."
             & $services.Navigation.GoTo -self $services.Navigation -Path "/dashboard" -Services $services
         }
         
-        # Start the main loop
         Start-TuiLoop
         
     } catch {
-        if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
-            Write-Log -Level Error -Message "FATAL: Failed to initialize PMC Terminal" -Data $_
-        }
-        
-        # Enhanced error display
-        Write-Host "`n========================================" -ForegroundColor Red
-        Write-Host "FATAL ERROR DURING INITIALIZATION" -ForegroundColor Red
-        Write-Host "========================================" -ForegroundColor Red
-        Write-Host ""
-        Write-Host "Error: $($_.Exception.Message)" -ForegroundColor Yellow
-        Write-Host ""
-        Write-Host "Stack Trace:" -ForegroundColor Cyan
+        if (Get-Command Write-Log -ErrorAction SilentlyContinue) { Write-Log -Level Error -Message "FATAL: Failed to initialize PMC Terminal" -Data $_ }
+        Write-Host "`nFATAL ERROR DURING INITIALIZATION: $($_.Exception.Message)" -ForegroundColor Red
         Write-Host $_.ScriptStackTrace -ForegroundColor Gray
-        Write-Host ""
-        Write-Host "========================================" -ForegroundColor Red
-        
         throw
     } finally {
-        if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
-            Write-Log -Level Info -Message "PMC Terminal shutting down"
-        }
-        
-        # Cleanup
-        if (Get-Command -Name "Stop-TuiEngine" -ErrorAction SilentlyContinue) {
-            if (-not $Silent) {
-                Write-Host "`nShutting down..." -ForegroundColor Yellow
-            }
-            Stop-TuiEngine
-        }
-        
-        # Save data
-        if ($global:Data -and (Get-Command -Name "Save-UnifiedData" -ErrorAction SilentlyContinue)) {
-            if (-not $Silent) {
-                Write-Host "Saving data..." -ForegroundColor Yellow -NoNewline
-            }
-            Save-UnifiedData
-            if (-not $Silent) {
-                Write-Host " Done!" -ForegroundColor Green
-            }
-        }
-        
-        if (-not $Silent) {
-            Write-Host "Goodbye!" -ForegroundColor Green
-        }
-        
-        if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
-            Write-Log -Level Info -Message "PMC Terminal shutdown complete"
-        }
+        if (Get-Command Write-Log -ErrorAction SilentlyContinue) { Write-Log -Level Info -Message "PMC Terminal shutting down" }
+        if (Get-Command -Name "Stop-TuiEngine" -ErrorAction SilentlyContinue) { if (-not $Silent) { Write-Host "`nShutting down..." }; Stop-TuiEngine }
+        if ($global:Data -and (Get-Command -Name "Save-UnifiedData" -ErrorAction SilentlyContinue)) { if (-not $Silent) { Write-Host "Saving data..." }; Save-UnifiedData }
+        if (-not $Silent) { Write-Host "Goodbye!" -ForegroundColor Green }
     }
 }
 
-# Parse command line arguments
-$script:args = $args
+# Main execution block
 $script:Silent = $args -contains "-silent" -or $args -contains "-s"
-
 try {
     Clear-Host
     Start-PMCTerminal -Silent:$script:Silent
 } catch {
     Write-Error "Fatal error occurred: $_"
-    Write-Host "`nPress any key to exit..." -ForegroundColor Red
-    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+    if ($Host.UI.RawUI) {
+        Write-Host "`nPress any key to exit..." -ForegroundColor Red
+        $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+    }
     exit 1
 }

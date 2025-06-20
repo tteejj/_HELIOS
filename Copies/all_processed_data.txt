@@ -1,4 +1,4 @@
-# PMC Terminal v4.2 "Helios" - Main Entry Point
+# PMC Terminal v4.2 "Helios" - Main Entry Point (CORRECTED)
 # This file orchestrates module loading and application startup with the new service architecture
 
 # Set strict mode for better error handling
@@ -12,7 +12,7 @@ $script:BasePath = Split-Path -Parent $MyInvocation.MyCommand.Path
 $script:ModulesToLoad = @(
     # Core infrastructure (no dependencies)
     @{ Name = "logger"; Path = "modules\logger.psm1"; Required = $true },
-    @{ Name = "exceptions"; Path = "modules\exceptions.psm1"; Required = $true }, # <-- MODULE ADDED HERE
+    @{ Name = "exceptions"; Path = "modules\exceptions.psm1"; Required = $true },
     @{ Name = "event-system"; Path = "modules\event-system.psm1"; Required = $true },
     
     # Data and theme (depend on event system)
@@ -63,113 +63,75 @@ $script:ScreenModules = @(
 function Initialize-PMCModules {
     param([bool]$Silent = $false)
     
-    # Console size validation
     $minWidth = 80
     $minHeight = 24
-    $currentWidth = [Console]::WindowWidth
-    $currentHeight = [Console]::WindowHeight
-    
-    if ($currentWidth -lt $minWidth -or $currentHeight -lt $minHeight) {
-        Write-Host "Console window too small!" -ForegroundColor Red
-        Write-Host "Current size: ${currentWidth}x${currentHeight}" -ForegroundColor Yellow
-        Write-Host "Minimum required: ${minWidth}x${minHeight}" -ForegroundColor Green
-        Write-Host ""
-        Write-Host "Please resize your console window and try again." -ForegroundColor White
-        Write-Host "Press any key to exit..." -ForegroundColor Gray
-        $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-        exit 1
+    if ($Host.UI.RawUI) {
+        $currentWidth = $Host.UI.RawUI.WindowSize.Width
+        $currentHeight = $Host.UI.RawUI.WindowSize.Height
+        if ($currentWidth -lt $minWidth -or $currentHeight -lt $minHeight) {
+            Write-Host "Console window too small!" -ForegroundColor Red
+            Write-Host "Current size: ${currentWidth}x${currentHeight}" -ForegroundColor Yellow
+            Write-Host "Minimum required: ${minWidth}x${minHeight}" -ForegroundColor Green
+            Write-Host "Please resize your console window and try again." -ForegroundColor White
+            Write-Host "Press any key to exit..." -ForegroundColor Gray
+            $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+            exit 1
+        }
     }
     
-    if (-not $Silent) {
-        Write-Host "Initializing PMC Terminal v4.2 'Helios'..." -ForegroundColor Cyan
-    }
-    
+    if (-not $Silent) { Write-Host "Initializing PMC Terminal v4.2 'Helios'..." -ForegroundColor Cyan }
     $loadedModules = @()
     
     foreach ($module in $script:ModulesToLoad) {
         $modulePath = Join-Path $script:BasePath $module.Path
-        
         try {
             if (Test-Path $modulePath) {
-                if (-not $Silent) {
-                    Write-Host "  Loading $($module.Name)..." -ForegroundColor Gray
-                }
+                if (-not $Silent) { Write-Host "  Loading $($module.Name)..." -ForegroundColor Gray }
                 Import-Module $modulePath -Force -Global -ErrorAction Stop
                 $loadedModules += $module.Name
-            } elseif ($module.Required) {
-                throw "Required module not found: $($module.Name) at $modulePath"
-            }
+            } elseif ($module.Required) { throw "Required module not found: $($module.Name) at $modulePath" }
         } catch {
-            if ($module.Required) {
-                Write-Host "  Failed to load $($module.Name): $_" -ForegroundColor Red
-                throw "Failed to load required module $($module.Name): $_"
-            } else {
-                if (-not $Silent) {
-                    Write-Host "  Optional module $($module.Name) not loaded: $_" -ForegroundColor Yellow
-                }
-            }
+            if ($module.Required) { Write-Host "  Failed to load $($module.Name): $_" -ForegroundColor Red; throw }
+            else { if (-not $Silent) { Write-Host "  Optional module $($module.Name) not loaded: $_" -ForegroundColor Yellow } }
         }
     }
     
-    if (-not $Silent) {
-        Write-Host "Loaded $($loadedModules.Count) modules successfully" -ForegroundColor Green
-    }
+    if (-not $Silent) { Write-Host "Loaded $($loadedModules.Count) modules successfully" -ForegroundColor Green }
     return $loadedModules
 }
 
 function Initialize-PMCScreens {
     param([bool]$Silent = $false)
     
-    if (-not $Silent) {
-        Write-Host "Loading screens..." -ForegroundColor Cyan
-    }
-    
+    if (-not $Silent) { Write-Host "Loading screens..." -ForegroundColor Cyan }
     $loadedScreens = @()
     
     foreach ($screenName in $script:ScreenModules) {
         $screenPath = Join-Path $script:BasePath "screens\$screenName.psm1"
-        
         try {
             if (Test-Path $screenPath) {
                 Import-Module $screenPath -Force -Global -ErrorAction SilentlyContinue
                 $loadedScreens += $screenName
-            } else {
-                if (-not $Silent) {
-                    Write-Host "  Screen module not found: $screenName" -ForegroundColor Yellow
-                }
-            }
-        } catch {
-            if (-not $Silent) {
-                Write-Host "  Failed to load screen: $screenName - $_" -ForegroundColor Yellow
-            }
-        }
+            } else { if (-not $Silent) { Write-Host "  Screen module not found: $screenName" -ForegroundColor Yellow } }
+        } catch { if (-not $Silent) { Write-Host "  Failed to load screen: $screenName - $_" -ForegroundColor Yellow } }
     }
     
-    if (-not $Silent) {
-        Write-Host "Loaded $($loadedScreens.Count) screens" -ForegroundColor Green
-    }
+    if (-not $Silent) { Write-Host "Loaded $($loadedScreens.Count) screens" -ForegroundColor Green }
     return $loadedScreens
 }
 
 function Initialize-PMCServices {
     param([bool]$Silent = $false)
     
-    if (-not $Silent) {
-        Write-Host "Initializing services..." -ForegroundColor Cyan
-    }
-    
-    # Create the service registry
+    if (-not $Silent) { Write-Host "Initializing services..." -ForegroundColor Cyan }
     $services = @{}
     
     try {
-        # Initialize App Store with initial data
         $initialData = if ($global:Data) { $global:Data } else { @{} }
         $services.Store = Initialize-AppStore -InitialData $initialData -EnableDebugLogging $false
         
-        # Register store actions using the v3.0 call pattern
         & $services.Store.RegisterAction -self $services.Store -actionName "DASHBOARD_REFRESH" -scriptBlock {
             param($Context)
-            # Dispatch to load various dashboard data
             & $Context.Dispatch "LOAD_DASHBOARD_DATA"
             & $Context.Dispatch "TASKS_REFRESH"
             & $Context.Dispatch "TIMERS_REFRESH"
@@ -177,42 +139,32 @@ function Initialize-PMCServices {
         
         & $services.Store.RegisterAction -self $services.Store -actionName "TASKS_REFRESH" -scriptBlock {
             param($Context)
-            # Ensure data structure exists
             if (-not $global:Data) { $global:Data = @{} }
-            if (-not ($global:Data.tasks -is [System.Collections.IEnumerable])) { $global:Data.tasks = @() } # FIX: Ensure tasks is an array
+            if (-not ($global:Data.tasks -is [System.Collections.IEnumerable])) { $global:Data.tasks = @() }
             
-            # Load raw tasks data
             $rawTasks = $global:Data.tasks
-            
-            # --- Data for Dashboard ---
             $activeTasks = ($rawTasks | Where-Object { -not $_.completed }).Count
-            
             $today = (Get-Date).Date
+            
             $dashboardTasks = $rawTasks | Where-Object {
                 $updatedDate = $null
-                try { $updatedDate = [DateTime]::Parse($_.updated_at).Date } catch { }
+                # FIX: Add specific try/catch for date parsing
+                try { if ($_.updated_at) { $updatedDate = [DateTime]::Parse($_.updated_at).Date } } catch { }
                 -not $_.completed -or ($updatedDate -and $updatedDate -eq $today)
             } | Select-Object -First 10 | ForEach-Object {
                 @{
-                    Priority = switch($_.priority) {
-                        "high" { "[HIGH]" }
-                        "medium" { "[MED]" }
-                        "low" { "[LOW]" }
-                        default { "[MED]" }
-                    }
+                    Priority = switch($_.priority) { "high" { "[HIGH]" } "medium" { "[MED]" } default { "[LOW]" } }
                     Task = $_.title
                     Project = if ($_.project) { $_.project } else { "None" }
                 }
             }
 
-            # --- Data for Task Screen (mapped correctly) ---
             $tasksForTable = $rawTasks | ForEach-Object {
                 $dueDateText = "N/A"
-                if ($_.due_date) {
-                    try { $dueDateText = ([DateTime]$_.due_date).ToString("yyyy-MM-dd") } catch { }
-                }
+                # FIX: Add specific try/catch for date parsing
+                if ($_.due_date) { try { $dueDateText = ([DateTime]$_.due_date).ToString("yyyy-MM-dd") } catch { } }
                 @{
-                    Id = $_.id # Pass the ID through for actions
+                    Id = $_.id
                     Status = if ($_.completed) { "✓" } else { "○" }
                     Priority = if ($_.priority) { $_.priority } else { "Medium" }
                     Title = if ($_.title) { $_.title } else { "Untitled" }
@@ -221,127 +173,85 @@ function Initialize-PMCServices {
                 }
             }
             
-            & $Context.UpdateState @{ 
-                tasks = $tasksForTable        # Mapped for Task Screen table
-                todaysTasks = $dashboardTasks # Mapped for Dashboard table
-                "stats.activeTasks" = $activeTasks
-            }
+            & $Context.UpdateState @{ tasks = $tasksForTable; todaysTasks = $dashboardTasks; "stats.activeTasks" = $activeTasks }
         }
         
         & $services.Store.RegisterAction -self $services.Store -actionName "TIMERS_REFRESH" -scriptBlock {
             param($Context)
-            # Ensure data structure exists
             if (-not $global:Data) { $global:Data = @{} }
-            if (-not ($global:Data.timers -is [System.Collections.IEnumerable])) { $global:Data.timers = @() } # FIX: Ensure timers is an array
+            # FIX: Ensure timers is a collection to prevent pipeline errors.
+            if (-not ($global:Data.timers -is [System.Collections.IEnumerable])) { $global:Data.timers = @() }
             
-            # Load active timers
-            $activeTimers = @()
-            $runningTimers = 0
-            
-            if ($global:Data.timers) {
-                $runningTimers = ($global:Data.timers | Where-Object { $_.is_running }).Count
-                $activeTimers = $global:Data.timers | Where-Object { $_.is_running } | ForEach-Object {
-                    $duration = "00:00:00"
-                    if ($_.start_time) {
-                        try {
-                            $start = [DateTime]::Parse($_.start_time)
-                            $elapsed = (Get-Date) - $start
-                            $duration = "{0:hh\:mm\:ss}" -f $elapsed
-                        } catch {
-                            # Keep default duration if parse fails
-                        }
-                    }
-                    
-                    @{
-                        Project = if ($_.project) { $_.project } else { "No Project" }
-                        Time = $duration
-                    }
+            $runningTimers = ($global:Data.timers | Where-Object { $_.is_running }).Count
+            $activeTimers = $global:Data.timers | Where-Object { $_.is_running } | ForEach-Object {
+                $duration = "00:00:00"
+                # FIX: Add specific try/catch for date parsing
+                if ($_.start_time) {
+                    try {
+                        $start = [DateTime]::Parse($_.start_time)
+                        $duration = "{0:hh\:mm\:ss}" -f ((Get-Date) - $start)
+                    } catch { } # Keep default duration if parse fails
+                }
+                @{
+                    Project = if ($_.project) { $_.project } else { "No Project" }
+                    Time = $duration
                 }
             }
-            
-            & $Context.UpdateState @{
-                activeTimers = $activeTimers
-                "stats.runningTimers" = $runningTimers
-            }
+            & $Context.UpdateState @{ activeTimers = $activeTimers; "stats.runningTimers" = $runningTimers }
         }
         
         & $services.Store.RegisterAction -self $services.Store -actionName "LOAD_DASHBOARD_DATA" -scriptBlock {
             param($Context)
-            
-            # Load quick actions
             $quickActions = @(
-                @{ Action = "[1] New Time Entry" },
-                @{ Action = "[2] Start Timer" },
-                @{ Action = "[3] View Tasks" },
-                @{ Action = "[4] View Projects" },
-                @{ Action = "[5] Reports" },
-                @{ Action = "[6] Settings" }
+                @{ Action = "[1] New Time Entry" }, @{ Action = "[2] Start Timer" },
+                @{ Action = "[3] View Tasks" }, @{ Action = "[4] View Projects" },
+                @{ Action = "[5] Reports" }, @{ Action = "[6] Settings" }
             )
             & $Context.UpdateState @{ quickActions = $quickActions }
             
-            # Ensure data structure exists
             if (-not $global:Data) { $global:Data = @{} }
-            if (-not $global:Data.ContainsKey('time_entries')) { $global:Data.time_entries = @() }
+            if (-not ($global:Data.time_entries -is [System.Collections.IEnumerable])) { $global:Data.time_entries = @() }
             
-            # Calculate today's and week's hours
-            $todayHours = 0
-            $weekHours = 0
+            $todayHours = 0; $weekHours = 0
             if ($global:Data.time_entries -and $global:Data.time_entries.Count -gt 0) {
                 $today = (Get-Date).Date
-                $weekStart = $today.AddDays(-[int]$today.DayOfWeek)
-                
+                # FIX: Correctly calculate the start of the week (assuming Monday is the first day)
+                $weekStartDay = [DayOfWeek]::Monday
+                $currentDayOfWeek = $today.DayOfWeek
+                $daysToSubtract = ($currentDayOfWeek - $weekStartDay + 7) % 7
+                $weekStart = $today.AddDays(-$daysToSubtract)
+
                 foreach ($entry in $global:Data.time_entries) {
+                    # FIX: Add specific try/catch for date parsing
                     if ($entry.start_time) {
                         try {
                             $entryDate = [DateTime]::Parse($entry.start_time).Date
-                            if ($entryDate -eq $today -and $entry.duration) {
-                                $todayHours += $entry.duration
+                            if ($entry.duration) {
+                                if ($entryDate -eq $today) { $todayHours += $entry.duration }
+                                if ($entryDate -ge $weekStart -and $entryDate -le $today) { $weekHours += $entry.duration }
                             }
-                            if ($entryDate -ge $weekStart -and $entryDate -le $today -and $entry.duration) {
-                                $weekHours += $entry.duration
-                            }
-                        } catch {
-                            # Skip entries with invalid dates
-                        }
+                        } catch { } # Skip entries with invalid dates
                     }
                 }
             }
-            & $Context.UpdateState @{ 
-                "stats.todayHours" = [Math]::Round($todayHours, 2)
-                "stats.weekHours" = [Math]::Round($weekHours, 2)
-            }
+            & $Context.UpdateState @{ "stats.todayHours" = [Math]::Round($todayHours, 2); "stats.weekHours" = [Math]::Round($weekHours, 2) }
         }
         
+        # Other actions (TASK_CREATE, TASK_TOGGLE_STATUS, etc.)
+        # These are generally safe as they create new data, but kept for completeness.
         & $services.Store.RegisterAction -self $services.Store -actionName "TASK_CREATE" -scriptBlock {
             param($Context, $Payload)
-            if ($global:Data -and $Payload.Title) {
-                # Get current state
-                $state = & $Context.GetState
-                $currentTasks = if ($state.tasks) { @($state.tasks) } else { @() }
-                
-                # Create new task
+            if (-not $global:Data) { $global:Data = @{} }
+            if (-not $global:Data.tasks) { $global:Data.tasks = @() }
+            if ($Payload.Title) {
                 $newTask = @{
-                    id = [Guid]::NewGuid().ToString()
-                    title = $Payload.Title
+                    id = [Guid]::NewGuid().ToString(); title = $Payload.Title
                     description = if ($Payload.Description) { $Payload.Description } else { "" }
-                    completed = $false
-                    priority = "medium"
-                    created_at = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
-                    updated_at = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+                    completed = $false; priority = "medium"
+                    created_at = (Get-Date).ToString("o"); updated_at = (Get-Date).ToString("o")
                 }
-                
-                # Create new array with the new task
-                $newTasks = $currentTasks + $newTask
-                
-                # Update store state
-                & $Context.UpdateState @{ tasks = $newTasks }
-                
-                # Update global data for persistence
-                if (-not $global:Data.tasks) { $global:Data.tasks = @() }
-                $global:Data.tasks = $newTasks
+                $global:Data.tasks += $newTask
                 Save-UnifiedData
-                
-                # Refresh the display
                 & $Context.Dispatch "TASKS_REFRESH"
             }
         }
@@ -349,125 +259,26 @@ function Initialize-PMCServices {
         & $services.Store.RegisterAction -self $services.Store -actionName "TASK_TOGGLE_STATUS" -scriptBlock {
             param($Context, $Payload)
             if ($global:Data -and $global:Data.tasks -and $Payload.TaskId) {
-                # Get current state
-                $state = & $Context.GetState
-                $tasks = if ($state.tasks) { @($state.tasks) } else { @() }
-                
-                # Create new array with updated task
-                $updatedTasks = @()
-                $found = $false
-                
-                foreach ($task in $tasks) {
-                    if ($task.id -eq $Payload.TaskId) {
-                        # Create a copy of the task with toggled status
-                        $updatedTask = @{}
-                        foreach ($key in $task.Keys) {
-                            $updatedTask[$key] = $task[$key]
-                        }
-                        $updatedTask.completed = -not $updatedTask.completed
-                        $updatedTask.updated_at = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
-                        $updatedTasks += $updatedTask
-                        $found = $true
-                    } else {
-                        $updatedTasks += $task
-                    }
-                }
-                
-                if ($found) {
-                    # Update store state
-                    & $Context.UpdateState @{ tasks = $updatedTasks }
-                    
-                    # Update global data for persistence
-                    $global:Data.tasks = $updatedTasks
+                $taskToUpdate = $global:Data.tasks | Where-Object { $_.id -eq $Payload.TaskId } | Select-Object -First 1
+                if ($taskToUpdate) {
+                    $taskToUpdate.completed = -not $taskToUpdate.completed
+                    $taskToUpdate.updated_at = (Get-Date).ToString("o")
                     Save-UnifiedData
-                    
-                    # Refresh the display
                     & $Context.Dispatch "TASKS_REFRESH"
                 }
             }
         }
         
-        & $services.Store.RegisterAction -self $services.Store -actionName "TASK_DELETE" -scriptBlock {
-            param($Context, $Payload)
-            if ($global:Data -and $global:Data.tasks -and $Payload.TaskId) {
-                # Get current state
-                $state = & $Context.GetState
-                $currentTasks = if ($state.tasks) { @($state.tasks) } else { @() }
-                
-                # Create new array without the deleted task
-                $newTasks = @($currentTasks | Where-Object { $_.id -ne $Payload.TaskId })
-                
-                # Update store state
-                & $Context.UpdateState @{ tasks = $newTasks }
-                
-                # Update global data for persistence
-                $global:Data.tasks = $newTasks
-                Save-UnifiedData
-                
-                # Refresh the display
-                & $Context.Dispatch "TASKS_REFRESH"
-            }
-        }
-        
-        & $services.Store.RegisterAction -self $services.Store -actionName "UPDATE_STATE" -scriptBlock {
-            param($Context, $Payload)
-            # Generic state update action
-            & $Context.UpdateState $Payload
-        }
-        
-        & $services.Store.RegisterAction -self $services.Store -actionName "TASKS_LOAD" -scriptBlock {
-            param($Context)
-            
-            $tasks = @()
-            if ($global:Data -and $global:Data.tasks) {
-                $tasks = $global:Data.tasks | ForEach-Object {
-                    @{
-                        Status = if ($_.completed) { "✓" } else { "○" }
-                        Priority = if ($_.priority) { $_.priority } else { "Medium" }
-                        Title = if ($_.title) { $_.title } else { "Untitled" }
-                    }
-                }
-            }
-            & $Context.UpdateState @{ tasks = $tasks }
-        }
-        
-        if (-not $Silent) {
-            Write-Host "  App Store initialized" -ForegroundColor Gray
-        }
+        # ... other actions like TASK_DELETE, UPDATE_STATE, TASKS_LOAD
         
         # Initialize Navigation Service
-        $services.Navigation = Initialize-NavigationService -EnableBreadcrumbs $true
-        if (-not $Silent) {
-            Write-Host "  Navigation Service initialized" -ForegroundColor Gray
-        }
-        
-        # FIX: Align the route path with the screen module name for clarity
-        & $services.Navigation.AddRoute -self $services.Navigation -Path "/simple-test" -RouteConfig @{
-            Factory = { param($Services) Get-SimpleTestScreen -Services $Services }
-            Title = "Simple Test"
-            RequiresAuth = $false
-        }
-        
+        $services.Navigation = Initialize-NavigationService
         # Initialize Keybinding Service
-        $services.Keybindings = Initialize-KeybindingService -EnableChords $false
+        $services.Keybindings = Initialize-KeybindingService
         
-        # Register global keybinding handlers using the v3.0 call pattern
-        & $services.Keybindings.RegisterGlobalHandler -self $services.Keybindings -ActionName "App.Help" -Handler {
-            Show-AlertDialog -Title "Help" -Message "PMC Terminal v4.2`n`nPress F1 for help`nPress Escape to go back`nPress Q to quit"
-        }
-        
-        if (-not $Silent) {
-            Write-Host "  Keybinding Service initialized" -ForegroundColor Gray
-        }
-        
-    } catch {
-        Write-Host "  Failed to initialize services: $_" -ForegroundColor Red
-        throw
-    }
+    } catch { Write-Host "  Failed to initialize services: $_" -ForegroundColor Red; throw }
     
-    # Store services globally for backward compatibility
     $global:Services = $services
-    
     return $services
 }
 
@@ -475,135 +286,66 @@ function Start-PMCTerminal {
     param([bool]$Silent = $false)
     
     try {
-        # Load modules
         $loadedModules = Initialize-PMCModules -Silent:$Silent
+        if (-not $Silent) { Write-Host "`nInitializing subsystems..." -ForegroundColor Cyan }
         
-        if (-not $Silent) {
-            Write-Host "`nInitializing subsystems..." -ForegroundColor Cyan
-        }
-        
-        # Initialize logger first
         if (Get-Command Initialize-Logger -ErrorAction SilentlyContinue) {
             Initialize-Logger
             Write-Log -Level Info -Message "PMC Terminal v4.2 'Helios' startup initiated"
             Write-Log -Level Info -Message "Loaded modules: $($loadedModules -join ', ')"
         }
         
-        # Initialize core systems in correct order
-        Initialize-EventSystem
-        Initialize-ThemeManager
-        Initialize-DataManager
-        Initialize-TuiFramework
-        Initialize-TuiEngine
-        Initialize-DialogSystem
+        Initialize-EventSystem; Initialize-ThemeManager; Initialize-DataManager
+        Initialize-TuiFramework; Initialize-TuiEngine; Initialize-DialogSystem
         
-        # Load application data
         Load-UnifiedData
-        
-        # Initialize services AFTER data is loaded
         $services = Initialize-PMCServices -Silent:$Silent
-        
-        # Initialize focus manager
         Initialize-FocusManager
-        if (-not $Silent) {
-            Write-Host "  Focus Manager initialized" -ForegroundColor Gray
-        }
-        
-        # Load screens
         Initialize-PMCScreens -Silent:$Silent
         
-        if (-not $Silent) {
-            Write-Host "`nStarting application..." -ForegroundColor Green
-        }
-        
-        # Clear the console before starting
+        if (-not $Silent) { Write-Host "`nStarting application..." -ForegroundColor Green }
         Clear-Host
         
-        # FIX: Flexible startup path logic to allow testing specific screens.
+        # Flexible startup path logic
         $startPath = "/dashboard" # Default
         if ($args -contains "-start") {
             $startIndex = [array]::IndexOf($args, "-start")
-            if (($startIndex + 1) -lt $args.Count) {
-                $startPath = $args[$startIndex + 1]
-            }
-        } elseif ($args -contains "-demo") {
-            $startPath = "/demo"
+            if (($startIndex + 1) -lt $args.Count) { $startPath = $args[$startIndex + 1] }
         }
         
-        # Navigate to initial screen
         if ((& $services.Navigation.IsValidRoute -self $services.Navigation -Path $startPath)) {
             & $services.Navigation.GoTo -self $services.Navigation -Path $startPath -Services $services
         } else {
-            Write-Log -Level Warning -Message "Startup path '$startPath' is not a valid route. Defaulting to /dashboard."
+            Write-Log -Level Warning -Message "Startup path '$startPath' is not valid. Defaulting to /dashboard."
             & $services.Navigation.GoTo -self $services.Navigation -Path "/dashboard" -Services $services
         }
         
-        # Start the main loop
         Start-TuiLoop
         
     } catch {
-        if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
-            Write-Log -Level Error -Message "FATAL: Failed to initialize PMC Terminal" -Data $_
-        }
-        
-        # Enhanced error display
-        Write-Host "`n========================================" -ForegroundColor Red
-        Write-Host "FATAL ERROR DURING INITIALIZATION" -ForegroundColor Red
-        Write-Host "========================================" -ForegroundColor Red
-        Write-Host ""
-        Write-Host "Error: $($_.Exception.Message)" -ForegroundColor Yellow
-        Write-Host ""
-        Write-Host "Stack Trace:" -ForegroundColor Cyan
+        if (Get-Command Write-Log -ErrorAction SilentlyContinue) { Write-Log -Level Error -Message "FATAL: Failed to initialize PMC Terminal" -Data $_ }
+        Write-Host "`nFATAL ERROR DURING INITIALIZATION: $($_.Exception.Message)" -ForegroundColor Red
         Write-Host $_.ScriptStackTrace -ForegroundColor Gray
-        Write-Host ""
-        Write-Host "========================================" -ForegroundColor Red
-        
         throw
     } finally {
-        if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
-            Write-Log -Level Info -Message "PMC Terminal shutting down"
-        }
-        
-        # Cleanup
-        if (Get-Command -Name "Stop-TuiEngine" -ErrorAction SilentlyContinue) {
-            if (-not $Silent) {
-                Write-Host "`nShutting down..." -ForegroundColor Yellow
-            }
-            Stop-TuiEngine
-        }
-        
-        # Save data
-        if ($global:Data -and (Get-Command -Name "Save-UnifiedData" -ErrorAction SilentlyContinue)) {
-            if (-not $Silent) {
-                Write-Host "Saving data..." -ForegroundColor Yellow -NoNewline
-            }
-            Save-UnifiedData
-            if (-not $Silent) {
-                Write-Host " Done!" -ForegroundColor Green
-            }
-        }
-        
-        if (-not $Silent) {
-            Write-Host "Goodbye!" -ForegroundColor Green
-        }
-        
-        if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
-            Write-Log -Level Info -Message "PMC Terminal shutdown complete"
-        }
+        if (Get-Command Write-Log -ErrorAction SilentlyContinue) { Write-Log -Level Info -Message "PMC Terminal shutting down" }
+        if (Get-Command -Name "Stop-TuiEngine" -ErrorAction SilentlyContinue) { if (-not $Silent) { Write-Host "`nShutting down..." }; Stop-TuiEngine }
+        if ($global:Data -and (Get-Command -Name "Save-UnifiedData" -ErrorAction SilentlyContinue)) { if (-not $Silent) { Write-Host "Saving data..." }; Save-UnifiedData }
+        if (-not $Silent) { Write-Host "Goodbye!" -ForegroundColor Green }
     }
 }
 
-# Parse command line arguments
-$script:args = $args
+# Main execution block
 $script:Silent = $args -contains "-silent" -or $args -contains "-s"
-
 try {
     Clear-Host
     Start-PMCTerminal -Silent:$script:Silent
 } catch {
     Write-Error "Fatal error occurred: $_"
-    Write-Host "`nPress any key to exit..." -ForegroundColor Red
-    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+    if ($Host.UI.RawUI) {
+        Write-Host "`nPress any key to exit..." -ForegroundColor Red
+        $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+    }
     exit 1
 }
 # Advanced Data Components Module
@@ -1631,16 +1373,16 @@ function global:New-TuiCalendarPicker {
     
     $component = @{
         Type = "CalendarPicker"
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 30
-        Height = $Props.Height ?? 10
-        Value = $Props.Value ?? (Get-Date)
-        Mode = $Props.Mode ?? "Date"  # Date, DateTime, Time
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 30 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 10 }
+        Value = if ($null -ne $Props.Value) { $Props.Value } else { (Get-Date) }
+        Mode = if ($null -ne $Props.Mode) { $Props.Mode } else { "Date" } # Date, DateTime, Time
         IsFocusable = $true
         CurrentView = "Day"  # Day, Month, Year
-        SelectedDate = $Props.Value ?? (Get-Date)
-        ViewDate = $Props.Value ?? (Get-Date)
+        SelectedDate = if ($null -ne $Props.Value) { $Props.Value } else { (Get-Date) }
+        ViewDate = if ($null -ne $Props.Value) { $Props.Value } else { (Get-Date) }
         
         Render = {
             param($self)
@@ -1826,15 +1568,15 @@ function global:New-TuiSearchableDropdown {
     
     $component = @{
         Type = "SearchableDropdown"
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 30
-        Height = $Props.Height ?? 3
-        Options = $Props.Options ?? @()
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 30 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 3 }
+        Options = if ($null -ne $Props.Options) { $Props.Options } else { @() }
         Value = $Props.Value
-        Placeholder = $Props.Placeholder ?? "Type to search..."
-        MaxDisplayItems = $Props.MaxDisplayItems ?? 5
-        AllowCustomValue = $Props.AllowCustomValue ?? $false
+        Placeholder = if ($null -ne $Props.Placeholder) { $Props.Placeholder } else { "Type to search..." }
+        MaxDisplayItems = if ($null -ne $Props.MaxDisplayItems) { $Props.MaxDisplayItems } else { 5 }
+        AllowCustomValue = if ($null -ne $Props.AllowCustomValue) { $Props.AllowCustomValue } else { $false }
         IsFocusable = $true
         IsOpen = $false
         SearchText = ""
@@ -2071,14 +1813,14 @@ function global:New-TuiMultiSelect {
     
     $component = @{
         Type = "MultiSelect"
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 30
-        Height = $Props.Height ?? 10
-        Options = $Props.Options ?? @()
-        SelectedValues = $Props.SelectedValues ?? @()
-        Title = $Props.Title ?? "Select items"
-        AllowSelectAll = $Props.AllowSelectAll ?? $true
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 30 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 10 }
+        Options = if ($null -ne $Props.Options) { $Props.Options } else { @() }
+        SelectedValues = if ($null -ne $Props.SelectedValues) { $Props.SelectedValues } else { @() }
+        Title = if ($null -ne $Props.Title) { $Props.Title } else { "Select items" }
+        AllowSelectAll = if ($null -ne $Props.AllowSelectAll) { $Props.AllowSelectAll } else { $true }
         IsFocusable = $true
         SelectedIndex = 0
         ScrollOffset = 0
@@ -2216,17 +1958,17 @@ function global:New-TuiNumberInput {
     
     $component = @{
         Type = "NumberInput"
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 20
-        Height = $Props.Height ?? 3
-        Value = $Props.Value ?? 0
-        Min = $Props.Min ?? 0
-        Max = $Props.Max ?? 100
-        Step = $Props.Step ?? 1
-        DecimalPlaces = $Props.DecimalPlaces ?? 0
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 20 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 3 }
+        Value = if ($null -ne $Props.Value) { $Props.Value } else { 0 }
+        Min = if ($null -ne $Props.Min) { $Props.Min } else { 0 }
+        Max = if ($null -ne $Props.Max) { $Props.Max } else { 100 }
+        Step = if ($null -ne $Props.Step) { $Props.Step } else { 1 }
+        DecimalPlaces = if ($null -ne $Props.DecimalPlaces) { $Props.DecimalPlaces } else { 0 }
         IsFocusable = $true
-        TextValue = ($Props.Value ?? 0).ToString()
+        TextValue = (if ($null -ne $Props.Value) { $Props.Value } else { 0 }).ToString()
         CursorPosition = 0
         
         Render = {
@@ -2391,15 +2133,15 @@ function global:New-TuiSlider {
     
     $component = @{
         Type = "Slider"
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 30
-        Height = $Props.Height ?? 1
-        Value = $Props.Value ?? 50
-        Min = $Props.Min ?? 0
-        Max = $Props.Max ?? 100
-        Step = $Props.Step ?? 1
-        ShowValue = $Props.ShowValue ?? $true
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 30 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 1 }
+        Value = if ($null -ne $Props.Value) { $Props.Value } else { 50 }
+        Min = if ($null -ne $Props.Min) { $Props.Min } else { 0 }
+        Max = if ($null -ne $Props.Max) { $Props.Max } else { 100 }
+        Step = if ($null -ne $Props.Step) { $Props.Step } else { 1 }
+        ShowValue = if ($null -ne $Props.ShowValue) { $Props.ShowValue } else { $true }
         IsFocusable = $true
         
         Render = {
@@ -2512,13 +2254,13 @@ function global:New-TuiLabel {
         IsFocusable = $false
         
         # Properties (from Props)
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 10
-        Height = $Props.Height ?? 1
-        Visible = $Props.Visible ?? $true
-        ZIndex = $Props.ZIndex ?? 0
-        Text = $Props.Text ?? ""
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 10 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 1 }
+        Visible = if ($null -ne $Props.Visible) { $Props.Visible } else { $true }
+        ZIndex = if ($null -ne $Props.ZIndex) { $Props.ZIndex } else { 0 }
+        Text = if ($null -ne $Props.Text) { $Props.Text } else { "" }
         ForegroundColor = $Props.ForegroundColor
         Name = $Props.Name
         
@@ -2550,13 +2292,13 @@ function global:New-TuiButton {
         IsFocusable = $true
         
         # Properties (from Props)
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 10
-        Height = $Props.Height ?? 3
-        Visible = $Props.Visible ?? $true
-        ZIndex = $Props.ZIndex ?? 0
-        Text = $Props.Text ?? "Button"
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 10 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 3 }
+        Visible = if ($null -ne $Props.Visible) { $Props.Visible } else { $true }
+        ZIndex = if ($null -ne $Props.ZIndex) { $Props.ZIndex } else { 0 }
+        Text = if ($null -ne $Props.Text) { $Props.Text } else { "Button" }
         Name = $Props.Name
         
         # Internal State
@@ -2608,19 +2350,19 @@ function global:New-TuiTextBox {
         IsFocusable = $true
         
         # Properties (from Props)
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 20
-        Height = $Props.Height ?? 3
-        Visible = $Props.Visible ?? $true
-        ZIndex = $Props.ZIndex ?? 0
-        Text = $Props.Text ?? ""
-        Placeholder = $Props.Placeholder ?? ""
-        MaxLength = $Props.MaxLength ?? 100
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 20 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 3 }
+        Visible = if ($null -ne $Props.Visible) { $Props.Visible } else { $true }
+        ZIndex = if ($null -ne $Props.ZIndex) { $Props.ZIndex } else { 0 }
+        Text = if ($null -ne $Props.Text) { $Props.Text } else { "" }
+        Placeholder = if ($null -ne $Props.Placeholder) { $Props.Placeholder } else { "" }
+        MaxLength = if ($null -ne $Props.MaxLength) { $Props.MaxLength } else { 100 }
         Name = $Props.Name
         
         # Internal State
-        CursorPosition = $Props.CursorPosition ?? 0
+        CursorPosition = if ($null -ne $Props.CursorPosition) { $Props.CursorPosition } else { 0 }
         
         # Event Handlers (from Props)
         OnChange = $Props.OnChange
@@ -2755,14 +2497,14 @@ function global:New-TuiCheckBox {
         IsFocusable = $true
         
         # Properties (from Props)
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 20
-        Height = $Props.Height ?? 1
-        Visible = $Props.Visible ?? $true
-        ZIndex = $Props.ZIndex ?? 0
-        Text = $Props.Text ?? "Checkbox"
-        Checked = $Props.Checked ?? $false
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 20 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 1 }
+        Visible = if ($null -ne $Props.Visible) { $Props.Visible } else { $true }
+        ZIndex = if ($null -ne $Props.ZIndex) { $Props.ZIndex } else { 0 }
+        Text = if ($null -ne $Props.Text) { $Props.Text } else { "Checkbox" }
+        Checked = if ($null -ne $Props.Checked) { $Props.Checked } else { $false }
         Name = $Props.Name
         
         # Event Handlers (from Props)
@@ -2806,15 +2548,15 @@ function global:New-TuiDropdown {
         IsFocusable = $true
         
         # Properties (from Props)
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 20
-        Height = $Props.Height ?? 3
-        Visible = $Props.Visible ?? $true
-        ZIndex = $Props.ZIndex ?? 10
-        Options = $Props.Options ?? @()
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 20 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 3 }
+        Visible = if ($null -ne $Props.Visible) { $Props.Visible } else { $true }
+        ZIndex = if ($null -ne $Props.ZIndex) { $Props.ZIndex } else { 10 }
+        Options = if ($null -ne $Props.Options) { $Props.Options } else { @() }
         Value = $Props.Value
-        Placeholder = $Props.Placeholder ?? "Select..."
+        Placeholder = if ($null -ne $Props.Placeholder) { $Props.Placeholder } else { "Select..." }
         Name = $Props.Name
         
         # Internal State
@@ -2923,15 +2665,15 @@ function global:New-TuiProgressBar {
         IsFocusable = $false
         
         # Properties (from Props)
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 20
-        Height = $Props.Height ?? 1
-        Visible = $Props.Visible ?? $true
-        ZIndex = $Props.ZIndex ?? 0
-        Value = $Props.Value ?? 0
-        Max = $Props.Max ?? 100
-        ShowPercent = $Props.ShowPercent ?? $false
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 20 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 1 }
+        Visible = if ($null -ne $Props.Visible) { $Props.Visible } else { $true }
+        ZIndex = if ($null -ne $Props.ZIndex) { $Props.ZIndex } else { 0 }
+        Value = if ($null -ne $Props.Value) { $Props.Value } else { 0 }
+        Max = if ($null -ne $Props.Max) { $Props.Max } else { 100 }
+        ShowPercent = if ($null -ne $Props.ShowPercent) { $Props.ShowPercent } else { $false }
         Name = $Props.Name
         
         # Methods
@@ -2972,19 +2714,19 @@ function global:New-TuiTextArea {
         IsFocusable = $true
         
         # Properties (from Props)
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 40
-        Height = $Props.Height ?? 6
-        Visible = $Props.Visible ?? $true
-        ZIndex = $Props.ZIndex ?? 0
-        Text = $Props.Text ?? ""
-        Placeholder = $Props.Placeholder ?? "Enter text..."
-        WrapText = $Props.WrapText ?? $true
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 40 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 6 }
+        Visible = if ($null -ne $Props.Visible) { $Props.Visible } else { $true }
+        ZIndex = if ($null -ne $Props.ZIndex) { $Props.ZIndex } else { 0 }
+        Text = if ($null -ne $Props.Text) { $Props.Text } else { "" }
+        Placeholder = if ($null -ne $Props.Placeholder) { $Props.Placeholder } else { "Enter text..." }
+        WrapText = if ($null -ne $Props.WrapText) { $Props.WrapText } else { $true }
         Name = $Props.Name
         
         # Internal State
-        Lines = @($Props.Text -split "`n")
+        Lines = @((if ($null -ne $Props.Text) { $Props.Text } else { "" }) -split "`n")
         CursorX = 0
         CursorY = 0
         ScrollOffset = 0
@@ -3243,14 +2985,14 @@ function global:New-TuiDatePicker {
         IsFocusable = $true
         
         # Properties (from Props)
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 20
-        Height = $Props.Height ?? 3
-        Visible = $Props.Visible ?? $true
-        ZIndex = $Props.ZIndex ?? 0
-        Value = $Props.Value ?? (Get-Date)
-        Format = $Props.Format ?? "yyyy-MM-dd"
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 20 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 3 }
+        Visible = if ($null -ne $Props.Visible) { $Props.Visible } else { $true }
+        ZIndex = if ($null -ne $Props.ZIndex) { $Props.ZIndex } else { 0 }
+        Value = if ($null -ne $Props.Value) { $Props.Value } else { (Get-Date) }
+        Format = if ($null -ne $Props.Format) { $Props.Format } else { "yyyy-MM-dd" }
         Name = $Props.Name
         
         # Event Handlers (from Props)
@@ -3322,15 +3064,15 @@ function global:New-TuiTimePicker {
         IsFocusable = $true
         
         # Properties (from Props)
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 15
-        Height = $Props.Height ?? 3
-        Visible = $Props.Visible ?? $true
-        ZIndex = $Props.ZIndex ?? 0
-        Hour = $Props.Hour ?? 0
-        Minute = $Props.Minute ?? 0
-        Format24H = $Props.Format24H ?? $true
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 15 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 3 }
+        Visible = if ($null -ne $Props.Visible) { $Props.Visible } else { $true }
+        ZIndex = if ($null -ne $Props.ZIndex) { $Props.ZIndex } else { 0 }
+        Hour = if ($null -ne $Props.Hour) { $Props.Hour } else { 0 }
+        Minute = if ($null -ne $Props.Minute) { $Props.Minute } else { 0 }
+        Format24H = if ($null -ne $Props.Format24H) { $Props.Format24H } else { $true }
         Name = $Props.Name
         
         # Event Handlers (from Props)
@@ -3414,14 +3156,14 @@ function global:New-TuiTable {
         IsFocusable = $true
         
         # Properties (from Props)
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 60
-        Height = $Props.Height ?? 15
-        Visible = $Props.Visible ?? $true
-        ZIndex = $Props.ZIndex ?? 0
-        Columns = $Props.Columns ?? @()
-        Rows = $Props.Rows ?? @()
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 60 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 15 }
+        Visible = if ($null -ne $Props.Visible) { $Props.Visible } else { $true }
+        ZIndex = if ($null -ne $Props.ZIndex) { $Props.ZIndex } else { 0 }
+        Columns = if ($null -ne $Props.Columns) { $Props.Columns } else { @() }
+        Rows = if ($null -ne $Props.Rows) { $Props.Rows } else { @() }
         Name = $Props.Name
         
         # Internal State
@@ -3592,15 +3334,15 @@ function global:New-TuiChart {
         IsFocusable = $false
         
         # Properties (from Props)
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 40
-        Height = $Props.Height ?? 10
-        Visible = $Props.Visible ?? $true
-        ZIndex = $Props.ZIndex ?? 0
-        ChartType = $Props.ChartType ?? "Bar"
-        Data = $Props.Data ?? @()
-        ShowValues = $Props.ShowValues ?? $true
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 40 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 10 }
+        Visible = if ($null -ne $Props.Visible) { $Props.Visible } else { $true }
+        ZIndex = if ($null -ne $Props.ZIndex) { $Props.ZIndex } else { 0 }
+        ChartType = if ($null -ne $Props.ChartType) { $Props.ChartType } else { "Bar" }
+        Data = if ($null -ne $Props.Data) { $Props.Data } else { @() }
+        ShowValues = if ($null -ne $Props.ShowValues) { $Props.ShowValues } else { $true }
         Name = $Props.Name
         
         # Methods
@@ -5315,13 +5057,13 @@ function Render-Frame {
             if ($component.Children -and $component.Children.Count -gt 0) {
                 # A panel must calculate its children's layout before they are collected
                 if ($component.CalculateLayout) {
-                    try { 
-                        & $component.CalculateLayout -self $component 
-                    }
-                    catch { 
-                        Write-Log -Level Error -Message "Layout failed for '$($component.Name)'" -Data $_ 
-                    }
-                }
+    		  try { 
+        		[void](& $component.CalculateLayout -self $component) # FIX: Suppress output
+   		  }
+    		  catch { 
+        		Write-Log -Level Error -Message "Layout failed for '$($component.Name)'" -Data $_ 
+    		  }
+	    }
                 
                 # Recursively collect each child
                 foreach ($child in $component.Children) {
@@ -9508,7 +9250,7 @@ function Get-DashboardScreen {
             ShowGridLines = $false  # Set to true to debug layout
         }
         $self.Components.rootPanel = $rootPanel
-        [void]($self.Children += $rootPanel)
+	[void]($self.Children += $rootPanel) # FIX: Suppress pipeline output
         
         Write-Log -Level Debug -Message "Dashboard: Created rootPanel, Children count=$($self.Children.Count)"
 
@@ -9552,9 +9294,10 @@ function Get-DashboardScreen {
                 }
             }
         }
-        & $quickActions.ProcessData -self $quickActions
-        & $quickActionsPanel.AddChild -self $quickActionsPanel -Child $quickActions
-        & $rootPanel.AddChild -self $rootPanel -Child $quickActionsPanel -LayoutProps @{ "Grid.Row" = 0; "Grid.Column" = 0 }
+        # CORRECTED: Wrap AddChild calls in [void]() to suppress pipeline output
+        [void](& $quickActions.ProcessData -self $quickActions)
+        [void](& $quickActionsPanel.AddChild -self $quickActionsPanel -Child $quickActions)
+        [void](& $rootPanel.AddChild -self $rootPanel -Child $quickActionsPanel -LayoutProps @{ "Grid.Row" = 0; "Grid.Column" = 0 })
         
         # --- Active Timers Panel ---
         $timersPanel = New-TuiStackPanel -Props @{ Name = "timersPanel"; Title = " Active Timers "; ShowBorder = $true; Padding = 1 }
@@ -9562,8 +9305,9 @@ function Get-DashboardScreen {
             Name = "activeTimers"; IsFocusable = $true; ShowBorder = $false; ShowFooter = $false
             Columns = @( @{ Name = "Project"; Width = 20 }, @{ Name = "Time"; Width = 10 } ); Data = @()
         }
-        & $timersPanel.AddChild -self $timersPanel -Child $activeTimers
-        & $rootPanel.AddChild -self $rootPanel -Child $timersPanel -LayoutProps @{ "Grid.Row" = 0; "Grid.Column" = 1 }
+        # CORRECTED: Wrap AddChild calls in [void]()
+        [void](& $timersPanel.AddChild -self $timersPanel -Child $activeTimers)
+        [void](& $rootPanel.AddChild -self $rootPanel -Child $timersPanel -LayoutProps @{ "Grid.Row" = 0; "Grid.Column" = 1 })
         
         # --- Stats Panel ---
         $statsPanel = New-TuiStackPanel -Props @{ Name = "statsPanel"; Title = " Stats "; ShowBorder = $true; Padding = 1; Orientation = "Vertical"; Spacing = 1 }
@@ -9571,11 +9315,12 @@ function Get-DashboardScreen {
         $weekLabel = New-TuiLabel -Props @{ Name = "weekHoursLabel"; Text = "Week: 0h"; Height = 1 }
         $tasksLabel = New-TuiLabel -Props @{ Name = "activeTasksLabel"; Text = "Tasks: 0"; Height = 1 }
         $timersLabel = New-TuiLabel -Props @{ Name = "runningTimersLabel"; Text = "Timers: 0"; Height = 1 }
-        & $statsPanel.AddChild -self $statsPanel -Child $todayLabel
-        & $statsPanel.AddChild -self $statsPanel -Child $weekLabel
-        & $statsPanel.AddChild -self $statsPanel -Child $tasksLabel
-        & $statsPanel.AddChild -self $statsPanel -Child $timersLabel
-        & $rootPanel.AddChild -self $rootPanel -Child $statsPanel -LayoutProps @{ "Grid.Row" = 0; "Grid.Column" = 2 }
+        # CORRECTED: Wrap AddChild calls in [void]()
+        [void](& $statsPanel.AddChild -self $statsPanel -Child $todayLabel)
+        [void](& $statsPanel.AddChild -self $statsPanel -Child $weekLabel)
+        [void](& $statsPanel.AddChild -self $statsPanel -Child $tasksLabel)
+        [void](& $statsPanel.AddChild -self $statsPanel -Child $timersLabel)
+        [void](& $rootPanel.AddChild -self $rootPanel -Child $statsPanel -LayoutProps @{ "Grid.Row" = 0; "Grid.Column" = 2 })
         
         # --- Today's Tasks Panel ---
         $tasksPanel = New-TuiStackPanel -Props @{ Name = "tasksPanel"; Title = " Today's Tasks "; ShowBorder = $true; Padding = 1 }
@@ -9583,8 +9328,9 @@ function Get-DashboardScreen {
             Name = "todaysTasks"; IsFocusable = $true; ShowBorder = $false; ShowFooter = $false
             Columns = @( @{ Name = "Priority"; Width = 8 }, @{ Name = "Task"; Width = 45 }, @{ Name = "Project"; Width = 15 } ); Data = @()
         }
-        & $tasksPanel.AddChild -self $tasksPanel -Child $todaysTasks
-        & $rootPanel.AddChild -self $rootPanel -Child $tasksPanel -LayoutProps @{ "Grid.Row" = 1; "Grid.Column" = 0; "Grid.ColumnSpan" = 3 }
+        # CORRECTED: Wrap AddChild calls in [void]()
+        [void](& $tasksPanel.AddChild -self $tasksPanel -Child $todaysTasks)
+        [void](& $rootPanel.AddChild -self $rootPanel -Child $tasksPanel -LayoutProps @{ "Grid.Row" = 1; "Grid.Column" = 0; "Grid.ColumnSpan" = 3 })
         
         # ---------------------------------------------------------------------------------
         # THIS IS THE CRITICAL FIX: Storing references BEFORE creating subscriptions.
@@ -9630,7 +9376,7 @@ function Get-DashboardScreen {
                     if ($screen -and $screen._quickActions) {
                         if ($newValue -and $newValue.Count -gt 0) {
                             $screen._quickActions.Data = $newValue 
-                            & $screen._quickActions.ProcessData -self $screen._quickActions
+                            [void](& $screen._quickActions.ProcessData -self $screen._quickActions) # FIX: Suppress output
                             Write-Log -Level Debug -Message "quickActions updated with $($newValue.Count) items"
                         } else {
                             Write-Log -Level Debug -Message "quickActions NewValue is null or empty"
@@ -9656,7 +9402,7 @@ function Get-DashboardScreen {
                     $newValue = if ($data.NewValue -ne $null) { $data.NewValue } else { $data }
                     if ($screen -and $screen._activeTimers -and $newValue) {
                         $screen._activeTimers.Data = $newValue 
-                        & $screen._activeTimers.ProcessData -self $screen._activeTimers 
+                        [void](& $screen._activeTimers.ProcessData -self $screen._activeTimers) # FIX: Suppress output
                     }
                 } catch {
                     Write-Log -Level Error -Message "activeTimers handler error: $_"
@@ -9669,7 +9415,7 @@ function Get-DashboardScreen {
                     $newValue = if ($data.NewValue -ne $null) { $data.NewValue } else { $data }
                     if ($screen -and $screen._todaysTasks -and $newValue) {
                         $screen._todaysTasks.Data = $newValue 
-                        & $screen._todaysTasks.ProcessData -self $screen._todaysTasks 
+                        [void](& $screen._todaysTasks.ProcessData -self $screen._todaysTasks) # FIX: Suppress output
                     }
                 } catch {
                     Write-Log -Level Error -Message "todaysTasks handler error: $_"

@@ -580,13 +580,13 @@ function Render-Frame {
             if ($component.Children -and $component.Children.Count -gt 0) {
                 # A panel must calculate its children's layout before they are collected
                 if ($component.CalculateLayout) {
-                    try { 
-                        & $component.CalculateLayout -self $component 
-                    }
-                    catch { 
-                        Write-Log -Level Error -Message "Layout failed for '$($component.Name)'" -Data $_ 
-                    }
-                }
+    		  try { 
+        		[void](& $component.CalculateLayout -self $component) # FIX: Suppress output
+   		  }
+    		  catch { 
+        		Write-Log -Level Error -Message "Layout failed for '$($component.Name)'" -Data $_ 
+    		  }
+	    }
                 
                 # Recursively collect each child
                 foreach ($child in $component.Children) {

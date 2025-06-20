@@ -1,4 +1,893 @@
+Okay, I understand. My apologies for the oversight. I will apply the requested fixes to the specified modules only.
 
+Here are the updated modules with the corrections:
+
+---
+### `components/advanced-input-components.psm1` (Affected by FIX 1)
+---
+```powershell
+# Advanced Input Components Module
+# Enhanced input components from the TUI Upgrade Roadmap
+
+#region DateTime Components with Calendar Grid
+
+function global:New-TuiCalendarPicker {
+    param([hashtable]$Props = @{})
+    
+    $component = @{
+        Type = "CalendarPicker"
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 30 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 10 }
+        Value = if ($null -ne $Props.Value) { $Props.Value } else { (Get-Date) }
+        Mode = if ($null -ne $Props.Mode) { $Props.Mode } else { "Date" } # Date, DateTime, Time
+        IsFocusable = $true
+        CurrentView = "Day"  # Day, Month, Year
+        SelectedDate = if ($null -ne $Props.Value) { $Props.Value } else { (Get-Date) }
+        ViewDate = if ($null -ne $Props.Value) { $Props.Value } else { (Get-Date) }
+        
+        Render = {
+            param($self)
+            
+            $borderColor = if ($self.IsFocused) { 
+                Get-ThemeColor "Accent" -Default ([ConsoleColor]::Cyan)
+            } else { 
+                Get-ThemeColor "Border" -Default ([ConsoleColor]::DarkGray)
+            }
+            
+            # Main container
+            Write-BufferBox -X $self.X -Y $self.Y -Width $self.Width -Height $self.Height `
+                -BorderColor $borderColor -Title " Calendar "
+            
+            # Header with navigation
+            $headerY = $self.Y + 1
+            $monthYear = $self.ViewDate.ToString("MMMM yyyy")
+            $headerX = $self.X + [Math]::Floor(($self.Width - $monthYear.Length) / 2)
+            
+            Write-BufferString -X ($self.X + 2) -Y $headerY -Text "◄" -ForegroundColor $borderColor
+            Write-BufferString -X $headerX -Y $headerY -Text $monthYear -ForegroundColor (Get-ThemeColor "Header")
+            Write-BufferString -X ($self.X + $self.Width - 3) -Y $headerY -Text "►" -ForegroundColor $borderColor
+            
+            # Day headers
+            $dayHeaderY = $headerY + 2
+            $days = @("Su", "Mo", "Tu", "We", "Th", "Fr", "Sa")
+            $dayWidth = 4
+            $startX = $self.X + 2
+            
+            for ($i = 0; $i -lt $days.Count; $i++) {
+                Write-BufferString -X ($startX + ($i * $dayWidth)) -Y $dayHeaderY `
+                    -Text $days[$i] -ForegroundColor (Get-ThemeColor "Subtle")
+            }
+            
+            # Calendar grid
+            $firstDay = Get-Date -Year $self.ViewDate.Year -Month $self.ViewDate.Month -Day 1
+            $startDayOfWeek = [int]$firstDay.DayOfWeek
+            $daysInMonth = [DateTime]::DaysInMonth($self.ViewDate.Year, $self.ViewDate.Month)
+            
+            $currentDay = 1
+            $calendarY = $dayHeaderY + 1
+            
+            for ($week = 0; $week -lt 6; $week++) {
+                if ($currentDay -gt $daysInMonth) { break }
+                
+                for ($dayOfWeek = 0; $dayOfWeek -lt 7; $dayOfWeek++) {
+                    $x = $startX + ($dayOfWeek * $dayWidth)
+                    
+                    if ($week -eq 0 -and $dayOfWeek -lt $startDayOfWeek) {
+                        continue
+                    }
+                    
+                    if ($currentDay -le $daysInMonth) {
+                        $isSelected = ($currentDay -eq $self.SelectedDate.Day -and 
+                                     $self.ViewDate.Month -eq $self.SelectedDate.Month -and 
+                                     $self.ViewDate.Year -eq $self.SelectedDate.Year)
+                        
+                        $isToday = ($currentDay -eq (Get-Date).Day -and 
+                                  $self.ViewDate.Month -eq (Get-Date).Month -and 
+                                  $self.ViewDate.Year -eq (Get-Date).Year)
+                        
+                        $fg = if ($isSelected) { 
+                            Get-ThemeColor "Background" 
+                        } elseif ($isToday) { 
+                            Get-ThemeColor "Accent" 
+                        } else { 
+                            Get-ThemeColor "Primary" 
+                        }
+                        
+                        $bg = if ($isSelected) { 
+                            Get-ThemeColor "Accent" 
+                        } else { 
+                            Get-ThemeColor "Background" 
+                        }
+                        
+                        $dayText = $currentDay.ToString().PadLeft(2)
+                        Write-BufferString -X $x -Y ($calendarY + $week) -Text $dayText `
+                            -ForegroundColor $fg -BackgroundColor $bg
+                        
+                        $currentDay++
+                    }
+                }
+            }
+            
+            # Time picker if in DateTime mode
+            if ($self.Mode -eq "DateTime") {
+                $timeY = $self.Y + $self.Height - 2
+                $timeStr = $self.SelectedDate.ToString("HH:mm")
+                Write-BufferString -X ($self.X + 2) -Y $timeY -Text "Time: $timeStr" `
+                    -ForegroundColor (Get-ThemeColor "Primary")
+            }
+        }
+        
+        HandleInput = {
+            param($self, $Key)
+            
+            $handled = $true
+            $date = $self.SelectedDate
+            $viewDate = $self.ViewDate
+            
+            switch ($Key.Key) {
+                ([ConsoleKey]::LeftArrow) {
+                    if ($Key.Modifiers -band [ConsoleModifiers]::Control) {
+                        # Previous month
+                        $self.ViewDate = $viewDate.AddMonths(-1)
+                    } else {
+                        # Previous day
+                        $date = $date.AddDays(-1)
+                        if ($date.Month -ne $viewDate.Month) {
+                            $self.ViewDate = $date
+                        }
+                    }
+                }
+                ([ConsoleKey]::RightArrow) {
+                    if ($Key.Modifiers -band [ConsoleModifiers]::Control) {
+                        # Next month
+                        $self.ViewDate = $viewDate.AddMonths(1)
+                    } else {
+                        # Next day
+                        $date = $date.AddDays(1)
+                        if ($date.Month -ne $viewDate.Month) {
+                            $self.ViewDate = $date
+                        }
+                    }
+                }
+                ([ConsoleKey]::UpArrow) {
+                    $date = $date.AddDays(-7)
+                    if ($date.Month -ne $viewDate.Month) {
+                        $self.ViewDate = $date
+                    }
+                }
+                ([ConsoleKey]::DownArrow) {
+                    $date = $date.AddDays(7)
+                    if ($date.Month -ne $viewDate.Month) {
+                        $self.ViewDate = $date
+                    }
+                }
+                ([ConsoleKey]::PageUp) {
+                    $self.ViewDate = $viewDate.AddMonths(-1)
+                    $date = Get-Date -Year $self.ViewDate.Year -Month $self.ViewDate.Month `
+                        -Day ([Math]::Min($date.Day, [DateTime]::DaysInMonth($self.ViewDate.Year, $self.ViewDate.Month)))
+                }
+                ([ConsoleKey]::PageDown) {
+                    $self.ViewDate = $viewDate.AddMonths(1)
+                    $date = Get-Date -Year $self.ViewDate.Year -Month $self.ViewDate.Month `
+                        -Day ([Math]::Min($date.Day, [DateTime]::DaysInMonth($self.ViewDate.Year, $self.ViewDate.Month)))
+                }
+                ([ConsoleKey]::Home) {
+                    $date = Get-Date
+                    $self.ViewDate = $date
+                }
+                ([ConsoleKey]::Enter) {
+                    if ($self.OnSelect) {
+                        & $self.OnSelect -Date $date
+                    }
+                }
+                default {
+                    $handled = $false
+                }
+            }
+            
+            if ($handled) {
+                $self.SelectedDate = $date
+                if ($self.OnChange) {
+                    & $self.OnChange -NewValue $date
+                }
+                Request-TuiRefresh
+            }
+            
+            return $handled
+        }
+    }
+    
+    return $component
+}
+
+#endregion
+
+#region Enhanced Dropdown with Search
+
+function global:New-TuiSearchableDropdown {
+    param([hashtable]$Props = @{})
+    
+    $component = @{
+        Type = "SearchableDropdown"
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 30 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 3 }
+        Options = if ($null -ne $Props.Options) { $Props.Options } else { @() }
+        Value = $Props.Value
+        Placeholder = if ($null -ne $Props.Placeholder) { $Props.Placeholder } else { "Type to search..." }
+        MaxDisplayItems = if ($null -ne $Props.MaxDisplayItems) { $Props.MaxDisplayItems } else { 5 }
+        AllowCustomValue = if ($null -ne $Props.AllowCustomValue) { $Props.AllowCustomValue } else { $false }
+        IsFocusable = $true
+        IsOpen = $false
+        SearchText = ""
+        FilteredOptions = @()
+        SelectedIndex = 0
+        
+        Render = {
+            param($self)
+            
+            $borderColor = if ($self.IsFocused) { 
+                Get-ThemeColor "Accent" -Default ([ConsoleColor]::Cyan)
+            } else { 
+                Get-ThemeColor "Border" -Default ([ConsoleColor]::DarkGray)
+            }
+            
+            # Main dropdown box
+            Write-BufferBox -X $self.X -Y $self.Y -Width $self.Width -Height $self.Height `
+                -BorderColor $borderColor
+            
+            # Display text
+            $displayText = ""
+            if ($self.IsOpen) {
+                $displayText = $self.SearchText
+                if ([string]::IsNullOrEmpty($displayText) -and -not $self.IsFocused) {
+                    $displayText = $self.Placeholder
+                }
+            } else {
+                if ($self.Value) {
+                    $selected = $self.Options | Where-Object { $_.Value -eq $self.Value } | Select-Object -First 1
+                    if ($selected) {
+                        $displayText = $selected.Display
+                    } else {
+                        $displayText = $self.Value.ToString()
+                    }
+                } else {
+                    $displayText = "Select..."
+                }
+            }
+            
+            Write-BufferString -X ($self.X + 2) -Y ($self.Y + 1) -Text $displayText
+            
+            # Dropdown indicator
+            $indicator = if ($self.IsOpen) { "▲" } else { "▼" }
+            Write-BufferString -X ($self.X + $self.Width - 3) -Y ($self.Y + 1) -Text $indicator `
+                -ForegroundColor $borderColor
+            
+            # Cursor for search mode
+            if ($self.IsOpen -and $self.IsFocused) {
+                $cursorX = $self.X + 2 + $self.SearchText.Length
+                if ($cursorX -lt ($self.X + $self.Width - 3)) {
+                    Write-BufferString -X $cursorX -Y ($self.Y + 1) -Text "_" `
+                        -BackgroundColor (Get-ThemeColor "Accent")
+                }
+            }
+            
+            # Options dropdown
+            if ($self.IsOpen -and $self.FilteredOptions.Count -gt 0) {
+                $dropHeight = [Math]::Min($self.FilteredOptions.Count, $self.MaxDisplayItems) + 2
+                Write-BufferBox -X $self.X -Y ($self.Y + $self.Height) -Width $self.Width -Height $dropHeight `
+                    -BorderColor $borderColor -BackgroundColor (Get-ThemeColor "Background")
+                
+                $startIdx = 0
+                if ($self.SelectedIndex -ge $self.MaxDisplayItems) {
+                    $startIdx = $self.SelectedIndex - $self.MaxDisplayItems + 1
+                }
+                
+                $endIdx = [Math]::Min($startIdx + $self.MaxDisplayItems - 1, $self.FilteredOptions.Count - 1)
+                
+                for ($i = $startIdx; $i -le $endIdx; $i++) {
+                    $option = $self.FilteredOptions[$i]
+                    $y = $self.Y + $self.Height + 1 + ($i - $startIdx)
+                    
+                    $isSelected = ($i -eq $self.SelectedIndex)
+                    $fg = if ($isSelected) { Get-ThemeColor "Background" } else { Get-ThemeColor "Primary" }
+                    $bg = if ($isSelected) { Get-ThemeColor "Accent" } else { Get-ThemeColor "Background" }
+                    
+                    $text = $option.Display
+                    if ($text.Length -gt ($self.Width - 4)) {
+                        $text = $text.Substring(0, $self.Width - 7) + "..."
+                    }
+                    
+                    # Highlight matching text
+                    if ($self.SearchText.Length -gt 0 -and -not $isSelected) {
+                        $matchIndex = $text.IndexOf($self.SearchText, [StringComparison]::OrdinalIgnoreCase)
+                        if ($matchIndex -ge 0) {
+                            # Draw text before match
+                            if ($matchIndex -gt 0) {
+                                Write-BufferString -X ($self.X + 2) -Y $y `
+                                    -Text $text.Substring(0, $matchIndex) -ForegroundColor $fg
+                            }
+                            
+                            # Draw matching text highlighted
+                            Write-BufferString -X ($self.X + 2 + $matchIndex) -Y $y `
+                                -Text $text.Substring($matchIndex, $self.SearchText.Length) `
+                                -ForegroundColor (Get-ThemeColor "Warning")
+                            
+                            # Draw text after match
+                            $afterMatch = $matchIndex + $self.SearchText.Length
+                            if ($afterMatch -lt $text.Length) {
+                                Write-BufferString -X ($self.X + 2 + $afterMatch) -Y $y `
+                                    -Text $text.Substring($afterMatch) -ForegroundColor $fg
+                            }
+                            
+                            continue
+                        }
+                    }
+                    
+                    Write-BufferString -X ($self.X + 2) -Y $y -Text $text `
+                        -ForegroundColor $fg -BackgroundColor $bg
+                }
+                
+                # Scrollbar if needed
+                if ($self.FilteredOptions.Count -gt $self.MaxDisplayItems) {
+                    $scrollHeight = $self.MaxDisplayItems
+                    $scrollPos = [Math]::Floor(($self.SelectedIndex / ($self.FilteredOptions.Count - 1)) * ($scrollHeight - 1))
+                    
+                    for ($i = 0; $i -lt $scrollHeight; $i++) {
+                        $char = if ($i -eq $scrollPos) { "█" } else { "│" }
+                        $color = if ($i -eq $scrollPos) { Get-ThemeColor "Accent" } else { Get-ThemeColor "Subtle" }
+                        Write-BufferString -X ($self.X + $self.Width - 2) -Y ($self.Y + $self.Height + 1 + $i) `
+                            -Text $char -ForegroundColor $color
+                    }
+                }
+            }
+        }
+        
+        FilterOptions = {
+            if ([string]::IsNullOrEmpty($this.SearchText)) {
+                $this.FilteredOptions = $this.Options
+            } else {
+                $this.FilteredOptions = @($this.Options | Where-Object {
+                    $_.Display -like "*$($this.SearchText)*"
+                })
+                
+                # Add custom value option if allowed and no exact match
+                if ($this.AllowCustomValue) {
+                    $exactMatch = $this.FilteredOptions | Where-Object { $_.Display -eq $this.SearchText }
+                    if (-not $exactMatch) {
+                        $this.FilteredOptions = @(@{
+                            Display = $this.SearchText
+                            Value = $this.SearchText
+                            IsCustom = $true
+                        }) + $this.FilteredOptions
+                    }
+                }
+            }
+            
+            # Reset selection to first item
+            $this.SelectedIndex = 0
+        }
+        
+        HandleInput = {
+            param($self, $Key)
+            
+            if (-not $self.IsOpen) {
+                switch ($Key.Key) {
+                    { $_ -in @([ConsoleKey]::Enter, [ConsoleKey]::Spacebar, [ConsoleKey]::DownArrow) } {
+                        $self.IsOpen = $true
+                        $self.SearchText = ""
+                        & $self.FilterOptions
+                        Request-TuiRefresh
+                        return $true
+                    }
+                }
+                return $false
+            }
+            
+            # Handle open dropdown
+            switch ($Key.Key) {
+                ([ConsoleKey]::Escape) {
+                    $self.IsOpen = $false
+                    $self.SearchText = ""
+                    Request-TuiRefresh
+                    return $true
+                }
+                ([ConsoleKey]::Enter) {
+                    if ($self.FilteredOptions.Count -gt 0) {
+                        $selected = $self.FilteredOptions[$self.SelectedIndex]
+                        if ($self.OnChange) {
+                            & $self.OnChange -NewValue $selected.Value -Option $selected
+                        }
+                        $self.Value = $selected.Value
+                        $self.IsOpen = $false
+                        $self.SearchText = ""
+                        Request-TuiRefresh
+                    }
+                    return $true
+                }
+                ([ConsoleKey]::UpArrow) {
+                    if ($self.SelectedIndex -gt 0) {
+                        $self.SelectedIndex--
+                        Request-TuiRefresh
+                    }
+                    return $true
+                }
+                ([ConsoleKey]::DownArrow) {
+                    if ($self.SelectedIndex -lt ($self.FilteredOptions.Count - 1)) {
+                        $self.SelectedIndex++
+                        Request-TuiRefresh
+                    }
+                    return $true
+                }
+                ([ConsoleKey]::Backspace) {
+                    if ($self.SearchText.Length -gt 0) {
+                        $self.SearchText = $self.SearchText.Substring(0, $self.SearchText.Length - 1)
+                        & $self.FilterOptions
+                        Request-TuiRefresh
+                    }
+                    return $true
+                }
+                default {
+                    if ($Key.KeyChar -and -not [char]::IsControl($Key.KeyChar)) {
+                        $self.SearchText += $Key.KeyChar
+                        & $self.FilterOptions
+                        Request-TuiRefresh
+                        return $true
+                    }
+                }
+            }
+            
+            return $false
+        }
+    }
+    
+    return $component
+}
+
+#endregion
+
+#region Multi-Select Components
+
+function global:New-TuiMultiSelect {
+    param([hashtable]$Props = @{})
+    
+    $component = @{
+        Type = "MultiSelect"
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 30 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 10 }
+        Options = if ($null -ne $Props.Options) { $Props.Options } else { @() }
+        SelectedValues = if ($null -ne $Props.SelectedValues) { $Props.SelectedValues } else { @() }
+        Title = if ($null -ne $Props.Title) { $Props.Title } else { "Select items" }
+        AllowSelectAll = if ($null -ne $Props.AllowSelectAll) { $Props.AllowSelectAll } else { $true }
+        IsFocusable = $true
+        SelectedIndex = 0
+        ScrollOffset = 0
+        
+        Render = {
+            param($self)
+            
+            $borderColor = if ($self.IsFocused) { 
+                Get-ThemeColor "Accent" -Default ([ConsoleColor]::Cyan)
+            } else { 
+                Get-ThemeColor "Border" -Default ([ConsoleColor]::DarkGray)
+            }
+            
+            Write-BufferBox -X $self.X -Y $self.Y -Width $self.Width -Height $self.Height `
+                -BorderColor $borderColor -Title " $($self.Title) "
+            
+            # Select all option
+            $currentY = $self.Y + 1
+            if ($self.AllowSelectAll) {
+                $allSelected = $self.Options.Count -eq $self.SelectedValues.Count
+                $checkbox = if ($allSelected) { "[X]" } else { "[ ]" }
+                $fg = if ($self.SelectedIndex -eq -1) { Get-ThemeColor "Accent" } else { Get-ThemeColor "Secondary" }
+                Write-BufferString -X ($self.X + 2) -Y $currentY -Text "$checkbox Select All" `
+                    -ForegroundColor $fg
+                $currentY += 2
+            }
+            
+            # Options
+            $visibleHeight = $self.Height - 4
+            if ($self.AllowSelectAll) { $visibleHeight -= 2 }
+            
+            $startIdx = $self.ScrollOffset
+            $endIdx = [Math]::Min($self.Options.Count - 1, $startIdx + $visibleHeight - 1)
+            
+            for ($i = $startIdx; $i -le $endIdx; $i++) {
+                $option = $self.Options[$i]
+                $isChecked = $self.SelectedValues -contains $option.Value
+                $isHighlighted = ($i -eq $self.SelectedIndex)
+                
+                $checkbox = if ($isChecked) { "[X]" } else { "[ ]" }
+                $fg = if ($isHighlighted) { Get-ThemeColor "Accent" } else { Get-ThemeColor "Primary" }
+                
+                $text = "$checkbox $($option.Display)"
+                if ($text.Length -gt ($self.Width - 4)) {
+                    $text = $text.Substring(0, $self.Width - 7) + "..."
+                }
+                
+                Write-BufferString -X ($self.X + 2) -Y $currentY -Text $text -ForegroundColor $fg
+                $currentY++
+            }
+            
+            # Status line
+            $statusY = $self.Y + $self.Height - 2
+            $statusText = "$($self.SelectedValues.Count) of $($self.Options.Count) selected"
+            Write-BufferString -X ($self.X + 2) -Y $statusY -Text $statusText `
+                -ForegroundColor (Get-ThemeColor "Subtle")
+        }
+        
+        HandleInput = {
+            param($self, $Key)
+            
+            $maxIndex = $self.Options.Count - 1
+            if ($self.AllowSelectAll) { $maxIndex++ }
+            
+            switch ($Key.Key) {
+                ([ConsoleKey]::UpArrow) {
+                    if ($self.AllowSelectAll -and $self.SelectedIndex -eq 0) {
+                        $self.SelectedIndex = -1
+                    } elseif ($self.SelectedIndex -gt 0 -or ($self.AllowSelectAll -and $self.SelectedIndex -gt -1)) {
+                        $self.SelectedIndex--
+                        if ($self.SelectedIndex -ge 0 -and $self.SelectedIndex -lt $self.ScrollOffset) {
+                            $self.ScrollOffset = $self.SelectedIndex
+                        }
+                    }
+                    Request-TuiRefresh
+                    return $true
+                }
+                ([ConsoleKey]::DownArrow) {
+                    if ($self.SelectedIndex -lt ($self.Options.Count - 1)) {
+                        $self.SelectedIndex++
+                        $visibleHeight = $self.Height - 4
+                        if ($self.AllowSelectAll) { $visibleHeight -= 2 }
+                        if ($self.SelectedIndex -ge ($self.ScrollOffset + $visibleHeight)) {
+                            $self.ScrollOffset = $self.SelectedIndex - $visibleHeight + 1
+                        }
+                    }
+                    Request-TuiRefresh
+                    return $true
+                }
+                ([ConsoleKey]::Spacebar) {
+                    if ($self.SelectedIndex -eq -1 -and $self.AllowSelectAll) {
+                        # Toggle all
+                        if ($self.SelectedValues.Count -eq $self.Options.Count) {
+                            $self.SelectedValues = @()
+                        } else {
+                            $self.SelectedValues = @($self.Options | ForEach-Object { $_.Value })
+                        }
+                    } elseif ($self.SelectedIndex -ge 0) {
+                        # Toggle individual
+                        $option = $self.Options[$self.SelectedIndex]
+                        if ($self.SelectedValues -contains $option.Value) {
+                            $self.SelectedValues = @($self.SelectedValues | Where-Object { $_ -ne $option.Value })
+                        } else {
+                            $self.SelectedValues += $option.Value
+                        }
+                    }
+                    
+                    if ($self.OnChange) {
+                        & $self.OnChange -SelectedValues $self.SelectedValues
+                    }
+                    Request-TuiRefresh
+                    return $true
+                }
+                ([ConsoleKey]::Enter) {
+                    if ($self.OnSubmit) {
+                        & $self.OnSubmit -SelectedValues $self.SelectedValues
+                    }
+                    return $true
+                }
+            }
+            
+            return $false
+        }
+    }
+    
+    return $component
+}
+
+#endregion
+
+#region Numeric Input Components
+
+function global:New-TuiNumberInput {
+    param([hashtable]$Props = @{})
+    
+    $component = @{
+        Type = "NumberInput"
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 20 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 3 }
+        Value = if ($null -ne $Props.Value) { $Props.Value } else { 0 }
+        Min = if ($null -ne $Props.Min) { $Props.Min } else { 0 }
+        Max = if ($null -ne $Props.Max) { $Props.Max } else { 100 }
+        Step = if ($null -ne $Props.Step) { $Props.Step } else { 1 }
+        DecimalPlaces = if ($null -ne $Props.DecimalPlaces) { $Props.DecimalPlaces } else { 0 }
+        IsFocusable = $true
+        TextValue = (if ($null -ne $Props.Value) { $Props.Value } else { 0 }).ToString()
+        CursorPosition = 0
+        
+        Render = {
+            param($self)
+            
+            $borderColor = if ($self.IsFocused) { 
+                Get-ThemeColor "Accent" -Default ([ConsoleColor]::Cyan)
+            } else { 
+                Get-ThemeColor "Border" -Default ([ConsoleColor]::DarkGray)
+            }
+            
+            Write-BufferBox -X $self.X -Y $self.Y -Width $self.Width -Height $self.Height `
+                -BorderColor $borderColor
+            
+            # Value display
+            $displayValue = $self.TextValue
+            if ($displayValue.Length -gt ($self.Width - 6)) {
+                $displayValue = $displayValue.Substring(0, $self.Width - 9) + "..."
+            }
+            
+            Write-BufferString -X ($self.X + 2) -Y ($self.Y + 1) -Text $displayValue
+            
+            # Cursor
+            if ($self.IsFocused -and $self.CursorPosition -le $displayValue.Length) {
+                $cursorX = $self.X + 2 + $self.CursorPosition
+                if ($cursorX -lt ($self.X + $self.Width - 4)) {
+                    Write-BufferString -X $cursorX -Y ($self.Y + 1) -Text "_" `
+                        -BackgroundColor (Get-ThemeColor "Accent")
+                }
+            }
+            
+            # Spinner buttons
+            Write-BufferString -X ($self.X + $self.Width - 3) -Y ($self.Y + 1) -Text "▲" `
+                -ForegroundColor $borderColor
+            Write-BufferString -X ($self.X + $self.Width - 3) -Y ($self.Y + 1) -Text "▼" `
+                -ForegroundColor $borderColor
+            
+            # Min/Max indicators
+            if ($self.Value -le $self.Min) {
+                Write-BufferString -X ($self.X + 1) -Y ($self.Y + 1) -Text "⊥" `
+                    -ForegroundColor (Get-ThemeColor "Warning")
+            }
+            if ($self.Value -ge $self.Max) {
+                Write-BufferString -X ($self.X + $self.Width - 2) -Y ($self.Y + 1) -Text "⊤" `
+                    -ForegroundColor (Get-ThemeColor "Warning")
+            }
+        }
+        
+        ValidateAndUpdate = {
+            try {
+                $newValue = [double]$this.TextValue
+                $newValue = [Math]::Max($this.Min, [Math]::Min($this.Max, $newValue))
+                
+                if ($this.DecimalPlaces -eq 0) {
+                    $newValue = [Math]::Floor($newValue)
+                } else {
+                    $newValue = [Math]::Round($newValue, $this.DecimalPlaces)
+                }
+                
+                $this.Value = $newValue
+                $this.TextValue = $newValue.ToString("F$($this.DecimalPlaces)")
+                
+                if ($this.OnChange) {
+                    & $this.OnChange -NewValue $newValue
+                }
+                
+                return $true
+            } catch {
+                # Invalid input, restore previous value
+                $this.TextValue = $this.Value.ToString("F$($this.DecimalPlaces)")
+                return $false
+            }
+        }
+        
+        HandleInput = {
+            param($self, $Key)
+            
+            switch ($Key.Key) {
+                ([ConsoleKey]::UpArrow) {
+                    $self.Value = [Math]::Min($self.Max, $self.Value + $self.Step)
+                    $self.TextValue = $self.Value.ToString("F$($self.DecimalPlaces)")
+                    $self.CursorPosition = $self.TextValue.Length
+                    if ($self.OnChange) {
+                        & $self.OnChange -NewValue $self.Value
+                    }
+                    Request-TuiRefresh
+                    return $true
+                }
+                ([ConsoleKey]::DownArrow) {
+                    $self.Value = [Math]::Max($self.Min, $self.Value - $self.Step)
+                    $self.TextValue = $self.Value.ToString("F$($self.DecimalPlaces)")
+                    $self.CursorPosition = $self.TextValue.Length
+                    if ($self.OnChange) {
+                        & $self.OnChange -NewValue $self.Value
+                    }
+                    Request-TuiRefresh
+                    return $true
+                }
+                ([ConsoleKey]::LeftArrow) {
+                    if ($self.CursorPosition -gt 0) {
+                        $self.CursorPosition--
+                        Request-TuiRefresh
+                    }
+                    return $true
+                }
+                ([ConsoleKey]::RightArrow) {
+                    if ($self.CursorPosition -lt $self.TextValue.Length) {
+                        $self.CursorPosition++
+                        Request-TuiRefresh
+                    }
+                    return $true
+                }
+                ([ConsoleKey]::Home) {
+                    $self.CursorPosition = 0
+                    Request-TuiRefresh
+                    return $true
+                }
+                ([ConsoleKey]::End) {
+                    $self.CursorPosition = $self.TextValue.Length
+                    Request-TuiRefresh
+                    return $true
+                }
+                ([ConsoleKey]::Backspace) {
+                    if ($self.CursorPosition -gt 0) {
+                        $self.TextValue = $self.TextValue.Remove($self.CursorPosition - 1, 1)
+                        $self.CursorPosition--
+                        Request-TuiRefresh
+                    }
+                    return $true
+                }
+                ([ConsoleKey]::Delete) {
+                    if ($self.CursorPosition -lt $self.TextValue.Length) {
+                        $self.TextValue = $self.TextValue.Remove($self.CursorPosition, 1)
+                        Request-TuiRefresh
+                    }
+                    return $true
+                }
+                ([ConsoleKey]::Enter) {
+                    & $self.ValidateAndUpdate
+                    Request-TuiRefresh
+                    return $true
+                }
+                default {
+                    if ($Key.KeyChar -and ($Key.KeyChar -match '[\d\.\-]')) {
+                        $self.TextValue = $self.TextValue.Insert($self.CursorPosition, $Key.KeyChar)
+                        $self.CursorPosition++
+                        Request-TuiRefresh
+                        return $true
+                    }
+                }
+            }
+            
+            return $false
+        }
+    }
+    
+    return $component
+}
+
+function global:New-TuiSlider {
+    param([hashtable]$Props = @{})
+    
+    $component = @{
+        Type = "Slider"
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 30 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 1 }
+        Value = if ($null -ne $Props.Value) { $Props.Value } else { 50 }
+        Min = if ($null -ne $Props.Min) { $Props.Min } else { 0 }
+        Max = if ($null -ne $Props.Max) { $Props.Max } else { 100 }
+        Step = if ($null -ne $Props.Step) { $Props.Step } else { 1 }
+        ShowValue = if ($null -ne $Props.ShowValue) { $Props.ShowValue } else { $true }
+        IsFocusable = $true
+        
+        Render = {
+            param($self)
+            
+            $fg = if ($self.IsFocused) { 
+                Get-ThemeColor "Accent" -Default ([ConsoleColor]::Cyan)
+            } else { 
+                Get-ThemeColor "Primary" -Default ([ConsoleColor]::White)
+            }
+            
+            # Calculate position
+            $range = $self.Max - $self.Min
+            $percent = ($self.Value - $self.Min) / $range
+            $trackWidth = $self.Width - 2
+            $thumbPos = [Math]::Floor($trackWidth * $percent)
+            
+            # Draw track
+            $track = "─" * $trackWidth
+            Write-BufferString -X ($self.X + 1) -Y $self.Y -Text $track -ForegroundColor (Get-ThemeColor "Subtle")
+            
+            # Draw filled portion
+            if ($thumbPos -gt 0) {
+                $filled = "═" * $thumbPos
+                Write-BufferString -X ($self.X + 1) -Y $self.Y -Text $filled -ForegroundColor $fg
+            }
+            
+            # Draw thumb
+            Write-BufferString -X ($self.X + 1 + $thumbPos) -Y $self.Y -Text "●" -ForegroundColor $fg
+            
+            # Draw bounds
+            Write-BufferString -X $self.X -Y $self.Y -Text "[" -ForegroundColor $fg
+            Write-BufferString -X ($self.X + $self.Width - 1) -Y $self.Y -Text "]" -ForegroundColor $fg
+            
+            # Show value
+            if ($self.ShowValue) {
+                $valueText = $self.Value.ToString()
+                $valueX = $self.X + [Math]::Floor(($self.Width - $valueText.Length) / 2)
+                Write-BufferString -X $valueX -Y ($self.Y + 1) -Text $valueText -ForegroundColor $fg
+            }
+        }
+        
+        HandleInput = {
+            param($self, $Key)
+            
+            $handled = $true
+            $oldValue = $self.Value
+            
+            switch ($Key.Key) {
+                ([ConsoleKey]::LeftArrow) {
+                    $self.Value = [Math]::Max($self.Min, $self.Value - $self.Step)
+                }
+                ([ConsoleKey]::RightArrow) {
+                    $self.Value = [Math]::Min($self.Max, $self.Value + $self.Step)
+                }
+                ([ConsoleKey]::Home) {
+                    $self.Value = $self.Min
+                }
+                ([ConsoleKey]::End) {
+                    $self.Value = $self.Max
+                }
+                ([ConsoleKey]::PageDown) {
+                    $largeStep = [Math]::Max($self.Step, ($self.Max - $self.Min) / 10)
+                    $self.Value = [Math]::Max($self.Min, $self.Value - $largeStep)
+                }
+                ([ConsoleKey]::PageUp) {
+                    $largeStep = [Math]::Max($self.Step, ($self.Max - $self.Min) / 10)
+                    $self.Value = [Math]::Min($self.Max, $self.Value + $largeStep)
+                }
+                default {
+                    $handled = $false
+                }
+            }
+            
+            if ($handled -and $self.Value -ne $oldValue) {
+                if ($self.OnChange) {
+                    & $self.OnChange -NewValue $self.Value
+                }
+                Request-TuiRefresh
+            }
+            
+            return $handled
+        }
+    }
+    
+    return $component
+}
+
+#endregion
+
+Export-ModuleMember -Function @(
+    'New-TuiCalendarPicker',
+    'New-TuiSearchableDropdown',
+    'New-TuiMultiSelect',
+    'New-TuiNumberInput',
+    'New-TuiSlider'
+)
+```
+
+---
+### `components/tui-components.psm1` (Affected by FIX 1)
+---
+```powershell
 # TUI Component Library - COMPLIANT VERSION
 # Stateful component factories following the canonical architecture
 # LEGACY New-TuiPanel has been REMOVED.
@@ -14,13 +903,13 @@ function global:New-TuiLabel {
         IsFocusable = $false
         
         # Properties (from Props)
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 10
-        Height = $Props.Height ?? 1
-        Visible = $Props.Visible ?? $true
-        ZIndex = $Props.ZIndex ?? 0
-        Text = $Props.Text ?? ""
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 10 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 1 }
+        Visible = if ($null -ne $Props.Visible) { $Props.Visible } else { $true }
+        ZIndex = if ($null -ne $Props.ZIndex) { $Props.ZIndex } else { 0 }
+        Text = if ($null -ne $Props.Text) { $Props.Text } else { "" }
         ForegroundColor = $Props.ForegroundColor
         Name = $Props.Name
         
@@ -52,13 +941,13 @@ function global:New-TuiButton {
         IsFocusable = $true
         
         # Properties (from Props)
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 10
-        Height = $Props.Height ?? 3
-        Visible = $Props.Visible ?? $true
-        ZIndex = $Props.ZIndex ?? 0
-        Text = $Props.Text ?? "Button"
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 10 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 3 }
+        Visible = if ($null -ne $Props.Visible) { $Props.Visible } else { $true }
+        ZIndex = if ($null -ne $Props.ZIndex) { $Props.ZIndex } else { 0 }
+        Text = if ($null -ne $Props.Text) { $Props.Text } else { "Button" }
         Name = $Props.Name
         
         # Internal State
@@ -110,19 +999,19 @@ function global:New-TuiTextBox {
         IsFocusable = $true
         
         # Properties (from Props)
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 20
-        Height = $Props.Height ?? 3
-        Visible = $Props.Visible ?? $true
-        ZIndex = $Props.ZIndex ?? 0
-        Text = $Props.Text ?? ""
-        Placeholder = $Props.Placeholder ?? ""
-        MaxLength = $Props.MaxLength ?? 100
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 20 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 3 }
+        Visible = if ($null -ne $Props.Visible) { $Props.Visible } else { $true }
+        ZIndex = if ($null -ne $Props.ZIndex) { $Props.ZIndex } else { 0 }
+        Text = if ($null -ne $Props.Text) { $Props.Text } else { "" }
+        Placeholder = if ($null -ne $Props.Placeholder) { $Props.Placeholder } else { "" }
+        MaxLength = if ($null -ne $Props.MaxLength) { $Props.MaxLength } else { 100 }
         Name = $Props.Name
         
         # Internal State
-        CursorPosition = $Props.CursorPosition ?? 0
+        CursorPosition = if ($null -ne $Props.CursorPosition) { $Props.CursorPosition } else { 0 }
         
         # Event Handlers (from Props)
         OnChange = $Props.OnChange
@@ -257,14 +1146,14 @@ function global:New-TuiCheckBox {
         IsFocusable = $true
         
         # Properties (from Props)
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 20
-        Height = $Props.Height ?? 1
-        Visible = $Props.Visible ?? $true
-        ZIndex = $Props.ZIndex ?? 0
-        Text = $Props.Text ?? "Checkbox"
-        Checked = $Props.Checked ?? $false
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 20 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 1 }
+        Visible = if ($null -ne $Props.Visible) { $Props.Visible } else { $true }
+        ZIndex = if ($null -ne $Props.ZIndex) { $Props.ZIndex } else { 0 }
+        Text = if ($null -ne $Props.Text) { $Props.Text } else { "Checkbox" }
+        Checked = if ($null -ne $Props.Checked) { $Props.Checked } else { $false }
         Name = $Props.Name
         
         # Event Handlers (from Props)
@@ -308,15 +1197,15 @@ function global:New-TuiDropdown {
         IsFocusable = $true
         
         # Properties (from Props)
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 20
-        Height = $Props.Height ?? 3
-        Visible = $Props.Visible ?? $true
-        ZIndex = $Props.ZIndex ?? 10
-        Options = $Props.Options ?? @()
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 20 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 3 }
+        Visible = if ($null -ne $Props.Visible) { $Props.Visible } else { $true }
+        ZIndex = if ($null -ne $Props.ZIndex) { $Props.ZIndex } else { 10 }
+        Options = if ($null -ne $Props.Options) { $Props.Options } else { @() }
         Value = $Props.Value
-        Placeholder = $Props.Placeholder ?? "Select..."
+        Placeholder = if ($null -ne $Props.Placeholder) { $Props.Placeholder } else { "Select..." }
         Name = $Props.Name
         
         # Internal State
@@ -425,15 +1314,15 @@ function global:New-TuiProgressBar {
         IsFocusable = $false
         
         # Properties (from Props)
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 20
-        Height = $Props.Height ?? 1
-        Visible = $Props.Visible ?? $true
-        ZIndex = $Props.ZIndex ?? 0
-        Value = $Props.Value ?? 0
-        Max = $Props.Max ?? 100
-        ShowPercent = $Props.ShowPercent ?? $false
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 20 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 1 }
+        Visible = if ($null -ne $Props.Visible) { $Props.Visible } else { $true }
+        ZIndex = if ($null -ne $Props.ZIndex) { $Props.ZIndex } else { 0 }
+        Value = if ($null -ne $Props.Value) { $Props.Value } else { 0 }
+        Max = if ($null -ne $Props.Max) { $Props.Max } else { 100 }
+        ShowPercent = if ($null -ne $Props.ShowPercent) { $Props.ShowPercent } else { $false }
         Name = $Props.Name
         
         # Methods
@@ -474,19 +1363,19 @@ function global:New-TuiTextArea {
         IsFocusable = $true
         
         # Properties (from Props)
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 40
-        Height = $Props.Height ?? 6
-        Visible = $Props.Visible ?? $true
-        ZIndex = $Props.ZIndex ?? 0
-        Text = $Props.Text ?? ""
-        Placeholder = $Props.Placeholder ?? "Enter text..."
-        WrapText = $Props.WrapText ?? $true
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 40 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 6 }
+        Visible = if ($null -ne $Props.Visible) { $Props.Visible } else { $true }
+        ZIndex = if ($null -ne $Props.ZIndex) { $Props.ZIndex } else { 0 }
+        Text = if ($null -ne $Props.Text) { $Props.Text } else { "" }
+        Placeholder = if ($null -ne $Props.Placeholder) { $Props.Placeholder } else { "Enter text..." }
+        WrapText = if ($null -ne $Props.WrapText) { $Props.WrapText } else { $true }
         Name = $Props.Name
         
         # Internal State
-        Lines = @($Props.Text -split "`n")
+        Lines = @((if ($null -ne $Props.Text) { $Props.Text } else { "" }) -split "`n")
         CursorX = 0
         CursorY = 0
         ScrollOffset = 0
@@ -745,14 +1634,14 @@ function global:New-TuiDatePicker {
         IsFocusable = $true
         
         # Properties (from Props)
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 20
-        Height = $Props.Height ?? 3
-        Visible = $Props.Visible ?? $true
-        ZIndex = $Props.ZIndex ?? 0
-        Value = $Props.Value ?? (Get-Date)
-        Format = $Props.Format ?? "yyyy-MM-dd"
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 20 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 3 }
+        Visible = if ($null -ne $Props.Visible) { $Props.Visible } else { $true }
+        ZIndex = if ($null -ne $Props.ZIndex) { $Props.ZIndex } else { 0 }
+        Value = if ($null -ne $Props.Value) { $Props.Value } else { (Get-Date) }
+        Format = if ($null -ne $Props.Format) { $Props.Format } else { "yyyy-MM-dd" }
         Name = $Props.Name
         
         # Event Handlers (from Props)
@@ -824,15 +1713,15 @@ function global:New-TuiTimePicker {
         IsFocusable = $true
         
         # Properties (from Props)
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 15
-        Height = $Props.Height ?? 3
-        Visible = $Props.Visible ?? $true
-        ZIndex = $Props.ZIndex ?? 0
-        Hour = $Props.Hour ?? 0
-        Minute = $Props.Minute ?? 0
-        Format24H = $Props.Format24H ?? $true
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 15 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 3 }
+        Visible = if ($null -ne $Props.Visible) { $Props.Visible } else { $true }
+        ZIndex = if ($null -ne $Props.ZIndex) { $Props.ZIndex } else { 0 }
+        Hour = if ($null -ne $Props.Hour) { $Props.Hour } else { 0 }
+        Minute = if ($null -ne $Props.Minute) { $Props.Minute } else { 0 }
+        Format24H = if ($null -ne $Props.Format24H) { $Props.Format24H } else { $true }
         Name = $Props.Name
         
         # Event Handlers (from Props)
@@ -916,14 +1805,14 @@ function global:New-TuiTable {
         IsFocusable = $true
         
         # Properties (from Props)
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 60
-        Height = $Props.Height ?? 15
-        Visible = $Props.Visible ?? $true
-        ZIndex = $Props.ZIndex ?? 0
-        Columns = $Props.Columns ?? @()
-        Rows = $Props.Rows ?? @()
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 60 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 15 }
+        Visible = if ($null -ne $Props.Visible) { $Props.Visible } else { $true }
+        ZIndex = if ($null -ne $Props.ZIndex) { $Props.ZIndex } else { 0 }
+        Columns = if ($null -ne $Props.Columns) { $Props.Columns } else { @() }
+        Rows = if ($null -ne $Props.Rows) { $Props.Rows } else { @() }
         Name = $Props.Name
         
         # Internal State
@@ -1094,15 +1983,15 @@ function global:New-TuiChart {
         IsFocusable = $false
         
         # Properties (from Props)
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 40
-        Height = $Props.Height ?? 10
-        Visible = $Props.Visible ?? $true
-        ZIndex = $Props.ZIndex ?? 0
-        ChartType = $Props.ChartType ?? "Bar"
-        Data = $Props.Data ?? @()
-        ShowValues = $Props.ShowValues ?? $true
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 40 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 10 }
+        Visible = if ($null -ne $Props.Visible) { $Props.Visible } else { $true }
+        ZIndex = if ($null -ne $Props.ZIndex) { $Props.ZIndex } else { 0 }
+        ChartType = if ($null -ne $Props.ChartType) { $Props.ChartType } else { "Bar" }
+        Data = if ($null -ne $Props.Data) { $Props.Data } else { @() }
+        ShowValues = if ($null -ne $Props.ShowValues) { $Props.ShowValues } else { $true }
         Name = $Props.Name
         
         # Methods
@@ -1202,3 +2091,459 @@ Export-ModuleMember -Function @(
     'New-TuiTable',
     'New-TuiChart'
 )
+```
+
+---
+### `layout/panels.psm1` (Affected by FIX 1 and FIX 2)
+---
+```powershell
+# FILE: layout/panels.psm1
+# PURPOSE: Provides a suite of specialized layout panels for declarative UI construction.
+
+function New-BasePanel {
+    param([hashtable]$Props)
+    
+    $panel = @{
+        Type = "Panel"
+        Name = if ($null -ne $Props.Name) { $Props.Name } else { "Panel_$([Guid]::NewGuid().ToString('N').Substring(0,8))" }
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 40 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 20 }
+        Visible = if ($null -ne $Props.Visible) { $Props.Visible } else { $true }
+        IsFocusable = if ($null -ne $Props.IsFocusable) { $Props.IsFocusable } else { $false }
+        ZIndex = if ($null -ne $Props.ZIndex) { $Props.ZIndex } else { 0 }
+        Children = @()
+        Parent = $null
+        LayoutProps = if ($null -ne $Props.LayoutProps) { $Props.LayoutProps } else { @{} }
+        ShowBorder = if ($null -ne $Props.ShowBorder) { $Props.ShowBorder } else { $false }
+        BorderStyle = if ($null -ne $Props.BorderStyle) { $Props.BorderStyle } else { "Single" }  # Single, Double, Rounded
+        Title = $Props.Title
+        Padding = if ($null -ne $Props.Padding) { $Props.Padding } else { 0 }
+        Margin = if ($null -ne $Props.Margin) { $Props.Margin } else { 0 }
+        BackgroundColor = $Props.BackgroundColor
+        ForegroundColor = $Props.ForegroundColor
+        _isDirty = $true
+        _cachedLayout = $null
+        
+        AddChild = { 
+            param($self, $Child, [hashtable]$LayoutProps = @{})
+            
+            if (-not $Child) {
+                throw "Cannot add null child to panel"
+            }
+            
+            $Child.Parent = $self
+            $Child.LayoutProps = $LayoutProps
+	    [void]($self.Children += $Child) # <<< FIX: Cast to [void] to suppress pipeline output
+	    $self._isDirty = $true
+            
+            # Propagate visibility
+            if (-not $self.Visible) {
+                $Child.Visible = $false
+            }
+        }
+        
+        RemoveChild = {
+            param($self, $Child)
+            
+            $self.Children = $self.Children | Where-Object { $_ -ne $Child }
+            if ($Child.Parent -eq $self) {
+                $Child.Parent = $null
+            }
+            $self._isDirty = $true
+        }
+        
+        ClearChildren = {
+            param($self)
+            
+            foreach ($child in $self.Children) {
+                $child.Parent = $null
+            }
+            $self.Children = @()
+            $self._isDirty = $true
+        }
+        
+        Show = { 
+            param($self)
+            
+            $self.Visible = $true
+            foreach ($child in $self.Children) { 
+                if ($child.Show) { 
+                    & $child.Show -self $child
+                } else { 
+                    $child.Visible = $true
+                }
+            }
+            
+            # Request refresh if we have access to the function
+            if (Get-Command -Name "Request-TuiRefresh" -ErrorAction SilentlyContinue) {
+                Request-TuiRefresh
+            }
+        }
+        
+        Hide = { 
+            param($self)
+            
+            $self.Visible = $false
+            foreach ($child in $self.Children) { 
+                if ($child.Hide) { 
+                    & $child.Hide -self $child
+                } else { 
+                    $child.Visible = $false
+                }
+            }
+            
+            # Request refresh if we have access to the function
+            if (Get-Command -Name "Request-TuiRefresh" -ErrorAction SilentlyContinue) {
+                Request-TuiRefresh
+            }
+        }
+        
+        HandleInput = { 
+            param($self, $Key)
+            
+            # Panels typically don't handle input directly
+            # but can be overridden for special behavior
+            return $false
+        }
+        
+        GetContentBounds = {
+            param($self)
+            
+            $borderOffset = if ($self.ShowBorder) { 1 } else { 0 }
+            
+            return @{
+                X = $self.X + $self.Padding + $borderOffset + $self.Margin
+                Y = $self.Y + $self.Padding + $borderOffset + $self.Margin
+                Width = $self.Width - (2 * ($self.Padding + $borderOffset + $self.Margin))
+                Height = $self.Height - (2 * ($self.Padding + $borderOffset + $self.Margin))
+            }
+        }
+        
+        InvalidateLayout = {
+            param($self)
+            
+            $self._isDirty = $true
+            
+            # Propagate to parent
+            if ($self.Parent -and $self.Parent.InvalidateLayout) {
+                & $self.Parent.InvalidateLayout -self $self.Parent
+            }
+        }
+    }
+    
+    return $panel
+}
+
+function global:New-TuiStackPanel {
+    param([hashtable]$Props = @{})
+    
+    $panel = New-BasePanel -Props $Props
+    $panel.Type = "StackPanel"
+    $panel.Layout = 'Stack'
+    $panel.Orientation = if ($null -ne $Props.Orientation) { $Props.Orientation } else { 'Vertical' }
+    $panel.Spacing = if ($null -ne $Props.Spacing) { $Props.Spacing } else { 1 }
+    $panel.HorizontalAlignment = if ($null -ne $Props.HorizontalAlignment) { $Props.HorizontalAlignment } else { 'Stretch' }  # Left, Center, Right, Stretch
+    $panel.VerticalAlignment = if ($null -ne $Props.VerticalAlignment) { $Props.VerticalAlignment } else { 'Stretch' }      # Top, Middle, Bottom, Stretch
+    
+    $panel.CalculateLayout = {
+        param($self)
+        
+        $bounds = & $self.GetContentBounds -self $self
+        $layout = @{
+            Children = @()
+        }
+        
+        $currentX = $bounds.X
+        $currentY = $bounds.Y
+        $totalChildWidth = 0
+        $totalChildHeight = 0
+        $visibleChildren = $self.Children | Where-Object { $_.Visible }
+        
+        # Calculate total size needed
+        foreach ($child in $visibleChildren) {
+            if ($self.Orientation -eq 'Vertical') {
+                $totalChildHeight += $child.Height
+                $totalChildWidth = [Math]::Max($totalChildWidth, $child.Width)
+            } else {
+                $totalChildWidth += $child.Width
+                $totalChildHeight = [Math]::Max($totalChildHeight, $child.Height)
+            }
+        }
+        
+        # Add spacing
+        if ($visibleChildren.Count -gt 1) {
+            if ($self.Orientation -eq 'Vertical') {
+                $totalChildHeight += ($visibleChildren.Count - 1) * $self.Spacing
+            } else {
+                $totalChildWidth += ($visibleChildren.Count - 1) * $self.Spacing
+            }
+        }
+        
+        # Calculate starting position based on alignment
+        if ($self.Orientation -eq 'Vertical') {
+            switch ($self.VerticalAlignment) {
+                'Top' { $currentY = $bounds.Y }
+                'Middle' { $currentY = $bounds.Y + [Math]::Floor(($bounds.Height - $totalChildHeight) / 2) }
+                'Bottom' { $currentY = $bounds.Y + $bounds.Height - $totalChildHeight }
+                'Stretch' { $currentY = $bounds.Y }
+            }
+        } else {
+            switch ($self.HorizontalAlignment) {
+                'Left' { $currentX = $bounds.X }
+                'Center' { $currentX = $bounds.X + [Math]::Floor(($bounds.Width - $totalChildWidth) / 2) }
+                'Right' { $currentX = $bounds.X + $bounds.Width - $totalChildWidth }
+                'Stretch' { $currentX = $bounds.X }
+            }
+        }
+        
+        # Layout children
+        foreach ($child in $visibleChildren) {
+            $childLayout = @{
+                Component = $child
+                X = $currentX
+                Y = $currentY
+                Width = $child.Width
+                Height = $child.Height
+            }
+            
+            # Apply stretch behavior
+            if ($self.Orientation -eq 'Vertical' -and $self.HorizontalAlignment -eq 'Stretch') {
+                $childLayout.Width = $bounds.Width
+                # Update child's actual width for proper rendering
+                if ($child.Width -ne $bounds.Width) {
+                    $child.Width = $bounds.Width
+                }
+            }
+            elseif ($self.Orientation -eq 'Horizontal' -and $self.VerticalAlignment -eq 'Stretch') {
+                $childLayout.Height = $bounds.Height
+                # Update child's actual height for proper rendering
+                if ($child.Height -ne $bounds.Height) {
+                    $child.Height = $bounds.Height
+                }
+            }
+            
+            # Handle horizontal alignment for vertical stacks
+            if ($self.Orientation -eq 'Vertical' -and $self.HorizontalAlignment -ne 'Stretch') {
+                switch ($self.HorizontalAlignment) {
+                    'Center' { $childLayout.X = $bounds.X + [Math]::Floor(($bounds.Width - $child.Width) / 2) }
+                    'Right' { $childLayout.X = $bounds.X + $bounds.Width - $child.Width }
+                }
+            }
+            
+            # Handle vertical alignment for horizontal stacks
+            if ($self.Orientation -eq 'Horizontal' -and $self.VerticalAlignment -ne 'Stretch') {
+                switch ($self.VerticalAlignment) {
+                    'Middle' { $childLayout.Y = $bounds.Y + [Math]::Floor(($bounds.Height - $child.Height) / 2) }
+                    'Bottom' { $childLayout.Y = $bounds.Y + $bounds.Height - $child.Height }
+                }
+            }
+            
+            # FIX: CRITICAL - Apply calculated positions and sizes back to the child component
+            $child.X = $childLayout.X
+            $child.Y = $childLayout.Y
+            if ($childLayout.Width -ne $child.Width -and $child.PSObject.Properties['Width'].IsSettable) {
+                $child.Width = $childLayout.Width
+            }
+            if ($childLayout.Height -ne $child.Height -and $child.PSObject.Properties['Height'].IsSettable) {
+                $child.Height = $childLayout.Height
+            }
+            
+            $layout.Children += $childLayout
+            
+            # Move to next position
+            if ($self.Orientation -eq 'Vertical') {
+                $currentY += $childLayout.Height + $self.Spacing
+            } else {
+                $currentX += $childLayout.Width + $self.Spacing
+            }
+        }
+        
+        $self._cachedLayout = $layout
+        $self._isDirty = $false
+        return $layout
+    }
+    
+    $panel.Render = {
+        param($self)
+        if (-not $self.Visible) { return }
+        
+        # Clear panel area first to prevent bleed-through
+        $bgColor = if ($self.BackgroundColor) { $self.BackgroundColor } else { Get-ThemeColor "Background" -Default Black }
+        for ($y = $self.Y; $y -lt ($self.Y + $self.Height); $y++) {
+            Write-BufferString -X $self.X -Y $y -Text (' ' * $self.Width) -BackgroundColor $bgColor
+        }
+        
+        if ($self.ShowBorder) {
+            $borderColor = if ($self.ForegroundColor) { $self.ForegroundColor } else { Get-ThemeColor "Border" -Default Gray }
+            Write-BufferBox -X $self.X -Y $self.Y -Width $self.Width -Height $self.Height -BorderColor $borderColor -Title $self.Title
+        }
+        # FIX: Ensure layout is calculated before Z-Index renderer processes children.
+        & $self.CalculateLayout -self $self
+    }
+    
+    return $panel
+}
+
+function global:New-TuiGridPanel {
+    param([hashtable]$Props = @{})
+    
+    $panel = New-BasePanel -Props $Props
+    $panel.Type = "GridPanel"
+    $panel.Layout = 'Grid'
+    $panel.RowDefinitions = if ($null -ne $Props.RowDefinitions) { $Props.RowDefinitions } else { @("1*") }
+    $panel.ColumnDefinitions = if ($null -ne $Props.ColumnDefinitions) { $Props.ColumnDefinitions } else { @("1*") }
+    $panel.ShowGridLines = if ($null -ne $Props.ShowGridLines) { $Props.ShowGridLines } else { $false }
+    $panel.GridLineColor = if ($null -ne $Props.GridLineColor) { $Props.GridLineColor } else { Get-ThemeColor "BorderDim" -Default DarkGray }
+    
+    $panel._CalculateGridSizes = {
+        param($self, $definitions, $totalSize)
+        
+        $parsedDefs = @()
+        $totalFixed = 0
+        $totalStars = 0.0
+        
+        foreach ($def in $definitions) {
+            if ($def -match '^(\d+)$') {
+                $parsedDefs += @{ Type = 'Fixed'; Value = [int]$Matches[1] }
+                $totalFixed += [int]$Matches[1]
+            } elseif ($def -match '^(\d*\.?\d*)\*$') {
+                $stars = if ($Matches[1]) { [double]$Matches[1] } else { 1.0 }
+                $parsedDefs += @{ Type = 'Star'; Value = $stars }
+                $totalStars += $stars
+            } elseif ($def -eq 'Auto') {
+                $parsedDefs += @{ Type = 'Star'; Value = 1.0 }
+                $totalStars += 1.0
+            } else {
+                throw "Invalid grid definition: $def"
+            }
+        }
+        
+        $remainingSize = [Math]::Max(0, $totalSize - $totalFixed)
+        $sizes = @()
+        
+        foreach ($def in $parsedDefs) {
+            if ($def.Type -eq 'Fixed') {
+                $sizes += $def.Value
+            } else {
+                $size = if ($totalStars -gt 0) { [Math]::Floor($remainingSize * ($def.Value / $totalStars)) } else { 0 }
+                $sizes += $size
+            }
+        }
+        
+        # FIX: Distribute rounding errors to the last star-sized cell to ensure total size is met.
+        $totalAllocated = ($sizes | Measure-Object -Sum).Sum
+        if ($totalAllocated -ne $totalSize -and $totalStars -gt 0) {
+            $lastStarIndex = -1
+            for($i = $parsedDefs.Count - 1; $i -ge 0; $i--) {
+                if ($parsedDefs[$i].Type -eq 'Star') {
+                    $lastStarIndex = $i; break
+                }
+            }
+            if ($lastStarIndex -ne -1) {
+                $sizes[$lastStarIndex] += ($totalSize - $totalAllocated)
+            }
+        }
+        
+        return $sizes
+    }
+    
+    $panel.CalculateLayout = {
+        param($self)
+        
+        $bounds = & $self.GetContentBounds -self $self
+        
+        $rowHeights = & $self._CalculateGridSizes -self $self -definitions $self.RowDefinitions -totalSize $bounds.Height
+        $colWidths = & $self._CalculateGridSizes -self $self -definitions $self.ColumnDefinitions -totalSize $bounds.Width
+        
+        $rowOffsets = @(0); for ($i = 0; $i -lt $rowHeights.Count - 1; $i++) { $rowOffsets += ($rowOffsets[-1] + $rowHeights[$i]) }
+        $colOffsets = @(0); for ($i = 0; $i -lt $colWidths.Count - 1; $i++) { $colOffsets += ($colOffsets[-1] + $colWidths[$i]) }
+        
+        $layout = @{ Children = @(); Rows = $rowHeights; Columns = $colWidths; RowOffsets = $rowOffsets; ColumnOffsets = $colOffsets }
+        
+        foreach ($child in $self.Children) {
+            if (-not $child.Visible) { continue }
+            
+            $gridRow = if ($null -ne $child.LayoutProps."Grid.Row") { [int]$child.LayoutProps."Grid.Row" } else { 0 }
+            $gridCol = if ($null -ne $child.LayoutProps."Grid.Column") { [int]$child.LayoutProps."Grid.Column" } else { 0 }
+            $gridRowSpan = if ($null -ne $child.LayoutProps."Grid.RowSpan") { [int]$child.LayoutProps."Grid.RowSpan" } else { 1 }
+            $gridColSpan = if ($null -ne $child.LayoutProps."Grid.ColumnSpan") { [int]$child.LayoutProps."Grid.ColumnSpan" } else { 1 }
+            
+            $row = [Math]::Max(0, [Math]::Min($rowHeights.Count - 1, $gridRow))
+            $col = [Math]::Max(0, [Math]::Min($colWidths.Count - 1, $gridCol))
+            $rowSpan = [Math]::Max(1, [Math]::Min($rowHeights.Count - $row, $gridRowSpan))
+            $colSpan = [Math]::Max(1, [Math]::Min($colWidths.Count - $col, $gridColSpan))
+            
+            $cellX = $bounds.X + $colOffsets[$col]; $cellY = $bounds.Y + $rowOffsets[$row]
+            $cellWidth = 0; for ($i = 0; $i -lt $colSpan; $i++) { if (($col + $i) -lt $colWidths.Count) { $cellWidth += $colWidths[$col + $i] } }
+            $cellHeight = 0; for ($i = 0; $i -lt $rowSpan; $i++) { if (($row + $i) -lt $rowHeights.Count) { $cellHeight += $rowHeights[$row + $i] } }
+            
+            $childX = $cellX; $childY = $cellY
+            $childWidth = $child.Width; $childHeight = $child.Height
+            
+            $hAlign = if ($null -ne $child.LayoutProps."Grid.HorizontalAlignment") { $child.LayoutProps."Grid.HorizontalAlignment" } else { "Stretch" }
+            switch ($hAlign) {
+                "Center" { $childX = $cellX + [Math]::Floor(($cellWidth - $childWidth) / 2) }
+                "Right" { $childX = $cellX + $cellWidth - $childWidth }
+                "Stretch" { $childWidth = $cellWidth }
+            }
+            
+            $vAlign = if ($null -ne $child.LayoutProps."Grid.VerticalAlignment") { $child.LayoutProps."Grid.VerticalAlignment" } else { "Stretch" }
+            switch ($vAlign) {
+                "Middle" { $childY = $cellY + [Math]::Floor(($cellHeight - $childHeight) / 2) }
+                "Bottom" { $childY = $cellY + $cellHeight - $childHeight }
+                "Stretch" { $childHeight = $cellHeight }
+            }
+            
+            # FIX: CRITICAL - Apply calculated positions and sizes back to the child component
+            $child.X = $childX
+            $child.Y = $childY
+            if ($child.PSObject.Properties['Width'] -and $child.Width -ne $childWidth) { $child.Width = $childWidth }
+            if ($child.PSObject.Properties['Height'] -and $child.Height -ne $childHeight) { $child.Height = $childHeight }
+            
+            $layout.Children += @{ Component = $child; X = $childX; Y = $childY; Width = $childWidth; Height = $childHeight }
+        }
+        
+        $self._cachedLayout = $layout
+        $self._isDirty = $false
+        return $layout
+    }
+    
+    $panel.Render = {
+        param($self)
+        if (-not $self.Visible) { return }
+        
+        # Clear panel area first to prevent bleed-through
+        $bgColor = if ($self.BackgroundColor) { $self.BackgroundColor } else { Get-ThemeColor "Background" -Default Black }
+        for ($y = $self.Y; $y -lt ($self.Y + $self.Height); $y++) {
+            Write-BufferString -X $self.X -Y $y -Text (' ' * $self.Width) -BackgroundColor $bgColor
+        }
+        
+        if ($self.ShowBorder) {
+            $borderColor = if ($self.ForegroundColor) { $self.ForegroundColor } else { Get-ThemeColor "Border" -Default Gray }
+            Write-BufferBox -X $self.X -Y $self.Y -Width $self.Width -Height $self.Height -BorderColor $borderColor -Title $self.Title
+        }
+        
+        # FIX: Calculate layout to set child positions. TUI engine will render the children.
+        $layout = & $self.CalculateLayout -self $self
+        
+        if ($self.ShowGridLines) {
+            $bounds = & $self.GetContentBounds -self $self
+            foreach ($offset in $layout.ColumnOffsets[1..($layout.ColumnOffsets.Count - 1)]) {
+                $x = $bounds.X + $offset; for ($y = $bounds.Y; $y -lt ($bounds.Y + $bounds.Height); $y++) { Write-BufferString -X $x -Y $y -Text "│" -ForegroundColor $self.GridLineColor }
+            }
+            foreach ($offset in $layout.RowOffsets[1..($layout.RowOffsets.Count - 1)]) {
+                $y = $bounds.Y + $offset; Write-BufferString -X $bounds.X -Y $y -Text ("─" * $bounds.Width) -ForegroundColor $self.GridLineColor
+            }
+        }
+    }
+    
+    return $panel
+}
+
+function global:New-TuiDockPanel { param([hashtable]$Props = @{}) ; return New-TuiStackPanel -Props ($Props.Clone() | Add-Member -MemberType NoteProperty -Name Orientation -Value 'Vertical' -PassThru) }
+function global:New-TuiWrapPanel { param([hashtable]$Props = @{}) ; return New-TuiStackPanel -Props $Props }
+
+Export-ModuleMember -Function "New-BasePanel", "New-TuiStackPanel", "New-TuiGridPanel", "New-TuiDockPanel", "New-TuiWrapPanel"
+```

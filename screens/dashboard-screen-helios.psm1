@@ -43,7 +43,7 @@ function Get-DashboardScreen {
             ShowGridLines = $false  # Set to true to debug layout
         }
         $self.Components.rootPanel = $rootPanel
-        [void]($self.Children += $rootPanel)
+	[void]($self.Children += $rootPanel) # FIX: Suppress pipeline output
         
         Write-Log -Level Debug -Message "Dashboard: Created rootPanel, Children count=$($self.Children.Count)"
 
@@ -87,9 +87,10 @@ function Get-DashboardScreen {
                 }
             }
         }
-        & $quickActions.ProcessData -self $quickActions
-        & $quickActionsPanel.AddChild -self $quickActionsPanel -Child $quickActions
-        & $rootPanel.AddChild -self $rootPanel -Child $quickActionsPanel -LayoutProps @{ "Grid.Row" = 0; "Grid.Column" = 0 }
+        # CORRECTED: Wrap AddChild calls in [void]() to suppress pipeline output
+        [void](& $quickActions.ProcessData -self $quickActions)
+        [void](& $quickActionsPanel.AddChild -self $quickActionsPanel -Child $quickActions)
+        [void](& $rootPanel.AddChild -self $rootPanel -Child $quickActionsPanel -LayoutProps @{ "Grid.Row" = 0; "Grid.Column" = 0 })
         
         # --- Active Timers Panel ---
         $timersPanel = New-TuiStackPanel -Props @{ Name = "timersPanel"; Title = " Active Timers "; ShowBorder = $true; Padding = 1 }
@@ -97,8 +98,9 @@ function Get-DashboardScreen {
             Name = "activeTimers"; IsFocusable = $true; ShowBorder = $false; ShowFooter = $false
             Columns = @( @{ Name = "Project"; Width = 20 }, @{ Name = "Time"; Width = 10 } ); Data = @()
         }
-        & $timersPanel.AddChild -self $timersPanel -Child $activeTimers
-        & $rootPanel.AddChild -self $rootPanel -Child $timersPanel -LayoutProps @{ "Grid.Row" = 0; "Grid.Column" = 1 }
+        # CORRECTED: Wrap AddChild calls in [void]()
+        [void](& $timersPanel.AddChild -self $timersPanel -Child $activeTimers)
+        [void](& $rootPanel.AddChild -self $rootPanel -Child $timersPanel -LayoutProps @{ "Grid.Row" = 0; "Grid.Column" = 1 })
         
         # --- Stats Panel ---
         $statsPanel = New-TuiStackPanel -Props @{ Name = "statsPanel"; Title = " Stats "; ShowBorder = $true; Padding = 1; Orientation = "Vertical"; Spacing = 1 }
@@ -106,11 +108,12 @@ function Get-DashboardScreen {
         $weekLabel = New-TuiLabel -Props @{ Name = "weekHoursLabel"; Text = "Week: 0h"; Height = 1 }
         $tasksLabel = New-TuiLabel -Props @{ Name = "activeTasksLabel"; Text = "Tasks: 0"; Height = 1 }
         $timersLabel = New-TuiLabel -Props @{ Name = "runningTimersLabel"; Text = "Timers: 0"; Height = 1 }
-        & $statsPanel.AddChild -self $statsPanel -Child $todayLabel
-        & $statsPanel.AddChild -self $statsPanel -Child $weekLabel
-        & $statsPanel.AddChild -self $statsPanel -Child $tasksLabel
-        & $statsPanel.AddChild -self $statsPanel -Child $timersLabel
-        & $rootPanel.AddChild -self $rootPanel -Child $statsPanel -LayoutProps @{ "Grid.Row" = 0; "Grid.Column" = 2 }
+        # CORRECTED: Wrap AddChild calls in [void]()
+        [void](& $statsPanel.AddChild -self $statsPanel -Child $todayLabel)
+        [void](& $statsPanel.AddChild -self $statsPanel -Child $weekLabel)
+        [void](& $statsPanel.AddChild -self $statsPanel -Child $tasksLabel)
+        [void](& $statsPanel.AddChild -self $statsPanel -Child $timersLabel)
+        [void](& $rootPanel.AddChild -self $rootPanel -Child $statsPanel -LayoutProps @{ "Grid.Row" = 0; "Grid.Column" = 2 })
         
         # --- Today's Tasks Panel ---
         $tasksPanel = New-TuiStackPanel -Props @{ Name = "tasksPanel"; Title = " Today's Tasks "; ShowBorder = $true; Padding = 1 }
@@ -118,8 +121,9 @@ function Get-DashboardScreen {
             Name = "todaysTasks"; IsFocusable = $true; ShowBorder = $false; ShowFooter = $false
             Columns = @( @{ Name = "Priority"; Width = 8 }, @{ Name = "Task"; Width = 45 }, @{ Name = "Project"; Width = 15 } ); Data = @()
         }
-        & $tasksPanel.AddChild -self $tasksPanel -Child $todaysTasks
-        & $rootPanel.AddChild -self $rootPanel -Child $tasksPanel -LayoutProps @{ "Grid.Row" = 1; "Grid.Column" = 0; "Grid.ColumnSpan" = 3 }
+        # CORRECTED: Wrap AddChild calls in [void]()
+        [void](& $tasksPanel.AddChild -self $tasksPanel -Child $todaysTasks)
+        [void](& $rootPanel.AddChild -self $rootPanel -Child $tasksPanel -LayoutProps @{ "Grid.Row" = 1; "Grid.Column" = 0; "Grid.ColumnSpan" = 3 })
         
         # ---------------------------------------------------------------------------------
         # THIS IS THE CRITICAL FIX: Storing references BEFORE creating subscriptions.
@@ -165,7 +169,7 @@ function Get-DashboardScreen {
                     if ($screen -and $screen._quickActions) {
                         if ($newValue -and $newValue.Count -gt 0) {
                             $screen._quickActions.Data = $newValue 
-                            & $screen._quickActions.ProcessData -self $screen._quickActions
+                            [void](& $screen._quickActions.ProcessData -self $screen._quickActions) # FIX: Suppress output
                             Write-Log -Level Debug -Message "quickActions updated with $($newValue.Count) items"
                         } else {
                             Write-Log -Level Debug -Message "quickActions NewValue is null or empty"
@@ -191,7 +195,7 @@ function Get-DashboardScreen {
                     $newValue = if ($data.NewValue -ne $null) { $data.NewValue } else { $data }
                     if ($screen -and $screen._activeTimers -and $newValue) {
                         $screen._activeTimers.Data = $newValue 
-                        & $screen._activeTimers.ProcessData -self $screen._activeTimers 
+                        [void](& $screen._activeTimers.ProcessData -self $screen._activeTimers) # FIX: Suppress output
                     }
                 } catch {
                     Write-Log -Level Error -Message "activeTimers handler error: $_"
@@ -204,7 +208,7 @@ function Get-DashboardScreen {
                     $newValue = if ($data.NewValue -ne $null) { $data.NewValue } else { $data }
                     if ($screen -and $screen._todaysTasks -and $newValue) {
                         $screen._todaysTasks.Data = $newValue 
-                        & $screen._todaysTasks.ProcessData -self $screen._todaysTasks 
+                        [void](& $screen._todaysTasks.ProcessData -self $screen._todaysTasks) # FIX: Suppress output
                     }
                 } catch {
                     Write-Log -Level Error -Message "todaysTasks handler error: $_"
