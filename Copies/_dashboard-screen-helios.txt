@@ -60,18 +60,9 @@ function Get-DashboardScreen {
                 param($SelectedData, $SelectedIndex)
                 $routes = @("/time-entry", "/timer/start", "/tasks", "/projects", "/reports", "/settings")
                 
-                # Try to find the screen object by going up the parent chain
-                $screenObj = $this
-                while ($screenObj -and -not $screenObj.Name -eq "DashboardScreen") {
-                    $screenObj = if ($screenObj.Parent) { $screenObj.Parent } else { $null }
-                }
-                
                 if ($SelectedIndex -ge 0 -and $SelectedIndex -lt $routes.Count) {
-                    if ($screenObj -and $screenObj._navigationServices -and $screenObj._navigationServices.Navigation) {
-                        & $screenObj._navigationServices.Navigation.GoTo -self $screenObj._navigationServices.Navigation -Path $routes[$SelectedIndex] -Services $screenObj._navigationServices
-                    } elseif ($global:Services -and $global:Services.Navigation) {
-                        # Fallback to global services if screen reference not found
-                        & $global:Services.Navigation.GoTo -self $global:Services.Navigation -Path $routes[$SelectedIndex] -Services $global:Services
+                    if ($services -and $services.Navigation) {
+                        & $services.Navigation.GoTo -self $services.Navigation -Path $routes[$SelectedIndex] -Services $services
                     } else {
                         Write-Log -Level Error -Message "Navigation services not available in OnRowSelect handler"
                     }

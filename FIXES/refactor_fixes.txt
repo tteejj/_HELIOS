@@ -1,0 +1,358 @@
+# Helios V2 PowerShell Scope Fix Implementation Guide
+
+## Executive Summary
+
+This guide provides a systematic approach to fixing PowerShell scope issues throughout the Helios TUI application. The core problem is that PowerShell hashtable properties containing scriptblocks must be invoked with the call operator `&`, not dot notation.
+
+## Critical Understanding
+
+### The Root Problem
+```powershell
+# WRONG - This fails with "Hashtable does not contain a method"
+$Context.UpdateState(@{...})
+
+# CORRECT - Use the call operator & for scriptblock properties
+& $Context.UpdateState @{...}
+```
+
+### Why This Happens
+- Helios uses hashtables to represent objects (services, components, screens)
+- Methods are stored as scriptblock properties on these hashtables
+- PowerShell requires the `&` operator to invoke scriptblock properties
+- Dot notation only works for true .NET methods, not scriptblock properties
+
+## Phase 1: Core Service Fixes (CRITICAL - Do First)
+
+### 1.1 Fix app-store.psm1
+
+**File:** `services/app-store.psm1`
+
+**Find the Dispatch method and replace the actionContext creation:**
+
+```powershell
+# REPLACE THIS SECTION in the Dispatch method:
+$storeInstance = $self  # Capture the store instance
+
+$actionContext = @{
+    GetState = { 
+        param($path = $null) 
+        if ($path) {
+            return & $storeInstance.GetState -self $storeInstance -path $path
+        } else {
+            return & $storeInstance.GetState -self $storeInstance
+        }
+    }.GetNewClosure()
+    
+    UpdateState = { 
+        param($updates) 
+        if ($storeInstance._state -and $storeInstance._state.Update) {
+            $storeInstance._state.Update($updates)
+        }
+    }.GetNewClosure()
+    
+    Dispatch = { 
+        param($name, $p = $null) 
+        return & $storeInstance.Dispatch -self $storeInstance -actionName $name -payload $p
+    }.GetNewClosure()
+}
+```
+
+### 1.2 Fix ALL Action Handlers in main-helios.ps1
+
+**File:** `main-helios.ps1`
+
+**Search and Replace Pattern:**
+```powershell
+# FIND: $Context.UpdateState(
+# REPLACE WITH: & $Context.UpdateState
+
+# FIND: $Context.GetState()
+# REPLACE WITH: & $Context.GetState
+
+# FIND: $Context.Dispatch(
+# REPLACE WITH: & $Context.Dispatch
+```
+
+**Example Fix:**
+```powershell
+# BEFORE:
+$Context.UpdateState(@{ tasks = $tasksForTable })
+
+# AFTER:
+& $Context.UpdateState @{ tasks = $tasksForTable }
+```
+
+## Phase 2: Helper Functions (Add to modules/utilities/context-helpers.psm1)
+
+Create a new file `modules/utilities/context-helpers.psm1`:
+
+```powershell
+# Context capture helper for consistent handler creation
+function New-ContextHandler {
+    param(
+        [hashtable]$CapturedContext,
+        [scriptblock]$Handler
+    )
+    
+    # Create a closure that captures the context
+    $wrapper = {
+        param($Event, $Args)
+        $context = $CapturedContext
+        & $Handler -Context $context -Event $Event -Args $Args
+    }.GetNewClosure()
+    
+    # Store the captured context for debugging
+    Add-Member -InputObject $wrapper -MemberType NoteProperty -Name "_CapturedContext" -Value $CapturedContext
+    
+    return $wrapper
+}
+
+# Screen context capture helper
+function Get-ScreenContext {
+    param([hashtable]$Screen)
+    
+    return @{
+        Screen = $Screen
+        Services = $Screen._services
+        Store = $Screen._services.Store
+        Navigation = $Screen._services.Navigation
+        Components = $Screen.Components
+    }
+}
+
+# Safe method invocation helper
+function Invoke-SafeMethod {
+    param(
+        [hashtable]$Object,
+        [string]$MethodName,
+        [hashtable]$Parameters = @{}
+    )
+    
+    if (-not $Object) {
+        Write-Log -Level Warning -Message "Cannot invoke $MethodName on null object"
+        return $null
+    }
+    
+    if (-not $Object[$MethodName]) {
+        Write-Log -Level Warning -Message "Method $MethodName not found on object"
+        return $null
+    }
+    
+    try {
+        return & $Object[$MethodName] -self $Object @Parameters
+    } catch {
+        Write-Log -Level Error -Message "Error invoking $MethodName" -Data $_
+        throw
+    }
+}
+
+Export-ModuleMember -Function @(
+    'New-ContextHandler',
+    'Get-ScreenContext',
+    'Invoke-SafeMethod'
+)
+```
+
+## Phase 3: Screen Module Fixes
+
+### 3.1 Dashboard Screen Pattern
+
+**File:** `screens/dashboard-screen-helios.psm1`
+
+**Fix Pattern for All Subscriptions:**
+```powershell
+# BEFORE:
+$self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "quickActions" -handler {
+    param($data)
+    # Handler using $self incorrectly
+}
+
+# AFTER:
+$screen = $self  # Capture screen context
+$self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "quickActions" -handler {
+    param($data)
+    # Use $screen instead of $self
+    if ($screen._quickActions) {
+        $screen._quickActions.Data = $data.NewValue
+        Request-TuiRefresh
+    }
+}
+```
+
+### 3.2 Component Event Handler Pattern
+
+**Fix OnRowSelect, OnClick, etc.:**
+```powershell
+# BEFORE:
+OnRowSelect = {
+    param($component, $rowData) 
+    $self._services.Navigation.GoTo("/somewhere")  # $self is component, not screen!
+}
+
+# AFTER:
+$navigationServices = $services  # Capture before creating component
+OnRowSelect = {
+    param($component, $rowData)
+    if ($navigationServices -and $navigationServices.Navigation) {
+        & $navigationServices.Navigation.GoTo -self $navigationServices.Navigation -Path "/somewhere" -Services $navigationServices
+    }
+}
+```
+
+## Phase 4: Search and Replace Patterns
+
+### 4.1 Store Dispatch Calls
+```powershell
+# FIND PATTERN (regex):
+\$(\w+)\.Store\.Dispatch\s*\(\s*["']([^"']+)["']\s*,?\s*(.+)?\s*\)
+
+# REPLACE WITH:
+& $$1.Store.Dispatch -self $$1.Store -actionName "$2" -payload $3
+```
+
+### 4.2 Navigation Calls
+```powershell
+# FIND PATTERN:
+\$(\w+)\.Navigation\.GoTo\s*\(\s*["']([^"']+)["']\s*\)
+
+# REPLACE WITH:
+& $$1.Navigation.GoTo -self $$1.Navigation -Path "$2" -Services $$1
+```
+
+### 4.3 Timer Event Handlers
+```powershell
+# FIND PATTERN:
+Register-ObjectEvent .* -Action {
+
+# ADD AFTER:
+-MessageData $services
+
+# AND IN THE ACTION BLOCK:
+$services = $Event.MessageData
+```
+
+## Phase 5: Component-Specific Fixes
+
+### 5.1 DataTable Components
+Check all DataTable instances for:
+- ProcessData calls before rendering
+- OnRowSelect handlers capturing correct context
+- Data subscriptions updating correct component reference
+
+### 5.2 Form Components
+Check all form components for:
+- OnClick handlers for buttons
+- OnChange handlers for inputs
+- Proper service access in handlers
+
+### 5.3 Panel Components
+Ensure panels:
+- Have proper Show/Hide methods if needed
+- Calculate layout in correct phase
+- Don't have stray rendering logic
+
+## Phase 6: Testing Procedures
+
+### 6.1 Create Test Script (test-scope-fixes.ps1)
+```powershell
+# Test AppStore context
+Write-Host "Testing AppStore Context..."
+$testStore = Initialize-AppStore -InitialData @{ test = "initial" }
+& $testStore.RegisterAction -self $testStore -actionName "TEST" -scriptBlock {
+    param($Context)
+    & $Context.UpdateState @{ test = "updated" }
+}
+$result = & $testStore.Dispatch -self $testStore -actionName "TEST"
+$finalValue = & $testStore.GetState -self $testStore -path "test"
+if ($finalValue -eq "updated") {
+    Write-Host "✓ AppStore context works" -ForegroundColor Green
+} else {
+    Write-Host "✗ AppStore context failed" -ForegroundColor Red
+}
+
+# Test each screen loads without errors
+@("dashboard", "task", "timer-start", "settings") | ForEach-Object {
+    Write-Host "Testing $_ screen..."
+    try {
+        & $services.Navigation.GoTo -self $services.Navigation -Path "/$_" -Services $services
+        Write-Host "✓ $_ screen loads" -ForegroundColor Green
+    } catch {
+        Write-Host "✗ $_ screen failed: $_" -ForegroundColor Red
+    }
+}
+```
+
+### 6.2 Manual Testing Checklist
+- [ ] Dashboard loads and displays data
+- [ ] Quick Actions menu responds to selection
+- [ ] Task screen can create/edit/delete tasks
+- [ ] All forms accept input and save correctly
+- [ ] Tab navigation works in all forms
+- [ ] Timer updates without errors
+- [ ] No "null reference" errors in logs
+
+## Phase 7: Documentation Updates
+
+### 7.1 Update fixes.txt
+Append a summary of the comprehensive scope fix:
+```text
+**COMPREHENSIVE SCOPE FIX - COMPLETED [DATE]**
+   Problem: Systematic PowerShell scope issues throughout application
+   Root Cause: Scriptblock properties on hashtables require & operator, not dot notation
+   Fix Applied:
+   - Updated app-store.psm1 to use proper closures in actionContext
+   - Fixed all action handlers in main-helios.ps1 to use & operator
+   - Added context-helpers.psm1 with standardized patterns
+   - Updated all screens to capture context before creating handlers
+   - Fixed all component event handlers to use captured context
+   - Added comprehensive error handling and null checks
+   Result: All scope-related errors resolved, consistent pattern established
+```
+
+### 7.2 Update Dev Guide
+Add a new section on scope handling:
+```markdown
+### PowerShell Scope Rules in Helios
+
+**CRITICAL:** Always use the & operator to invoke methods on Helios objects:
+- WRONG: `$services.Store.Dispatch("ACTION")`
+- RIGHT: `& $services.Store.Dispatch -self $services.Store -actionName "ACTION"`
+
+**Context Capture Pattern:**
+Always capture context before creating handlers:
+```powershell
+$screen = $self
+$services = $self._services
+$handler = {
+    # Use $screen and $services, not $self
+}
+```
+
+## Implementation Order
+
+1. **Fix app-store.psm1 first** - This is the most critical
+2. **Update main-helios.ps1** - Fix all action handlers
+3. **Add context-helpers.psm1** - Provide consistent patterns
+4. **Fix dashboard-screen-helios.psm1** - Most complex screen
+5. **Fix task-screen-helios.psm1** - Second most complex
+6. **Fix remaining screens** - Apply patterns consistently
+7. **Run tests** - Verify everything works
+8. **Update documentation** - Record the fixes
+
+## Common Pitfalls to Avoid
+
+1. **Don't assume $self context** - Always capture explicitly
+2. **Don't use dot notation on hashtable methods** - Always use &
+3. **Don't forget .GetNewClosure()** - When capturing variables
+4. **Don't skip null checks** - Defensive programming is critical
+5. **Don't ignore cleanup** - Unsubscribe and dispose properly
+
+## Success Criteria
+
+The fixes are complete when:
+1. No "method not found on hashtable" errors
+2. No "null reference" errors in handlers  
+3. All screens load and function correctly
+4. All user interactions work as expected
+5. No memory leaks from uncleaned handlers
+6. Consistent pattern used throughout codebase

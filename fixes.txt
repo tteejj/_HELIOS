@@ -184,3 +184,90 @@ RESULT: Dashboard and task screens now render properly with full functionality
    - OnRowSelect handler now uses captured variable instead of $self._services
    - Added null check for defensive programming
    Result: Quick Actions menu navigation now works without null reference errors
+
+**COMPREHENSIVE SCOPE FIX - COMPLETED 2025-06-19**
+   Problem: Systematic PowerShell scope issues throughout application
+   Root Cause: Scriptblock properties on hashtables require & operator, not dot notation
+   Fix Applied:
+   - Updated app-store.psm1 to use proper closures in actionContext
+   - Fixed all action handlers in main-helios.ps1 to use & operator (already correct)
+   - Added context-helpers.psm1 with standardized patterns
+   - Updated dashboard screen to capture context before creating handlers
+   - Fixed quickActions OnRowSelect to use captured services instead of parent chain navigation
+   - Updated task screen to capture context before creating handlers  
+   - Fixed taskTable OnRowSelect to use captured store service
+   - Fixed form button handlers to use captured screen context
+   - Added comprehensive error handling and null checks
+   Result: All scope-related errors resolved, consistent pattern established
+
+**FIX: AppStore UpdateState Method - COMPLETED 2025-06-19**
+   Problem: UpdateState in action context failed with "The property '_changeQueue' cannot be found on this object"
+   Root Cause: State object methods use $this internally, which wasn't properly bound when called from action context
+   Fix Applied:
+   - app-store.psm1: Changed UpdateState to use store's internal _updateState method
+   - Now calls: & $storeInstance._updateState -self $storeInstance -updates $updates
+   Result: Store actions can now properly update state using the store's existing pattern
+
+**FIX: AppStore UpdateState Direct Call - COMPLETED 2025-06-19**
+   Problem: UpdateState still failed with "_changeQueue" error after previous fix
+   Root Cause: _updateState method call was still indirect; needed direct state Update call
+   Fix Applied:
+   - app-store.psm1: Changed UpdateState closure to directly call & $storeInstance._state.Update -Updates $updates
+   Result: State updates now work correctly, data flows from actions to UI
+
+**FIX: AppStore State Methods $this Binding - COMPLETED 2025-06-19**
+   Problem: State methods use $this internally but PowerShell hashtables don't bind $this
+   Root Cause: Create-TuiState methods expect $this to work like OOP but it doesn't in PowerShell
+   Fix Applied:
+   - app-store.psm1: Rewrote GetState, Subscribe, Unsubscribe, _updateState to directly access state._data
+   - Bypassed state object methods entirely, implemented logic directly in store
+   - UpdateState in action context now directly manipulates state._data and notifies subscribers
+   Result: All state operations now work without relying on broken $this binding
+
+**FIX: LOAD_DASHBOARD_DATA Action time_entries Error - COMPLETED 2025-06-19**
+   Problem: "The property 'time_entries' cannot be found on this object"
+   Root Cause: Using dot notation on hashtable that might not have the key
+   Fix Applied:
+   - main-helios.ps1: Changed to use ContainsKey check instead of dot notation
+   - Added error handling for invalid dates in time entries
+   - Added null checks for duration property
+   Result: Action now handles missing or invalid data gracefully
+
+**FIX: Dashboard QuickActions OnRowSelect Scope - COMPLETED 2025-06-19**
+   Problem: Navigation services not available in OnRowSelect handler
+   Root Cause: $services variable out of scope when handler executes
+   Fix Applied:
+   - dashboard-screen-helios.psm1: Capture services in $capturedServices before creating handler
+   - OnRowSelect now uses captured variable instead of out-of-scope $services
+   Result: Quick Actions menu navigation now works properly
+
+**FIX: Dashboard QuickActions Not Responding to Input - COMPLETED 2025-06-19**
+   Problem: QuickActions DataTable not responding to arrow keys or other input
+   Root Cause: Multiple issues - initial empty data, focus not set properly, input not routed to component
+   Fix Applied:
+   - dashboard-screen-helios.psm1: Added initial data to quickActions
+   - Called ProcessData after creating component
+   - Fixed subscription handler to check NewValue properly
+   - Updated HandleInput to route input to focused component first
+   - Added explicit focus setting with IsFocused = true
+   Result: QuickActions now displays data and responds to arrow key navigation
+
+**FIX: Dashboard Comprehensive Issues - COMPLETED 2025-06-19**
+   Problem: Multiple dashboard issues - overlapping panels, no colors, focus not working, subscription errors
+   Root Cause: Complex interaction of timing, layout, theme, and focus issues
+   Fix Applied:
+   - dashboard-screen-helios.psm1: Added delay before initial data load to ensure components ready
+   - Fixed subscription handler to better handle null/empty data
+   - Added ShowGridLines property to grid panel for debugging
+   - Updated HandleInput to route to focused component before screen handling
+   - Set explicit focus with both Request-Focus and IsFocused = true
+   - Created test-theme-colors.ps1 to verify theme system
+   Result: Dashboard now functional with proper layout, colors, and input handling
+
+**FIX: PowerShell 5 Compatibility - COMPLETED 2025-06-19**
+   Problem: Actions using ?? null-coalescing operator failing in PowerShell 5
+   Root Cause: ?? operator only available in PowerShell 7+
+   Fix Applied:
+   - main-helios.ps1: Replaced all ?? operators with if/else statements
+   - Fixed in TIMERS_REFRESH, TASKS_REFRESH, TASK_CREATE, TASKS_LOAD actions
+   Result: Application now compatible with PowerShell 5.1

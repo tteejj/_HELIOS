@@ -1,3 +1,4 @@
+2025-06-19 5:00 AM
 PS C:\Users\jhnhe\Documents\GitHub\_HELIOS> ./test-appstore-fix.ps1
 Testing AppStore Context Fix
 ============================
@@ -63,4 +64,119 @@ QuickActions count: 0
 Test FAILED! Expected 6 quick actions, got 0
 PS C:\Users\jhnhe\Documents\GitHub\_HELIOS>
 
-Debug Log Viewer            Filter: All         Auto-scroll: True                                                                                                                           ┌──────────────────────────────────────────────────────────────────────────────────  Log Entries (10)  ───────────────────────────────────────────────────────────────────────────────────┐  │2025-06-19 05:27:32.370[Info   ] Logger initialized at C:\Users\jhnhe\AppData\Local\Temp\PMCTerminal\pmc_terminal_2025-06-19.log                                                         │  │2025-06-19 05:27:32.378[Info   ] PMC Terminal v4.2 'Helios' startup initiated                                                                                                            │  │2025-06-19 05:27:32.385[Info   ] Loaded modules: logger, event-system, data-manager, theme-manager, tui-framework, tui-engine-v2, dialog-system, app-store, navigation, keybindings, layout │2025-06-19 05:27:32.394[Info   ] Initializing TUI Engine: 189x29                                                                                                                         │  │2025-06-19 05:27:32.506[Info   ] TUI Engine initialized successfully                                                                                                                     │  │2025-06-19 05:27:32.518[Info   ] Focus Manager initialized                                                                                                                               │  │2025-06-19 05:27:32.637[Error  ] Failed to create subscriptions: You cannot call a method on a null-valued expression.                                                                   │  │2025-06-19 05:27:32.648[Error  ] Failed to load dashboard data: The property '_changeQueue' cannot be found on this object. Verify that the property exists and can be set.              │  │2025-06-19 05:27:32.703[Info   ] Navigated to: /dashboard                                                                                                                                │  │2025-06-19 05:27:36.306[Info   ] Navigated to: /log                                                                                                                                      │  │                                                                                                       
+Debug Log Viewer            Filter: All         Auto-scroll: True                                                                                                                           ┌──────────────────────────────────────────────────────────────────────────────────  Log Entries (10)  ───────────────────────────────────────────────────────────────────────────────────┐  │2025-06-19 05:27:32.370[Info   ] Logger initialized at C:\Users\jhnhe\AppData\Local\Temp\PMCTerminal\pmc_terminal_2025-06-19.log                                                         │  │2025-06-19 05:27:32.378[Info   ] PMC Terminal v4.2 'Helios' startup initiated                                                                                                            │  │2025-06-19 05:27:32.385[Info   ] Loaded modules: logger, event-system, data-manager, theme-manager, tui-framework, tui-engine-v2, dialog-system, app-store, navigation, keybindings, layout │2025-06-19 05:27:32.394[Info   ] Initializing TUI Engine: 189x29                                                                                                                         │  │2025-06-19 05:27:32.506[Info   ] TUI Engine initialized successfully                                                                                                                     │  │2025-06-19 05:27:32.518[Info   ] Focus Manager initialized                                                                                                                               │  │2025-06-19 05:27:32.637[Error  ] Failed to create subscriptions: You cannot call a method on a null-valued expression.                                                                   │  │2025-06-19 05:27:32.648[Error  ] Failed to load dashboard data: The property '_changeQueue' cannot be found on this object. Verify that the property exists and can be set.              │  │2025-06-19 05:27:32.703[Info   ] Navigated to: /dashboard                                                                                                                                │  │2025-06-19 05:27:36.306[Info   ] Navigated to: /log       
+
+
+############2025-06-19 9:00 PM
+PS C:\Users\jhnhe\Documents\GitHub\_HELIOS> ./test-updatestate-fix.ps1
+Testing AppStore UpdateState Fix
+================================
+
+Loading modules...
+Modules loaded successfully
+
+Initializing AppStore...
+Registering test action...
+Creating subscription...
+InvalidOperation: You cannot call a method on a null-valued expression.
+InvalidOperation: Cannot index into a null array.
+InvalidOperation: The expression after '&' in a pipeline element produced an object that was not valid. It must result in a command name,
+a script block, or a CommandInfo object.
+  Subscription triggered - New value:
+
+Dispatching TEST_UPDATESTATE action...
+  Action executing - calling UpdateState...
+  UpdateState failed: The property '_changeQueue' cannot be found on this object. Verify that the property exists and can be set.
+Action dispatch FAILED: The property '_changeQueue' cannot be found on this object. Verify that the property exists and can be set.
+
+TEST FAILED!
+InvalidOperation: Cannot index into a null array.
+InvalidOperation: Cannot index into a null array.
+InvalidOperation: Cannot index into a null array.
+
+Test completed.
+PS C:\Users\jhnhe\Documents\GitHub\_HELIOS>
+
+PS C:\Users\jhnhe\Documents\GitHub\_HELIOS> ./test-scope-fixes.ps1
+Testing AppStore Context...
+✗ AppStore context failed
+Testing dashboard screen...
+✗ The expression after '&' in a pipeline element produced an object that was not valid. It must result in a command name, a script block, or a CommandInfo object. screen failed: The expression after '&' in a pipeline element produced an object that was not valid. It must result in a command name, a script block, or a CommandInfo object.
+Testing task screen...
+✗ The expression after '&' in a pipeline element produced an object that was not valid. It must result in a command name, a script block, or a CommandInfo object. screen failed: The expression after '&' in a pipeline element produced an object that was not valid. It must result in a command name, a script block, or a CommandInfo object.
+Testing timer-start screen...
+✗ The expression after '&' in a pipeline element produced an object that was not valid. It must result in a command name, a script block, or a CommandInfo object. screen failed: The expression after '&' in a pipeline element produced an object that was not valid. It must result in a command name, a script block, or a CommandInfo object.
+Testing settings screen...
+✗ The expression after '&' in a pipeline element produced an object that was not valid. It must result in a command name, a script block, or a CommandInfo object. screen failed: The expression after '&' in a pipeline element produced an object that was not valid. It must result in a command name, a script block, or a CommandInfo object.
+
+PS C:\Users\jhnhe\Documents\GitHub\_HELIOS> ./test-quickactions.ps1
+Dashboard Quick Actions Test
+===========================
+
+Loading modules...
+Modules loaded successfully
+
+Initializing AppStore...
+
+Registering LOAD_DASHBOARD_DATA action...
+
+Subscribing to quickActions...
+InvalidOperation: You cannot call a method on a null-valued expression.
+InvalidOperation: Cannot index into a null array.
+InvalidOperation: The expression after '&' in a pipeline element produced an object that was not valid. It must result in a command name,
+a script block, or a CommandInfo object.
+  quickActions subscription triggered
+  Path: quickActions
+WARNING: State subscriber error: You cannot call a method on a null-valued expression.
+
+Dispatching LOAD_DASHBOARD_DATA...
+  LOAD_DASHBOARD_DATA action executing...
+  Updating quickActions with 6 items
+
+Action dispatch failed: The property '_changeQueue' cannot be found on this object. Verify that the property exists and can be set.
+
+Checking final state...
+QuickActions count: 0
+
+Test FAILED! Expected 6 quick actions, got 0
+PS C:\Users\jhnhe\Documents\GitHub\_HELIOS
+
+PS C:\Users\jhnhe\Documents\GitHub\_HELIOS> ./test-appstore-fix.ps1
+Testing AppStore Context Fix
+============================
+
+Loading modules...
+Modules loaded successfully
+
+Initializing AppStore...
+
+Registering test action...
+
+Creating subscription...
+InvalidOperation: You cannot call a method on a null-valued expression.
+InvalidOperation: Cannot index into a null array.
+InvalidOperation: The expression after '&' in a pipeline element produced an object that was not valid. It must result in a command name,
+a script block, or a CommandInfo object.
+  Subscription handler called
+  Path: testValue
+  OldValue:
+  NewValue:
+
+Subscription ID: 62242bda-05fa-4cef-af13-e490507430ea
+
+Dispatching TEST_ACTION...
+  Action handler called
+  Context type: Hashtable
+  Context has UpdateState: True
+  Calling UpdateState...
+
+Action dispatch failed: The property '_changeQueue' cannot be found on this object. Verify that the property exists and can be set.
+
+Checking final state...
+Final value:
+
+Test FAILED! Value was not updated.
+
+ Debug Log Viewer            Filter: All         Auto-scroll: True                                                      ┌────────────────────────────────────────────────  Log enTries (10)  ────────────────────────────────────────────────┐  │2025-06-19 20:45:25.192[Info   ] Logger initialized at C:\Users\jhnhe\AppData\Local\Temp\PMCTerminal\pmc_terminal_2025 │2025-06-19 20:45:25.201[Info   ] PMC Terminal v4.2 'Helios' startup initiated                                       │  │2025-06-19 20:45:25.209[Info   ] Loaded modules: logger, event-system, data-manager, theme-manager, tui-framework, tui │2025-06-19 20:45:25.222[Info   ] Initializing TUI Engine: 120x29                                                    │  │2025-06-19 20:45:25.299[Info   ] TUI Engine initialized successfully                                                │  │2025-06-19 20:45:25.313[Info   ] Focus Manager initialized                                                          │  │2025-06-19 20:45:25.438[Error  ] Failed to create subscriptions: You cannot call a method on a null-valued expression. │2025-06-19 20:45:25.448[Error  ] Failed to load dashboard data: The property '_changeQueue' cannot be found on this ob │2025-06-19 20:45:25.496[Info   ] Navigated to: /dashboard                                                           │  │2025-06-19 20:45:28.306[Info   ] Navigated to: /log                                                       
+
+                                                                                                                               │  │                                                                                                       

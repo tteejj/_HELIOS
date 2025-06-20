@@ -40,6 +40,7 @@ function Get-DashboardScreen {
         $rootPanel = New-TuiGridPanel -Props @{
             X = 1; Y = 2; Width = ($global:TuiState.BufferWidth - 2); Height = ($global:TuiState.BufferHeight - 4)
             ShowBorder = $false; RowDefinitions = @("14", "1*"); ColumnDefinitions = @("37", "42", "1*")
+            ShowGridLines = $false  # Set to true to debug layout
         }
         $self.Components.rootPanel = $rootPanel
         $self.Children += $rootPanel
@@ -52,32 +53,34 @@ function Get-DashboardScreen {
         # Store services on self BEFORE creating components
         $self._navigationServices = $services
         
+        # Capture services for use in handler
+        $capturedServices = $services
+        
         $quickActions = New-TuiDataTable -Props @{
             Name = "quickActions"; IsFocusable = $true; ShowBorder = $false; ShowHeader = $false; ShowFooter = $false
             Columns = @( @{ Name = "Action"; Width = 32 } )
-            Data = @();
+            Data = @(
+                @{ Action = "[1] New Time Entry" },
+                @{ Action = "[2] Start Timer" },
+                @{ Action = "[3] View Tasks" },
+                @{ Action = "[4] View Projects" },
+                @{ Action = "[5] Reports" },
+                @{ Action = "[6] Settings" }
+            )
             OnRowSelect = {
                 param($SelectedData, $SelectedIndex)
                 $routes = @("/time-entry", "/timer/start", "/tasks", "/projects", "/reports", "/settings")
                 
-                # Try to find the screen object by going up the parent chain
-                $screenObj = $this
-                while ($screenObj -and -not $screenObj.Name -eq "DashboardScreen") {
-                    $screenObj = if ($screenObj.Parent) { $screenObj.Parent } else { $null }
-                }
-                
                 if ($SelectedIndex -ge 0 -and $SelectedIndex -lt $routes.Count) {
-                    if ($screenObj -and $screenObj._navigationServices -and $screenObj._navigationServices.Navigation) {
-                        & $screenObj._navigationServices.Navigation.GoTo -self $screenObj._navigationServices.Navigation -Path $routes[$SelectedIndex] -Services $screenObj._navigationServices
-                    } elseif ($global:Services -and $global:Services.Navigation) {
-                        # Fallback to global services if screen reference not found
-                        & $global:Services.Navigation.GoTo -self $global:Services.Navigation -Path $routes[$SelectedIndex] -Services $global:Services
+                    if ($capturedServices -and $capturedServices.Navigation) {
+                        & $capturedServices.Navigation.GoTo -self $capturedServices.Navigation -Path $routes[$SelectedIndex] -Services $capturedServices
                     } else {
                         Write-Log -Level Error -Message "Navigation services not available in OnRowSelect handler"
                     }
                 }
             }
         }
+        & $quickActions.ProcessData -self $quickActions
         & $quickActionsPanel.AddChild -self $quickActionsPanel -Child $quickActions
         & $rootPanel.AddChild -self $rootPanel -Child $quickActionsPanel -LayoutProps @{ "Grid.Row" = 0; "Grid.Column" = 0 }
         
@@ -147,12 +150,16 @@ function Get-DashboardScreen {
                 param($NewValue, $OldValue, $Path) 
                 try {
                     Write-Log -Level Debug -Message "quickActions handler triggered for path: $Path"
-                    if ($screen -and $screen._quickActions -and $NewValue) {
-                        $screen._quickActions.Data = $NewValue 
-                        & $screen._quickActions.ProcessData -self $screen._quickActions
-                        Write-Log -Level Debug -Message "quickActions updated with $($NewValue.Count) items"
+                    if ($screen -and $screen._quickActions) {
+                        if ($NewValue -and $NewValue.Count -gt 0) {
+                            $screen._quickActions.Data = $NewValue 
+                            & $screen._quickActions.ProcessData -self $screen._quickActions
+                            Write-Log -Level Debug -Message "quickActions updated with $($NewValue.Count) items"
+                        } else {
+                            Write-Log -Level Debug -Message "quickActions NewValue is null or empty"
+                        }
                     } else {
-                        Write-Log -Level Error -Message "quickActions component not accessible or NewValue is null"
+                        Write-Log -Level Error -Message "quickActions component not accessible"
                     }
                 } catch {
                     Write-Log -Level Error -Message "quickActions handler error: $_"
@@ -246,6 +253,9 @@ function Get-DashboardScreen {
         
         # Initial data load with error handling
         try {
+            # Small delay to ensure components are ready
+            Start-Sleep -Milliseconds 50
+            
             $result = & $services.Store.Dispatch -self $services.Store -actionName "LOAD_DASHBOARD_DATA"
             if (-not $result.Success) {
                 Write-Log -Level Error -Message "Failed to load dashboard data: $($result.Error)"
@@ -263,7 +273,10 @@ function Get-DashboardScreen {
             Register-ScreenForFocus -Screen $self
         }
         
+        # Set initial focus to quickActions
         Request-Focus -Component $quickActions
+        $quickActions.IsFocused = $true
+        Write-Log -Level Debug -Message "Set initial focus to quickActions"
         
         # Set up refresh timer with proper service capture
         $timerServices = $services
@@ -331,6 +344,16 @@ function Get-DashboardScreen {
                 $services = $self._services
                 if (-not $services) { return $false }
                 
+                # First, let focused component handle input
+                $focusedComponent = Get-FocusedComponent
+                if ($focusedComponent -and $focusedComponent.HandleInput) {
+                    $handled = & $focusedComponent.HandleInput -self $focusedComponent -Key $Key
+                    if ($handled) {
+                        Write-Log -Level Debug -Message "Input handled by focused component: $($focusedComponent.Name)"
+                        return $true
+                    }
+                }
+                
                 $action = & $services.Keybindings.HandleKey -self $services.Keybindings -KeyInfo $Key
                 
                 switch ($action) {
@@ -338,6 +361,13 @@ function Get-DashboardScreen {
                     "App.DebugLog" { & $services.Navigation.GoTo -self $services.Navigation -Path "/log" -Services $services; return $true }
                     "App.Quit" { return "Quit" }
                     "App.Back" { return "Quit" }
+                }
+                
+                # Tab navigation
+                if ($Key.Key -eq [ConsoleKey]::Tab) {
+                    $reverse = ($Key.Modifiers -band [ConsoleModifiers]::Shift) -ne 0
+                    Move-Focus -Reverse:$reverse
+                    return $true
                 }
                 
                 if ($Key.KeyChar -ge '1' -and $Key.KeyChar -le '6') {

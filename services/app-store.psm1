@@ -22,20 +22,59 @@ function Initialize-AppStore {
         GetState = { 
             param($self, [string]$path = $null) 
             if ([string]::IsNullOrEmpty($path)) {
-                return (& $self._state.GetValue)
+                # Directly access state data
+                return $self._state._data
             }
-            return (& $self._state.GetValue -Path $path)
+            # Navigate path manually
+            $parts = $path -split '\.'
+            $current = $self._state._data
+            foreach ($part in $parts) {
+                if ($null -eq $current) { return $null }
+                $current = $current[$part]
+            }
+            return $current
         }
         
         Subscribe = { 
             param($self, [string]$path, [scriptblock]$handler) 
             if (-not $handler) { throw "Handler scriptblock is required for Subscribe" }
-            return (& $self._state.Subscribe -Path $path -Handler $handler)
+            
+            # Manually implement subscribe to avoid $this issues
+            $state = $self._state
+            $subId = [Guid]::NewGuid().ToString()
+            
+            if (-not $state._subscribers) { $state._subscribers = @{} }
+            if (-not $state._subscribers.ContainsKey($path)) {
+                $state._subscribers[$path] = @()
+            }
+            
+            $state._subscribers[$path] += @{
+                Id = $subId
+                Handler = $handler
+            }
+            
+            # Call handler with current value
+            $currentValue = & $self.GetState -self $self -path $path
+            try {
+                & $handler -NewValue $currentValue -OldValue $null -Path $path
+            } catch {
+                Write-Warning "State subscriber error: $_"
+            }
+            
+            return $subId
         }
         
         Unsubscribe = { 
             param($self, $subId) 
-            if ($subId) { & $self._state.Unsubscribe -SubscriptionId $subId }
+            if ($subId -and $self._state._subscribers) {
+                # Manually remove subscription
+                foreach ($path in @($self._state._subscribers.Keys)) {
+                    $self._state._subscribers[$path] = @($self._state._subscribers[$path] | Where-Object { $_.Id -ne $subId })
+                    if ($self._state._subscribers[$path].Count -eq 0) {
+                        $self._state._subscribers.Remove($path)
+                    }
+                }
+            }
         }
         
         RegisterAction = { 
@@ -75,36 +114,50 @@ function Initialize-AppStore {
             try {
                 $previousState = & $self.GetState -self $self
                 
-                # Fix: Capture store reference for use in scriptblocks
-                $storeRef = $self
+                # Capture the store instance for proper closure creation
+                $storeInstance = $self
                 
                 $actionContext = @{
                     GetState = { 
-                        if ($storeRef) {
-                            & $storeRef.GetState -self $storeRef
+                        param($path = $null) 
+                        if ($path) {
+                            return & $storeInstance.GetState -self $storeInstance -path $path
                         } else {
-                            Write-Log -Level Error -Message "Store reference lost in GetState"
-                            return @{}
+                            return & $storeInstance.GetState -self $storeInstance
                         }
                     }.GetNewClosure()
                     
                     UpdateState = { 
                         param($updates) 
-                        if ($storeRef -and $updates) {
-                            & $storeRef._updateState -self $storeRef -updates $updates
-                        } else {
-                            Write-Log -Level Error -Message "Store reference lost in UpdateState or updates null"
+                        # Directly update state data and notify subscribers
+                        if ($storeInstance._state -and $updates) {
+                            $state = $storeInstance._state
+                            
+                            # Update the data directly
+                            foreach ($key in $updates.Keys) {
+                                $oldValue = $state._data[$key]
+                                $state._data[$key] = $updates[$key]
+                                
+                                # Notify subscribers if value changed
+                                if ($oldValue -ne $updates[$key]) {
+                                    # Call NotifySubscribers for this path
+                                    if ($state._subscribers.ContainsKey($key)) {
+                                        foreach ($sub in $state._subscribers[$key]) {
+                                            try {
+                                                & $sub.Handler -NewValue $updates[$key] -OldValue $oldValue -Path $key
+                                            } catch {
+                                                Write-Warning "State notification error: $_"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }.GetNewClosure()
                     
                     Dispatch = { 
-                        param($name, $p) 
-                        if ($storeRef) {
-                            & $storeRef.Dispatch -self $storeRef -actionName $name -payload $p
-                        } else {
-                            Write-Log -Level Error -Message "Store reference lost in Dispatch"
-                            return @{ Success = $false; Error = "Store reference lost" }
-                        }
+                        param($name, $p = $null) 
+                        return & $storeInstance.Dispatch -self $storeInstance -actionName $name -payload $p
                     }.GetNewClosure()
                 }
                 
@@ -123,7 +176,24 @@ function Initialize-AppStore {
         
         _updateState = { 
             param($self, [hashtable]$updates)
-            if ($updates) { & $self._state.Update -Updates $updates }
+            if ($updates -and $self._state) {
+                # Use the same direct update logic as UpdateState in action context
+                $state = $self._state
+                foreach ($key in $updates.Keys) {
+                    $oldValue = $state._data[$key]
+                    $state._data[$key] = $updates[$key]
+                    
+                    if ($oldValue -ne $updates[$key] -and $state._subscribers.ContainsKey($key)) {
+                        foreach ($sub in $state._subscribers[$key]) {
+                            try {
+                                & $sub.Handler -NewValue $updates[$key] -OldValue $oldValue -Path $key
+                            } catch {
+                                Write-Warning "State notification error: $_"
+                            }
+                        }
+                    }
+                }
+            }
         }
         
         GetHistory = { param($self) ; return $self._history }

@@ -61,8 +61,8 @@ function Get-TaskManagementScreen {
                     Height = ($global:TuiState.BufferHeight - 10)
                 }
                 
-                # Store services before creating components
-                $self._storeService = $services.Store
+                # Capture store service for component handlers
+                $storeService = $services.Store
                 
                 $taskTable = New-TuiDataTable -Props @{
                     Name = "taskTable"; IsFocusable = $true; ShowBorder = $false
@@ -75,12 +75,8 @@ function Get-TaskManagementScreen {
                     OnRowSelect = {
                         param($SelectedData, $SelectedIndex)
                         if ($SelectedData -and $SelectedData.Id) {
-                            $parent = $this.Parent
-                            while ($parent -and -not $parent._storeService) {
-                                $parent = $parent.Parent
-                            }
-                            if ($parent -and $parent._storeService) {
-                                & $parent._storeService.Dispatch -self $parent._storeService -actionName "TASK_TOGGLE_STATUS" -payload @{ TaskId = $SelectedData.Id }
+                            if ($storeService) {
+                                & $storeService.Dispatch -self $storeService -actionName "TASK_TOGGLE_STATUS" -payload @{ TaskId = $SelectedData.Id }
                             }
                         }
                     }
@@ -167,10 +163,13 @@ function Get-TaskManagementScreen {
             & $formPanel.AddChild -self $formPanel -Child $descLabel -LayoutProps @{ "Grid.Row" = 1; "Grid.Column" = 0 }
             & $formPanel.AddChild -self $formPanel -Child $descInput -LayoutProps @{ "Grid.Row" = 1; "Grid.Column" = 1 }
             
+            # Capture screen reference for button handlers
+            $screen = $self
+            
             # Buttons
             $buttonPanel = New-TuiStackPanel -Props @{ Orientation = "Horizontal"; HorizontalAlignment = "Center"; Spacing = 2; Height = 3 }
-            $saveButton = New-TuiButton -Props @{ Text = "Save"; Width = 12; Height = 3; IsFocusable = $true; OnClick = { & $self._SaveTask -self $self } }
-            $cancelButton = New-TuiButton -Props @{ Text = "Cancel"; Width = 12; Height = 3; IsFocusable = $true; OnClick = { & $self._HideForm -self $self } }
+            $saveButton = New-TuiButton -Props @{ Text = "Save"; Width = 12; Height = 3; IsFocusable = $true; OnClick = { & $screen._SaveTask -self $screen } }
+            $cancelButton = New-TuiButton -Props @{ Text = "Cancel"; Width = 12; Height = 3; IsFocusable = $true; OnClick = { & $screen._HideForm -self $screen } }
             & $buttonPanel.AddChild -self $buttonPanel -Child $saveButton
             & $buttonPanel.AddChild -self $buttonPanel -Child $cancelButton
             & $formPanel.AddChild -self $formPanel -Child $buttonPanel -LayoutProps @{ "Grid.Row" = 5; "Grid.Column" = 0; "Grid.ColumnSpan" = 2 }

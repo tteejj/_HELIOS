@@ -8977,8 +8977,8 @@ function Get-TaskManagementScreen {
                     Height = ($global:TuiState.BufferHeight - 10)
                 }
                 
-                # Store services before creating components
-                $self._storeService = $services.Store
+                # Capture store service for component handlers
+                $storeService = $services.Store
                 
                 $taskTable = New-TuiDataTable -Props @{
                     Name = "taskTable"; IsFocusable = $true; ShowBorder = $false
@@ -8991,12 +8991,8 @@ function Get-TaskManagementScreen {
                     OnRowSelect = {
                         param($SelectedData, $SelectedIndex)
                         if ($SelectedData -and $SelectedData.Id) {
-                            $parent = $this.Parent
-                            while ($parent -and -not $parent._storeService) {
-                                $parent = $parent.Parent
-                            }
-                            if ($parent -and $parent._storeService) {
-                                & $parent._storeService.Dispatch -self $parent._storeService -actionName "TASK_TOGGLE_STATUS" -payload @{ TaskId = $SelectedData.Id }
+                            if ($storeService) {
+                                & $storeService.Dispatch -self $storeService -actionName "TASK_TOGGLE_STATUS" -payload @{ TaskId = $SelectedData.Id }
                             }
                         }
                     }
@@ -9083,10 +9079,13 @@ function Get-TaskManagementScreen {
             & $formPanel.AddChild -self $formPanel -Child $descLabel -LayoutProps @{ "Grid.Row" = 1; "Grid.Column" = 0 }
             & $formPanel.AddChild -self $formPanel -Child $descInput -LayoutProps @{ "Grid.Row" = 1; "Grid.Column" = 1 }
             
+            # Capture screen reference for button handlers
+            $screen = $self
+            
             # Buttons
             $buttonPanel = New-TuiStackPanel -Props @{ Orientation = "Horizontal"; HorizontalAlignment = "Center"; Spacing = 2; Height = 3 }
-            $saveButton = New-TuiButton -Props @{ Text = "Save"; Width = 12; Height = 3; IsFocusable = $true; OnClick = { & $self._SaveTask -self $self } }
-            $cancelButton = New-TuiButton -Props @{ Text = "Cancel"; Width = 12; Height = 3; IsFocusable = $true; OnClick = { & $self._HideForm -self $self } }
+            $saveButton = New-TuiButton -Props @{ Text = "Save"; Width = 12; Height = 3; IsFocusable = $true; OnClick = { & $screen._SaveTask -self $screen } }
+            $cancelButton = New-TuiButton -Props @{ Text = "Cancel"; Width = 12; Height = 3; IsFocusable = $true; OnClick = { & $screen._HideForm -self $screen } }
             & $buttonPanel.AddChild -self $buttonPanel -Child $saveButton
             & $buttonPanel.AddChild -self $buttonPanel -Child $cancelButton
             & $formPanel.AddChild -self $formPanel -Child $buttonPanel -LayoutProps @{ "Grid.Row" = 5; "Grid.Column" = 0; "Grid.ColumnSpan" = 2 }
@@ -9277,18 +9276,9 @@ function Get-DashboardScreen {
                 param($SelectedData, $SelectedIndex)
                 $routes = @("/time-entry", "/timer/start", "/tasks", "/projects", "/reports", "/settings")
                 
-                # Try to find the screen object by going up the parent chain
-                $screenObj = $this
-                while ($screenObj -and -not $screenObj.Name -eq "DashboardScreen") {
-                    $screenObj = if ($screenObj.Parent) { $screenObj.Parent } else { $null }
-                }
-                
                 if ($SelectedIndex -ge 0 -and $SelectedIndex -lt $routes.Count) {
-                    if ($screenObj -and $screenObj._navigationServices -and $screenObj._navigationServices.Navigation) {
-                        & $screenObj._navigationServices.Navigation.GoTo -self $screenObj._navigationServices.Navigation -Path $routes[$SelectedIndex] -Services $screenObj._navigationServices
-                    } elseif ($global:Services -and $global:Services.Navigation) {
-                        # Fallback to global services if screen reference not found
-                        & $global:Services.Navigation.GoTo -self $global:Services.Navigation -Path $routes[$SelectedIndex] -Services $global:Services
+                    if ($services -and $services.Navigation) {
+                        & $services.Navigation.GoTo -self $services.Navigation -Path $routes[$SelectedIndex] -Services $services
                     } else {
                         Write-Log -Level Error -Message "Navigation services not available in OnRowSelect handler"
                     }
@@ -9732,36 +9722,30 @@ function Initialize-AppStore {
             try {
                 $previousState = & $self.GetState -self $self
                 
-                # Fix: Capture store reference for use in scriptblocks
-                $storeRef = $self
+                # Capture the store instance for proper closure creation
+                $storeInstance = $self
                 
                 $actionContext = @{
                     GetState = { 
-                        if ($storeRef) {
-                            & $storeRef.GetState -self $storeRef
+                        param($path = $null) 
+                        if ($path) {
+                            return & $storeInstance.GetState -self $storeInstance -path $path
                         } else {
-                            Write-Log -Level Error -Message "Store reference lost in GetState"
-                            return @{}
+                            return & $storeInstance.GetState -self $storeInstance
                         }
                     }.GetNewClosure()
                     
                     UpdateState = { 
                         param($updates) 
-                        if ($storeRef -and $updates) {
-                            & $storeRef._updateState -self $storeRef -updates $updates
-                        } else {
-                            Write-Log -Level Error -Message "Store reference lost in UpdateState or updates null"
+                        # Use the store's internal _updateState method which knows how to call the state properly
+                        if ($storeInstance._updateState) {
+                            & $storeInstance._updateState -self $storeInstance -updates $updates
                         }
                     }.GetNewClosure()
                     
                     Dispatch = { 
-                        param($name, $p) 
-                        if ($storeRef) {
-                            & $storeRef.Dispatch -self $storeRef -actionName $name -payload $p
-                        } else {
-                            Write-Log -Level Error -Message "Store reference lost in Dispatch"
-                            return @{ Success = $false; Error = "Store reference lost" }
-                        }
+                        param($name, $p = $null) 
+                        return & $storeInstance.Dispatch -self $storeInstance -actionName $name -payload $p
                     }.GetNewClosure()
                 }
                 

@@ -173,54 +173,52 @@ function Initialize-PMCServices {
             & $Context.Dispatch "TIMERS_REFRESH"
         }
         
-        # PASTE THIS CODE over the existing TASKS_REFRESH action in Initialize-PMCServices
-
-& $services.Store.RegisterAction -self $services.Store -actionName "TASKS_REFRESH" -scriptBlock {
-    param($Context)
-    # Ensure data structure exists
-    if (-not $global:Data) { $global:Data = @{} }
-    if (-not $global:Data.tasks) { $global:Data.tasks = @() }
-    
-    # Load raw tasks data
-    $rawTasks = $global:Data.tasks
-    
-    # --- Data for Dashboard ---
-    $activeTasks = ($rawTasks | Where-Object { -not $_.completed }).Count
-    
-    $today = (Get-Date).Date
-    $dashboardTasks = $rawTasks | Where-Object {
-        -not $_.completed -or ([DateTime]::Parse($_.updated_at).Date -eq $today)
-    } | Select-Object -First 10 | ForEach-Object {
-        @{
-            Priority = switch($_.priority) {
-                "high" { "[HIGH]" }
-                "medium" { "[MED]" }
-                "low" { "[LOW]" }
-                default { "[MED]" }
+        & $services.Store.RegisterAction -self $services.Store -actionName "TASKS_REFRESH" -scriptBlock {
+            param($Context)
+            # Ensure data structure exists
+            if (-not $global:Data) { $global:Data = @{} }
+            if (-not $global:Data.tasks) { $global:Data.tasks = @() }
+            
+            # Load raw tasks data
+            $rawTasks = $global:Data.tasks
+            
+            # --- Data for Dashboard ---
+            $activeTasks = ($rawTasks | Where-Object { -not $_.completed }).Count
+            
+            $today = (Get-Date).Date
+            $dashboardTasks = $rawTasks | Where-Object {
+                -not $_.completed -or ([DateTime]::Parse($_.updated_at).Date -eq $today)
+            } | Select-Object -First 10 | ForEach-Object {
+                @{
+                    Priority = switch($_.priority) {
+                        "high" { "[HIGH]" }
+                        "medium" { "[MED]" }
+                        "low" { "[LOW]" }
+                        default { "[MED]" }
+                    }
+                    Task = $_.title
+                    Project = if ($_.project) { $_.project } else { "None" }
+                }
             }
-            Task = $_.title
-            Project = $_.project ?? "None"
-        }
-    }
 
-    # --- Data for Task Screen (mapped correctly) ---
-    $tasksForTable = $rawTasks | ForEach-Object {
-        @{
-            Id = $_.id # Pass the ID through for actions
-            Status = if ($_.completed) { "✓" } else { "○" }
-            Priority = $_.priority ?? "Medium"
-            Title = $_.title ?? "Untitled"
-            Category = $_.project ?? "General"
-            DueDate = if ($_.due_date) { ([DateTime]$_.due_date).ToString("yyyy-MM-dd") } else { "N/A" }
+            # --- Data for Task Screen (mapped correctly) ---
+            $tasksForTable = $rawTasks | ForEach-Object {
+                @{
+                    Id = $_.id # Pass the ID through for actions
+                    Status = if ($_.completed) { "✓" } else { "○" }
+                    Priority = if ($_.priority) { $_.priority } else { "Medium" }
+                    Title = if ($_.title) { $_.title } else { "Untitled" }
+                    Category = if ($_.project) { $_.project } else { "General" }
+                    DueDate = if ($_.due_date) { ([DateTime]$_.due_date).ToString("yyyy-MM-dd") } else { "N/A" }
+                }
+            }
+            
+            & $Context.UpdateState @{ 
+                tasks = $tasksForTable        # Mapped for Task Screen table
+                todaysTasks = $dashboardTasks # Mapped for Dashboard table
+                "stats.activeTasks" = $activeTasks
+            }
         }
-    }
-    
-    & $Context.UpdateState @{ 
-        tasks = $tasksForTable        # Mapped for Task Screen table
-        todaysTasks = $dashboardTasks # Mapped for Dashboard table
-        "stats.activeTasks" = $activeTasks
-    }
-}
         
         & $services.Store.RegisterAction -self $services.Store -actionName "TIMERS_REFRESH" -scriptBlock {
             param($Context)
@@ -242,7 +240,7 @@ function Initialize-PMCServices {
                     } else { "00:00:00" }
                     
                     @{
-                        Project = $_.project ?? "No Project"
+                        Project = if ($_.project) { $_.project } else { "No Project" }
                         Time = $duration
                     }
                 }
@@ -270,23 +268,27 @@ function Initialize-PMCServices {
             
             # Ensure data structure exists
             if (-not $global:Data) { $global:Data = @{} }
-            if (-not $global:Data.time_entries) { $global:Data.time_entries = @() }
+            if (-not $global:Data.ContainsKey('time_entries')) { $global:Data.time_entries = @() }
             
             # Calculate today's and week's hours
             $todayHours = 0
             $weekHours = 0
-            if ($global:Data.time_entries) {
+            if ($global:Data.time_entries -and $global:Data.time_entries.Count -gt 0) {
                 $today = (Get-Date).Date
                 $weekStart = $today.AddDays(-[int]$today.DayOfWeek)
                 
                 foreach ($entry in $global:Data.time_entries) {
                     if ($entry.start_time) {
-                        $entryDate = [DateTime]::Parse($entry.start_time).Date
-                        if ($entryDate -eq $today) {
-                            $todayHours += $entry.duration
-                        }
-                        if ($entryDate -ge $weekStart -and $entryDate -le $today) {
-                            $weekHours += $entry.duration
+                        try {
+                            $entryDate = [DateTime]::Parse($entry.start_time).Date
+                            if ($entryDate -eq $today -and $entry.duration) {
+                                $todayHours += $entry.duration
+                            }
+                            if ($entryDate -ge $weekStart -and $entryDate -le $today -and $entry.duration) {
+                                $weekHours += $entry.duration
+                            }
+                        } catch {
+                            # Skip entries with invalid dates
                         }
                     }
                 }
@@ -308,7 +310,7 @@ function Initialize-PMCServices {
                 $newTask = @{
                     id = [Guid]::NewGuid().ToString()
                     title = $Payload.Title
-                    description = $Payload.Description ?? ""
+                    description = if ($Payload.Description) { $Payload.Description } else { "" }
                     completed = $false
                     priority = "medium"
                     created_at = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
@@ -408,8 +410,8 @@ function Initialize-PMCServices {
                 $tasks = $global:Data.tasks | ForEach-Object {
                     @{
                         Status = if ($_.completed) { "✓" } else { "○" }
-                        Priority = $_.priority ?? "Medium"
-                        Title = $_.title ?? "Untitled"
+                        Priority = if ($_.priority) { $_.priority } else { "Medium" }
+                        Title = if ($_.title) { $_.title } else { "Untitled" }
                     }
                 }
             }

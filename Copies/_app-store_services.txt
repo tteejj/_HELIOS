@@ -75,36 +75,30 @@ function Initialize-AppStore {
             try {
                 $previousState = & $self.GetState -self $self
                 
-                # Fix: Capture store reference for use in scriptblocks
-                $storeRef = $self
+                # Capture the store instance for proper closure creation
+                $storeInstance = $self
                 
                 $actionContext = @{
                     GetState = { 
-                        if ($storeRef) {
-                            & $storeRef.GetState -self $storeRef
+                        param($path = $null) 
+                        if ($path) {
+                            return & $storeInstance.GetState -self $storeInstance -path $path
                         } else {
-                            Write-Log -Level Error -Message "Store reference lost in GetState"
-                            return @{}
+                            return & $storeInstance.GetState -self $storeInstance
                         }
                     }.GetNewClosure()
                     
                     UpdateState = { 
                         param($updates) 
-                        if ($storeRef -and $updates) {
-                            & $storeRef._updateState -self $storeRef -updates $updates
-                        } else {
-                            Write-Log -Level Error -Message "Store reference lost in UpdateState or updates null"
+                        # Use the store's internal _updateState method which knows how to call the state properly
+                        if ($storeInstance._updateState) {
+                            & $storeInstance._updateState -self $storeInstance -updates $updates
                         }
                     }.GetNewClosure()
                     
                     Dispatch = { 
-                        param($name, $p) 
-                        if ($storeRef) {
-                            & $storeRef.Dispatch -self $storeRef -actionName $name -payload $p
-                        } else {
-                            Write-Log -Level Error -Message "Store reference lost in Dispatch"
-                            return @{ Success = $false; Error = "Store reference lost" }
-                        }
+                        param($name, $p = $null) 
+                        return & $storeInstance.Dispatch -self $storeInstance -actionName $name -payload $p
                     }.GetNewClosure()
                 }
                 
