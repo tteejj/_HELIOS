@@ -178,7 +178,7 @@ function Initialize-PMCServices {
             param($Context)
             # Ensure data structure exists
             if (-not $global:Data) { $global:Data = @{} }
-            if (-not $global:Data.tasks) { $global:Data.tasks = @() }
+            if (-not ($global:Data.tasks -is [System.Collections.IEnumerable])) { $global:Data.tasks = @() } # FIX: Ensure tasks is an array
             
             # Load raw tasks data
             $rawTasks = $global:Data.tasks
@@ -225,7 +225,7 @@ function Initialize-PMCServices {
             param($Context)
             # Ensure data structure exists
             if (-not $global:Data) { $global:Data = @{} }
-            if (-not $global:Data.timers) { $global:Data.timers = @() }
+            if (-not ($global:Data.timers -is [System.Collections.IEnumerable])) { $global:Data.timers = @() } # FIX: Ensure timers is an array
             
             # Load active timers
             $activeTimers = @()
@@ -429,8 +429,8 @@ function Initialize-PMCServices {
             Write-Host "  Navigation Service initialized" -ForegroundColor Gray
         }
         
-        # Add simple test screen route
-        & $services.Navigation.AddRoute -self $services.Navigation -Path "/test" -RouteConfig @{
+        # FIX: Align the route path with the screen module name for clarity
+        & $services.Navigation.AddRoute -self $services.Navigation -Path "/simple-test" -RouteConfig @{
             Factory = { param($Services) Get-SimpleTestScreen -Services $Services }
             Title = "Simple Test"
             RequiresAuth = $false
@@ -507,10 +507,22 @@ function Start-PMCTerminal {
         # Clear the console before starting
         Clear-Host
         
+        # FIX: Flexible startup path logic to allow testing specific screens.
+        $startPath = "/dashboard" # Default
+        if ($args -contains "-start") {
+            $startIndex = [array]::IndexOf($args, "-start")
+            if (($startIndex + 1) -lt $args.Count) {
+                $startPath = $args[$startIndex + 1]
+            }
+        } elseif ($args -contains "-demo") {
+            $startPath = "/demo"
+        }
+        
         # Navigate to initial screen
-        if ($args -contains "-demo" -and (& $services.Navigation.IsValidRoute -self $services.Navigation -Path "/demo")) {
-            & $services.Navigation.GoTo -self $services.Navigation -Path "/demo" -Services $services
+        if ((& $services.Navigation.IsValidRoute -self $services.Navigation -Path $startPath)) {
+            & $services.Navigation.GoTo -self $services.Navigation -Path $startPath -Services $services
         } else {
+            Write-Log -Level Warning -Message "Startup path '$startPath' is not a valid route. Defaulting to /dashboard."
             & $services.Navigation.GoTo -self $services.Navigation -Path "/dashboard" -Services $services
         }
         
@@ -592,15 +604,15 @@ function global:New-TuiDataTable {
     
     $component = @{
         Type = "DataTable"
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 80
-        Height = $Props.Height ?? 20
-        ZIndex = $Props.ZIndex ?? 0
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 80 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 20 }
+        ZIndex = if ($null -ne $Props.ZIndex) { $Props.ZIndex } else { 0 }
         Title = $Props.Title
-        ShowBorder = $Props.ShowBorder ?? $true  # <-- NEW: Controls whether component draws its own border
-        Data = $Props.Data ?? @()
-        Columns = $Props.Columns ?? @()
+        ShowBorder = if ($null -ne $Props.ShowBorder) { $Props.ShowBorder } else { $true }  # <-- NEW: Controls whether component draws its own border
+        Data = if ($null -ne $Props.Data) { $Props.Data } else { @() }
+        Columns = if ($null -ne $Props.Columns) { $Props.Columns } else { @() }
         SelectedRow = 0
         ScrollOffset = 0
         SortColumn = $null
@@ -609,19 +621,21 @@ function global:New-TuiDataTable {
         FilterColumn = $null
         PageSize = 0  # 0 = auto-calculate
         CurrentPage = 0
-        ShowHeader = $Props.ShowHeader ?? $true
-        ShowFooter = $Props.ShowFooter ?? $true
-        ShowRowNumbers = $Props.ShowRowNumbers ?? $false
-        AllowSort = $Props.AllowSort ?? $true
-        AllowFilter = $Props.AllowFilter ?? $true
-        AllowSelection = $Props.AllowSelection ?? $true
-        MultiSelect = $Props.MultiSelect ?? $false
+        ShowHeader = if ($null -ne $Props.ShowHeader) { $Props.ShowHeader } else { $true }
+        ShowFooter = if ($null -ne $Props.ShowFooter) { $Props.ShowFooter } else { $true }
+        ShowRowNumbers = if ($null -ne $Props.ShowRowNumbers) { $Props.ShowRowNumbers } else { $false }
+        AllowSort = if ($null -ne $Props.AllowSort) { $Props.AllowSort } else { $true }
+        AllowFilter = if ($null -ne $Props.AllowFilter) { $Props.AllowFilter } else { $true }
+        AllowSelection = if ($null -ne $Props.AllowSelection) { $Props.AllowSelection } else { $true }
+        MultiSelect = if ($null -ne $Props.MultiSelect) { $Props.MultiSelect } else { $false }
         SelectedRows = @()
-        IsFocusable = $Props.IsFocusable ?? $true
-        Visible = $Props.Visible ?? $true
+        IsFocusable = if ($null -ne $Props.IsFocusable) { $Props.IsFocusable } else { $true }
+        Visible = if ($null -ne $Props.Visible) { $Props.Visible } else { $true }
         Name = $Props.Name
         FilteredData = @()
         ProcessedData = @()
+        _lastRenderedWidth = 0
+        _lastRenderedHeight = 0
         
         # Event handlers from Props
         OnRowSelect = $Props.OnRowSelect
@@ -704,15 +718,17 @@ function global:New-TuiDataTable {
             # CRITICAL: Check if component is visible
             if ($self.Visible -eq $false) { return }
             
+            # Force ProcessData if dimensions changed
+            if ($self._lastRenderedWidth -ne $self.Width -or $self._lastRenderedHeight -ne $self.Height) {
+                & $self.ProcessData -self $self
+                $self._lastRenderedWidth = $self.Width
+                $self._lastRenderedHeight = $self.Height
+            }
+            
             # NOTE: ProcessData is now called by external code when data changes
             # This prevents unnecessary recalculation on every render frame
             
-            # Only draw border if ShowBorder is true
-            $contentX = $self.X
-            $contentY = $self.Y
-            $contentWidth = $self.Width
-            $contentHeight = $self.Height
-            
+            # Calculate content area based on border settings
             if ($self.ShowBorder) {
                 $borderColor = if ($self.IsFocusable -and $self.IsFocused) { 
                     Get-ThemeColor "Accent" -Default ([ConsoleColor]::Cyan)
@@ -720,14 +736,21 @@ function global:New-TuiDataTable {
                     Get-ThemeColor "Border" -Default ([ConsoleColor]::DarkGray)
                 }
                 
+                $titleText = if ($null -ne $self.Title) { $self.Title } else { 'Data Table' }
                 Write-BufferBox -X $self.X -Y $self.Y -Width $self.Width -Height $self.Height `
-                    -BorderColor $borderColor -Title " $($self.Title ?? 'Data Table') "
+                    -BorderColor $borderColor -Title " $titleText "
                 
                 # Adjust content area for border
                 $contentX = $self.X + 1
                 $contentY = $self.Y + 1
                 $contentWidth = $self.Width - 2
                 $contentHeight = $self.Height - 2
+            } else {
+                # No border, use full dimensions
+                $contentX = $self.X
+                $contentY = $self.Y
+                $contentWidth = $self.Width
+                $contentHeight = $self.Height
             }
             
             $currentY = $contentY
@@ -745,7 +768,8 @@ function global:New-TuiDataTable {
                     -ForegroundColor $filterFg -BackgroundColor $filterBg
                 
                 if ($self.FilterColumn) {
-                    $colName = ($self.Columns | Where-Object { $_.Name -eq $self.FilterColumn }).Header ?? $self.FilterColumn
+                    $filterCol = $self.Columns | Where-Object { $_.Name -eq $self.FilterColumn }
+                    $colName = if ($filterCol -and $filterCol.Header) { $filterCol.Header } else { $self.FilterColumn }
                     Write-BufferString -X ($contentX + $contentWidth - 19) -Y $currentY `
                         -Text "Column: $colName" -ForegroundColor (Get-ThemeColor "Info" -Default ([ConsoleColor]::Blue))
                 }
@@ -754,19 +778,16 @@ function global:New-TuiDataTable {
             }
             
             # Calculate column widths - FIXED VERSION
-            $totalDefinedWidth = ($self.Columns | Where-Object { $_.Width } | Measure-Object -Property Width -Sum).Sum ?? 0
+            $totalDefinedWidth = ($self.Columns | Where-Object { $_.Width } | Measure-Object -Property Width -Sum).Sum
+            if ($null -eq $totalDefinedWidth) { $totalDefinedWidth = 0 }
             $flexColumns = @($self.Columns | Where-Object { -not $_.Width })
             $columnSeparators = if ($self.Columns.Count -gt 1) { $self.Columns.Count - 1 } else { 0 }  # Only add separators if multiple columns
             $remainingWidth = $innerWidth - $totalDefinedWidth - ($self.ShowRowNumbers ? 5 : 0) - $columnSeparators
             
             # CRITICAL FIX: Ensure flex columns get adequate width, especially for single-column tables
-            if ($flexColumns.Count -eq 1 -and $self.Columns.Count -eq 1) {
-                # Single flex column should use full available width
-                $flexWidth = $remainingWidth
-            } elseif ($flexColumns.Count -gt 0) {
+            $flexWidth = 0
+            if ($flexColumns.Count -gt 0) {
                 $flexWidth = [Math]::Floor($remainingWidth / $flexColumns.Count)
-            } else {
-                $flexWidth = 0
             }
             
             # Assign calculated widths
@@ -774,13 +795,8 @@ function global:New-TuiDataTable {
                 if ($col.Width) {
                     $col.CalculatedWidth = $col.Width
                 } else {
-                    # For the Quick Actions single column, ensure it gets proper width
-                    if ($self.Title -eq "Quick Actions" -and $self.Columns.Count -eq 1) {
-                        # Table width 35, minus 2 for borders if ShowBorder=false (but content area already adjusted)
-                        $col.CalculatedWidth = $innerWidth - 1  # Leave 1 space for safety
-                    } else {
-                        $col.CalculatedWidth = [Math]::Max(5, $flexWidth)
-                    }
+                    # For flex columns, use the calculated flex width
+                    $col.CalculatedWidth = [Math]::Max(5, $flexWidth)
                 }
             }
             
@@ -797,7 +813,7 @@ function global:New-TuiDataTable {
                 
                 # Column headers
                 foreach ($col in $self.Columns) {
-                    $headerText = $col.Header ?? $col.Name
+                    $headerText = if ($col.Header) { $col.Header } else { $col.Name }
                     $width = $col.CalculatedWidth
                     
                     # Add sort indicator
@@ -858,9 +874,22 @@ function global:New-TuiDataTable {
                 $rowBg = if ($isSelected) { Get-ThemeColor "Accent" -Default ([ConsoleColor]::Cyan) } else { Get-ThemeColor "Background" -Default ([ConsoleColor]::Black) }
                 $rowFg = if ($isSelected) { Get-ThemeColor "Background" -Default ([ConsoleColor]::Black) } else { Get-ThemeColor "Primary" -Default ([ConsoleColor]::White) }
                 
-                # Clear row background if selected
+                # Clear row background if selected - FIXED to respect actual component width
                 if ($isSelected) {
-                    Write-BufferString -X $rowX -Y $currentY -Text (" " * $contentWidth) `
+                    # Calculate actual row width based on column widths and separators
+                    $actualRowWidth = 0
+                    if ($self.ShowRowNumbers) { $actualRowWidth += 5 }
+                    foreach ($col in $self.Columns) {
+                        $actualRowWidth += $col.CalculatedWidth
+                    }
+                    # Add column separators
+                    if ($self.Columns.Count -gt 1) {
+                        $actualRowWidth += ($self.Columns.Count - 1)
+                    }
+                    # Ensure we don't exceed content width
+                    $actualRowWidth = [Math]::Min($actualRowWidth, $contentWidth)
+                    
+                    Write-BufferString -X $rowX -Y $currentY -Text (" " * $actualRowWidth) `
                         -BackgroundColor $rowBg
                 }
                 
@@ -918,8 +947,19 @@ function global:New-TuiDataTable {
                         $rowFg
                     }
                     
-                    Write-BufferString -X $rowX -Y $currentY -Text $alignedValue `
-                        -ForegroundColor $cellFg -BackgroundColor $rowBg
+                    # Ensure we don't write beyond component boundaries
+                    if ($rowX + $alignedValue.Length <= $contentX + $contentWidth) {
+                        Write-BufferString -X $rowX -Y $currentY -Text $alignedValue `
+                            -ForegroundColor $cellFg -BackgroundColor $rowBg
+                    } else {
+                        # Clip the text to fit within boundaries
+                        $availableWidth = ($contentX + $contentWidth) - $rowX
+                        if ($availableWidth -gt 0) {
+                            $clippedText = $alignedValue.Substring(0, [Math]::Min($alignedValue.Length, $availableWidth))
+                            Write-BufferString -X $rowX -Y $currentY -Text $clippedText `
+                                -ForegroundColor $cellFg -BackgroundColor $rowBg
+                        }
+                    }
                     
                     $rowX += $width + 1
                 }
@@ -1212,7 +1252,8 @@ function global:New-TuiDataTable {
                     # Simple HTML table export
                     $html = "<table border='1'><tr>"
                     foreach ($col in $self.Columns) {
-                        $html += "<th>$($col.Header ?? $col.Name)</th>"
+                        $headerText = if ($col.Header) { $col.Header } else { $col.Name }
+                        $html += "<th>$headerText</th>"
                     }
                     $html += "</tr>"
                     
@@ -1247,19 +1288,19 @@ function global:New-TuiTreeView {
     
     $component = @{
         Type = "TreeView"
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 40
-        Height = $Props.Height ?? 20
-        ZIndex = $Props.ZIndex ?? 0
-        RootNode = $Props.RootNode ?? @{ Name = "Root"; Children = @(); Expanded = $true }
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 40 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 20 }
+        ZIndex = if ($null -ne $Props.ZIndex) { $Props.ZIndex } else { 0 }
+        RootNode = if ($null -ne $Props.RootNode) { $Props.RootNode } else { @{ Name = "Root"; Children = @(); Expanded = $true } }
         SelectedNode = $null
         SelectedPath = @()
         FlattenedNodes = @()
         ScrollOffset = 0
-        ShowRoot = $Props.ShowRoot ?? $true
+        ShowRoot = if ($null -ne $Props.ShowRoot) { $Props.ShowRoot } else { $true }
         IsFocusable = $true
-        Visible = $Props.Visible ?? $true
+        Visible = if ($null -ne $Props.Visible) { $Props.Visible } else { $true }
         Name = $Props.Name
         
         # Node structure:
@@ -3655,22 +3696,22 @@ function New-BasePanel {
     
     $panel = @{
         Type = "Panel"
-        Name = $Props.Name ?? "Panel_$([Guid]::NewGuid().ToString('N').Substring(0,8))"
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 40
-        Height = $Props.Height ?? 20
-        Visible = $Props.Visible ?? $true
-        IsFocusable = $Props.IsFocusable ?? $false
-        ZIndex = $Props.ZIndex ?? 0
+        Name = if ($null -ne $Props.Name) { $Props.Name } else { "Panel_$([Guid]::NewGuid().ToString('N').Substring(0,8))" }
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 40 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 20 }
+        Visible = if ($null -ne $Props.Visible) { $Props.Visible } else { $true }
+        IsFocusable = if ($null -ne $Props.IsFocusable) { $Props.IsFocusable } else { $false }
+        ZIndex = if ($null -ne $Props.ZIndex) { $Props.ZIndex } else { 0 }
         Children = @()
         Parent = $null
-        LayoutProps = $Props.LayoutProps ?? @{}
-        ShowBorder = $Props.ShowBorder ?? $false
-        BorderStyle = $Props.BorderStyle ?? "Single"  # Single, Double, Rounded
+        LayoutProps = if ($null -ne $Props.LayoutProps) { $Props.LayoutProps } else { @{} }
+        ShowBorder = if ($null -ne $Props.ShowBorder) { $Props.ShowBorder } else { $false }
+        BorderStyle = if ($null -ne $Props.BorderStyle) { $Props.BorderStyle } else { "Single" }  # Single, Double, Rounded
         Title = $Props.Title
-        Padding = $Props.Padding ?? 0
-        Margin = $Props.Margin ?? 0
+        Padding = if ($null -ne $Props.Padding) { $Props.Padding } else { 0 }
+        Margin = if ($null -ne $Props.Margin) { $Props.Margin } else { 0 }
         BackgroundColor = $Props.BackgroundColor
         ForegroundColor = $Props.ForegroundColor
         _isDirty = $true
@@ -3792,17 +3833,13 @@ function global:New-TuiStackPanel {
     $panel = New-BasePanel -Props $Props
     $panel.Type = "StackPanel"
     $panel.Layout = 'Stack'
-    $panel.Orientation = $Props.Orientation ?? 'Vertical'
-    $panel.Spacing = $Props.Spacing ?? 1
-    $panel.HorizontalAlignment = $Props.HorizontalAlignment ?? 'Stretch'  # Left, Center, Right, Stretch
-    $panel.VerticalAlignment = $Props.VerticalAlignment ?? 'Stretch'      # Top, Middle, Bottom, Stretch
+    $panel.Orientation = if ($null -ne $Props.Orientation) { $Props.Orientation } else { 'Vertical' }
+    $panel.Spacing = if ($null -ne $Props.Spacing) { $Props.Spacing } else { 1 }
+    $panel.HorizontalAlignment = if ($null -ne $Props.HorizontalAlignment) { $Props.HorizontalAlignment } else { 'Stretch' }  # Left, Center, Right, Stretch
+    $panel.VerticalAlignment = if ($null -ne $Props.VerticalAlignment) { $Props.VerticalAlignment } else { 'Stretch' }      # Top, Middle, Bottom, Stretch
     
     $panel.CalculateLayout = {
         param($self)
-        
-        if (-not $self._isDirty) {
-            return $self._cachedLayout
-        }
         
         $bounds = & $self.GetContentBounds -self $self
         $layout = @{
@@ -3865,9 +3902,17 @@ function global:New-TuiStackPanel {
             # Apply stretch behavior
             if ($self.Orientation -eq 'Vertical' -and $self.HorizontalAlignment -eq 'Stretch') {
                 $childLayout.Width = $bounds.Width
+                # Update child's actual width for proper rendering
+                if ($child.Width -ne $bounds.Width) {
+                    $child.Width = $bounds.Width
+                }
             }
             elseif ($self.Orientation -eq 'Horizontal' -and $self.VerticalAlignment -eq 'Stretch') {
                 $childLayout.Height = $bounds.Height
+                # Update child's actual height for proper rendering
+                if ($child.Height -ne $bounds.Height) {
+                    $child.Height = $bounds.Height
+                }
             }
             
             # Handle horizontal alignment for vertical stacks
@@ -3886,7 +3931,7 @@ function global:New-TuiStackPanel {
                 }
             }
             
-            # CRITICAL FIX: Apply calculated positions to child immediately
+            # FIX: CRITICAL - Apply calculated positions and sizes back to the child component
             $child.X = $childLayout.X
             $child.Y = $childLayout.Y
             if ($childLayout.Width -ne $child.Width -and $child.PSObject.Properties['Width'].IsSettable) {
@@ -3913,68 +3958,20 @@ function global:New-TuiStackPanel {
     
     $panel.Render = {
         param($self)
+        if (-not $self.Visible) { return }
         
-        # Debug: Log panel state for debugging
-        if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
-            Write-Log -Level Debug -Message "StackPanel Render called: Title='$($self.Title)', Visible=$($self.Visible), Position=($($self.X),$($self.Y)), Size=$($self.Width)x$($self.Height), Children=$($self.Children.Count)"
+        # Clear panel area first to prevent bleed-through
+        $bgColor = if ($self.BackgroundColor) { $self.BackgroundColor } else { Get-ThemeColor "Background" -Default Black }
+        for ($y = $self.Y; $y -lt ($self.Y + $self.Height); $y++) {
+            Write-BufferString -X $self.X -Y $y -Text (' ' * $self.Width) -BackgroundColor $bgColor
         }
         
-        if (-not $self.Visible) {
-            if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
-                Write-Log -Level Debug -Message "StackPanel '$($self.Title)' not visible, skipping render"
-            }
-            return
-        }
-        
-        # Clear background if color specified
-        if ($self.BackgroundColor) {
-            for ($y = $self.Y; $y -lt ($self.Y + $self.Height); $y++) {
-                Write-BufferString -X $self.X -Y $y -Text (' ' * $self.Width) -BackgroundColor $self.BackgroundColor
-            }
-        }
-        
-        # Draw border if requested
         if ($self.ShowBorder) {
-            # DIAGNOSTIC: Force visible colors for debugging
-            $borderColor = if ($self.ForegroundColor) { 
-                $self.ForegroundColor 
-            } else { 
-                $themeColor = Get-ThemeColor "Border" -Default Gray
-                # If theme returns black on black background, force a visible color
-                if ($themeColor -eq [ConsoleColor]::Black -and $self.BackgroundColor -eq [ConsoleColor]::Black) {
-                    [ConsoleColor]::Gray
-                } else {
-                    $themeColor
-                }
-            }
-            
-            # Debug logging
-            if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
-                Write-Log -Level Debug -Message "Drawing border at ($($self.X),$($self.Y)) size $($self.Width)x$($self.Height) color $borderColor"
-            }
-            
+            $borderColor = if ($self.ForegroundColor) { $self.ForegroundColor } else { Get-ThemeColor "Border" -Default Gray }
             Write-BufferBox -X $self.X -Y $self.Y -Width $self.Width -Height $self.Height -BorderColor $borderColor -Title $self.Title
         }
-        
-        # FIX: Ensure layout is calculated before Z-Index renderer processes children
+        # FIX: Ensure layout is calculated before Z-Index renderer processes children.
         & $self.CalculateLayout -self $self
-        
-        # Child positions are now applied in CalculateLayout, and children are rendered by the Z-Index renderer.
-        # The loop below is no longer needed here as it was redundant.
-        # foreach ($childLayout in $layout.Children) {
-        #     $child = $childLayout.Component
-        #     # Apply calculated position
-        #     $child.X = $childLayout.X
-        #     $child.Y = $childLayout.Y
-        #     # Apply calculated size if child supports it
-        #     if ($childLayout.Width -ne $child.Width -and $child.PSObject.Properties['Width'].IsSettable) {
-        #         $child.Width = $childLayout.Width
-        #     }
-        #     if ($childLayout.Height -ne $child.Height -and $child.PSObject.Properties['Height'].IsSettable) {
-        #         $child.Height = $childLayout.Height
-        #     }
-        #     # NOTE: Child rendering is now handled by the Z-Index renderer
-        # }
     }
     
     return $panel
@@ -3986,67 +3983,57 @@ function global:New-TuiGridPanel {
     $panel = New-BasePanel -Props $Props
     $panel.Type = "GridPanel"
     $panel.Layout = 'Grid'
-    $panel.RowDefinitions = $Props.RowDefinitions ?? @("1*")
-    $panel.ColumnDefinitions = $Props.ColumnDefinitions ?? @("1*")
-    $panel.ShowGridLines = $Props.ShowGridLines ?? $false
-    $panel.GridLineColor = $Props.GridLineColor ?? (Get-ThemeColor "BorderDim" -Default DarkGray)
+    $panel.RowDefinitions = if ($null -ne $Props.RowDefinitions) { $Props.RowDefinitions } else { @("1*") }
+    $panel.ColumnDefinitions = if ($null -ne $Props.ColumnDefinitions) { $Props.ColumnDefinitions } else { @("1*") }
+    $panel.ShowGridLines = if ($null -ne $Props.ShowGridLines) { $Props.ShowGridLines } else { $false }
+    $panel.GridLineColor = if ($null -ne $Props.GridLineColor) { $Props.GridLineColor } else { Get-ThemeColor "BorderDim" -Default DarkGray }
     
     $panel._CalculateGridSizes = {
         param($self, $definitions, $totalSize)
         
-        # Parse definitions and calculate sizes
         $parsedDefs = @()
         $totalFixed = 0
-        $totalStars = 0
+        $totalStars = 0.0
         
         foreach ($def in $definitions) {
             if ($def -match '^(\d+)$') {
-                # Fixed size
-                $size = [int]$Matches[1]
-                $parsedDefs += @{ Type = 'Fixed'; Value = $size }
-                $totalFixed += $size
-            }
-            elseif ($def -match '^(\d*\.?\d*)\*$') {
-                # Star size
+                $parsedDefs += @{ Type = 'Fixed'; Value = [int]$Matches[1] }
+                $totalFixed += [int]$Matches[1]
+            } elseif ($def -match '^(\d*\.?\d*)\*$') {
                 $stars = if ($Matches[1]) { [double]$Matches[1] } else { 1.0 }
                 $parsedDefs += @{ Type = 'Star'; Value = $stars }
                 $totalStars += $stars
-            }
-            elseif ($def -eq 'Auto') {
-                # Auto size (not implemented yet, treat as 1*)
+            } elseif ($def -eq 'Auto') {
                 $parsedDefs += @{ Type = 'Star'; Value = 1.0 }
                 $totalStars += 1.0
-            }
-            else {
+            } else {
                 throw "Invalid grid definition: $def"
             }
         }
         
-        # Calculate actual sizes
         $remainingSize = [Math]::Max(0, $totalSize - $totalFixed)
         $sizes = @()
         
         foreach ($def in $parsedDefs) {
             if ($def.Type -eq 'Fixed') {
                 $sizes += $def.Value
-            }
-            else {
-                # Star sizing
-                if ($totalStars -gt 0) {
-                    $size = [Math]::Floor($remainingSize * ($def.Value / $totalStars))
-                    $sizes += $size
-                } else {
-                    $sizes += 0
-                }
+            } else {
+                $size = if ($totalStars -gt 0) { [Math]::Floor($remainingSize * ($def.Value / $totalStars)) } else { 0 }
+                $sizes += $size
             }
         }
         
-        # Adjust last cell to account for rounding
-        if ($sizes.Count -gt 0) {
-            $totalAllocated = ($sizes | Measure-Object -Sum).Sum
-            $difference = $totalSize - $totalAllocated
-            if ($difference -gt 0 -and $sizes[-1] -gt 0) {
-                $sizes[-1] += $difference
+        # FIX: Distribute rounding errors to the last star-sized cell to ensure total size is met.
+        $totalAllocated = ($sizes | Measure-Object -Sum).Sum
+        if ($totalAllocated -ne $totalSize -and $totalStars -gt 0) {
+            $lastStarIndex = -1
+            for($i = $parsedDefs.Count - 1; $i -ge 0; $i--) {
+                if ($parsedDefs[$i].Type -eq 'Star') {
+                    $lastStarIndex = $i; break
+                }
+            }
+            if ($lastStarIndex -ne -1) {
+                $sizes[$lastStarIndex] += ($totalSize - $totalAllocated)
             }
         }
         
@@ -4056,107 +4043,57 @@ function global:New-TuiGridPanel {
     $panel.CalculateLayout = {
         param($self)
         
-        if (-not $self._isDirty) {
-            return $self._cachedLayout
-        }
-        
         $bounds = & $self.GetContentBounds -self $self
         
-        # Calculate row and column sizes
         $rowHeights = & $self._CalculateGridSizes -self $self -definitions $self.RowDefinitions -totalSize $bounds.Height
         $colWidths = & $self._CalculateGridSizes -self $self -definitions $self.ColumnDefinitions -totalSize $bounds.Width
         
-        # Calculate offsets
-        $rowOffsets = @(0)
-        $colOffsets = @(0)
+        $rowOffsets = @(0); for ($i = 0; $i -lt $rowHeights.Count - 1; $i++) { $rowOffsets += ($rowOffsets[-1] + $rowHeights[$i]) }
+        $colOffsets = @(0); for ($i = 0; $i -lt $colWidths.Count - 1; $i++) { $colOffsets += ($colOffsets[-1] + $colWidths[$i]) }
         
-        for ($i = 0; $i -lt $rowHeights.Count - 1; $i++) {
-            $rowOffsets += ($rowOffsets[-1] + $rowHeights[$i])
-        }
-        
-        for ($i = 0; $i -lt $colWidths.Count - 1; $i++) {
-            $colOffsets += ($colOffsets[-1] + $colWidths[$i])
-        }
-        
-        # Layout children
-        $layout = @{
-            Children = @()
-            Rows = $rowHeights
-            Columns = $colWidths
-            RowOffsets = $rowOffsets
-            ColumnOffsets = $colOffsets
-        }
+        $layout = @{ Children = @(); Rows = $rowHeights; Columns = $colWidths; RowOffsets = $rowOffsets; ColumnOffsets = $colOffsets }
         
         foreach ($child in $self.Children) {
             if (-not $child.Visible) { continue }
             
-            # Get grid position
-            $row = [Math]::Max(0, [Math]::Min($rowHeights.Count - 1, [int]($child.LayoutProps."Grid.Row" ?? 0)))
-            $col = [Math]::Max(0, [Math]::Min($colWidths.Count - 1, [int]($child.LayoutProps."Grid.Column" ?? 0)))
-            $rowSpan = [Math]::Max(1, [Math]::Min($rowHeights.Count - $row, [int]($child.LayoutProps."Grid.RowSpan" ?? 1)))
-            $colSpan = [Math]::Max(1, [Math]::Min($colWidths.Count - $col, [int]($child.LayoutProps."Grid.ColumnSpan" ?? 1)))
+            $gridRow = if ($null -ne $child.LayoutProps."Grid.Row") { [int]$child.LayoutProps."Grid.Row" } else { 0 }
+            $gridCol = if ($null -ne $child.LayoutProps."Grid.Column") { [int]$child.LayoutProps."Grid.Column" } else { 0 }
+            $gridRowSpan = if ($null -ne $child.LayoutProps."Grid.RowSpan") { [int]$child.LayoutProps."Grid.RowSpan" } else { 1 }
+            $gridColSpan = if ($null -ne $child.LayoutProps."Grid.ColumnSpan") { [int]$child.LayoutProps."Grid.ColumnSpan" } else { 1 }
             
-            # Calculate cell bounds
-            $cellX = $bounds.X + $colOffsets[$col]
-            $cellY = $bounds.Y + $rowOffsets[$row]
-            $cellWidth = 0
-            $cellHeight = 0
+            $row = [Math]::Max(0, [Math]::Min($rowHeights.Count - 1, $gridRow))
+            $col = [Math]::Max(0, [Math]::Min($colWidths.Count - 1, $gridCol))
+            $rowSpan = [Math]::Max(1, [Math]::Min($rowHeights.Count - $row, $gridRowSpan))
+            $colSpan = [Math]::Max(1, [Math]::Min($colWidths.Count - $col, $gridColSpan))
             
-            for ($i = 0; $i -lt $colSpan; $i++) {
-                if (($col + $i) -lt $colWidths.Count) {
-                    $cellWidth += $colWidths[$col + $i]
-                }
-            }
+            $cellX = $bounds.X + $colOffsets[$col]; $cellY = $bounds.Y + $rowOffsets[$row]
+            $cellWidth = 0; for ($i = 0; $i -lt $colSpan; $i++) { if (($col + $i) -lt $colWidths.Count) { $cellWidth += $colWidths[$col + $i] } }
+            $cellHeight = 0; for ($i = 0; $i -lt $rowSpan; $i++) { if (($row + $i) -lt $rowHeights.Count) { $cellHeight += $rowHeights[$row + $i] } }
             
-            for ($i = 0; $i -lt $rowSpan; $i++) {
-                if (($row + $i) -lt $rowHeights.Count) {
-                    $cellHeight += $rowHeights[$row + $i]
-                }
-            }
+            $childX = $cellX; $childY = $cellY
+            $childWidth = $child.Width; $childHeight = $child.Height
             
-            # Apply alignment within cell
-            $childX = $cellX
-            $childY = $cellY
-            $childWidth = [Math]::Min($child.Width, $cellWidth)
-            $childHeight = [Math]::Min($child.Height, $cellHeight)
-            
-            # Horizontal alignment
-            $hAlign = $child.LayoutProps."Grid.HorizontalAlignment" ?? "Stretch"
+            $hAlign = if ($null -ne $child.LayoutProps."Grid.HorizontalAlignment") { $child.LayoutProps."Grid.HorizontalAlignment" } else { "Stretch" }
             switch ($hAlign) {
                 "Center" { $childX = $cellX + [Math]::Floor(($cellWidth - $childWidth) / 2) }
                 "Right" { $childX = $cellX + $cellWidth - $childWidth }
                 "Stretch" { $childWidth = $cellWidth }
             }
             
-            # Vertical alignment
-            $vAlign = $child.LayoutProps."Grid.VerticalAlignment" ?? "Stretch"
+            $vAlign = if ($null -ne $child.LayoutProps."Grid.VerticalAlignment") { $child.LayoutProps."Grid.VerticalAlignment" } else { "Stretch" }
             switch ($vAlign) {
                 "Middle" { $childY = $cellY + [Math]::Floor(($cellHeight - $childHeight) / 2) }
                 "Bottom" { $childY = $cellY + $cellHeight - $childHeight }
                 "Stretch" { $childHeight = $cellHeight }
             }
             
-            # CRITICAL FIX: Apply calculated positions to child immediately
+            # FIX: CRITICAL - Apply calculated positions and sizes back to the child component
             $child.X = $childX
             $child.Y = $childY
-            if ($child.PSObject.Properties['Width'] -and $child.Width -ne $childWidth) {
-                $child.Width = $childWidth
-            }
-            if ($child.PSObject.Properties['Height'] -and $child.Height -ne $childHeight) {
-                $child.Height = $childHeight
-            }
+            if ($child.PSObject.Properties['Width'] -and $child.Width -ne $childWidth) { $child.Width = $childWidth }
+            if ($child.PSObject.Properties['Height'] -and $child.Height -ne $childHeight) { $child.Height = $childHeight }
             
-            $layout.Children += @{
-                Component = $child
-                X = $childX
-                Y = $childY
-                Width = $childWidth
-                Height = $childHeight
-                Row = $row
-                Column = $col
-                RowSpan = $rowSpan
-                ColumnSpan = $colSpan
-            }
+            $layout.Children += @{ Component = $child; X = $childX; Y = $childY; Width = $childWidth; Height = $childHeight }
         }
         
         $self._cachedLayout = $layout
@@ -4166,111 +4103,38 @@ function global:New-TuiGridPanel {
     
     $panel.Render = {
         param($self)
+        if (-not $self.Visible) { return }
         
-        # Debug: Log panel state for debugging
-        if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
-            Write-Log -Level Debug -Message "GridPanel Render called: Title='$($self.Title)', Visible=$($self.Visible), Position=($($self.X),$($self.Y)), Size=$($self.Width)x$($self.Height), Children=$($self.Children.Count)"
+        # Clear panel area first to prevent bleed-through
+        $bgColor = if ($self.BackgroundColor) { $self.BackgroundColor } else { Get-ThemeColor "Background" -Default Black }
+        for ($y = $self.Y; $y -lt ($self.Y + $self.Height); $y++) {
+            Write-BufferString -X $self.X -Y $y -Text (' ' * $self.Width) -BackgroundColor $bgColor
         }
         
-        if (-not $self.Visible) {
-            Write-Log -Level Debug -Message "GridPanel '$($self.Title)' not visible, skipping render"
-            return
-        }
-        
-        # Clear background if color specified
-        if ($self.BackgroundColor) {
-            for ($y = $self.Y; $y -lt ($self.Y + $self.Height); $y++) {
-                Write-BufferString -X $self.X -Y $y -Text (' ' * $self.Width) -BackgroundColor $self.BackgroundColor
-            }
-        }
-        
-        # Draw border if requested
         if ($self.ShowBorder) {
-            # DIAGNOSTIC: Force visible colors for debugging
-            $borderColor = if ($self.ForegroundColor) { 
-                $self.ForegroundColor 
-            } else { 
-                $themeColor = Get-ThemeColor "Border" -Default Gray
-                # If theme returns black on black background, force a visible color
-                if ($themeColor -eq [ConsoleColor]::Black -and $self.BackgroundColor -eq [ConsoleColor]::Black) {
-                    [ConsoleColor]::Gray
-                } else {
-                    $themeColor
-                }
-            }
-            
-            # Debug logging
-            if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
-                Write-Log -Level Debug -Message "GridPanel drawing border at ($($self.X),$($self.Y)) size $($self.Width)x$($self.Height) color $borderColor"
-            }
-            
+            $borderColor = if ($self.ForegroundColor) { $self.ForegroundColor } else { Get-ThemeColor "Border" -Default Gray }
             Write-BufferBox -X $self.X -Y $self.Y -Width $self.Width -Height $self.Height -BorderColor $borderColor -Title $self.Title
         }
         
-        # FIX: Calculate layout to ensure child positions are set
+        # FIX: Calculate layout to set child positions. TUI engine will render the children.
         $layout = & $self.CalculateLayout -self $self
-        Write-Log -Level Debug -Message "GridPanel '$($self.Title)' layout calculated: $($layout.Children.Count) children to render"
         
-        # Draw grid lines if requested
         if ($self.ShowGridLines) {
             $bounds = & $self.GetContentBounds -self $self
-            
-            # Vertical lines
             foreach ($offset in $layout.ColumnOffsets[1..($layout.ColumnOffsets.Count - 1)]) {
-                $x = $bounds.X + $offset - 1
-                if ($x -ge $bounds.X -and $x -lt ($bounds.X + $bounds.Width)) {
-                    for ($y = $bounds.Y; $y -lt ($bounds.Y + $bounds.Height); $y++) {
-                        Write-BufferString -X $x -Y $y -Text "│" -ForegroundColor $self.GridLineColor
-                    }
-                }
+                $x = $bounds.X + $offset; for ($y = $bounds.Y; $y -lt ($bounds.Y + $bounds.Height); $y++) { Write-BufferString -X $x -Y $y -Text "│" -ForegroundColor $self.GridLineColor }
             }
-            
-            # Horizontal lines
             foreach ($offset in $layout.RowOffsets[1..($layout.RowOffsets.Count - 1)]) {
-                $y = $bounds.Y + $offset - 1
-                if ($y -ge $bounds.Y -and $y -lt ($bounds.Y + $bounds.Height)) {
-                    Write-BufferString -X $bounds.X -Y $y -Text ("─" * $bounds.Width) -ForegroundColor $self.GridLineColor
-                }
+                $y = $bounds.Y + $offset; Write-BufferString -X $bounds.X -Y $y -Text ("─" * $bounds.Width) -ForegroundColor $self.GridLineColor
             }
         }
-        
-        # NOTE: Child positions already applied in CalculateLayout
-        # NOTE: Child rendering is now handled by the Z-Index renderer
     }
     
     return $panel
 }
 
-# Additional layout panel types for future extension
-function global:New-TuiDockPanel {
-    param([hashtable]$Props = @{})
-    
-    $panel = New-BasePanel -Props $Props
-    $panel.Type = "DockPanel"
-    $panel.Layout = 'Dock'
-    $panel.LastChildFill = $Props.LastChildFill ?? $true
-    
-    # DockPanel implementation would go here
-    # For now, fallback to StackPanel behavior
-    $stackProps = $Props.Clone()
-    $stackProps.Orientation = 'Vertical'
-    return New-TuiStackPanel -Props $stackProps
-}
-
-function global:New-TuiWrapPanel {
-    param([hashtable]$Props = @{})
-    
-    $panel = New-BasePanel -Props $Props
-    $panel.Type = "WrapPanel"
-    $panel.Layout = 'Wrap'
-    $panel.Orientation = $Props.Orientation ?? 'Horizontal'
-    $panel.ItemWidth = $Props.ItemWidth
-    $panel.ItemHeight = $Props.ItemHeight
-    
-    # WrapPanel implementation would go here
-    # For now, fallback to StackPanel behavior
-    return New-TuiStackPanel -Props $Props
-}
+function global:New-TuiDockPanel { param([hashtable]$Props = @{}) ; return New-TuiStackPanel -Props ($Props.Clone() | Add-Member -MemberType NoteProperty -Name Orientation -Value 'Vertical' -PassThru) }
+function global:New-TuiWrapPanel { param([hashtable]$Props = @{}) ; return New-TuiStackPanel -Props $Props }
 
 Export-ModuleMember -Function "New-BasePanel", "New-TuiStackPanel", "New-TuiGridPanel", "New-TuiDockPanel", "New-TuiWrapPanel"
 # TUI Framework Integration Module - COMPLIANT VERSION
@@ -9314,8 +9178,7 @@ function Get-DashboardScreen {
             Title = " Quick Actions "
             ShowBorder = $true
             Padding = 1
-            ForegroundColor = [ConsoleColor]::White
-            BorderColor = [ConsoleColor]::Gray
+            ForegroundColor = [ConsoleColor]::Gray
         }
         
         # Store services on self BEFORE creating components
@@ -9326,7 +9189,7 @@ function Get-DashboardScreen {
         
         $quickActions = New-TuiDataTable -Props @{
             Name = "quickActions"; IsFocusable = $true; ShowBorder = $false; ShowHeader = $false; ShowFooter = $false
-            Columns = @( @{ Name = "Action"; Width = 32 } )
+            Columns = @( @{ Name = "Action" } )  # Let it calculate width automatically
             Data = @(
                 @{ Action = "[1] New Time Entry" },
                 @{ Action = "[2] Start Timer" },
@@ -9414,7 +9277,8 @@ function Get-DashboardScreen {
             }
             
             Write-Log -Level Debug -Message "Creating quickActions subscription..."
-            $subId = & $services.Store.Subscribe -self $services.Store -path "quickActions" -handler { 
+            # Defer initial call since component might not be ready yet
+            $subId = & $services.Store.Subscribe -self $services.Store -path "quickActions" -DeferInitialCall $true -handler { 
                 param($data) 
                 try {
                     # Handle both parameter styles
@@ -9431,7 +9295,7 @@ function Get-DashboardScreen {
                             Write-Log -Level Debug -Message "quickActions NewValue is null or empty"
                         }
                     } else {
-                        Write-Log -Level Error -Message "quickActions component not accessible"
+                        Write-Log -Level Warning -Message "quickActions component not ready yet"
                     }
                 } catch {
                     Write-Log -Level Error -Message "quickActions handler error: $_"
@@ -9474,9 +9338,16 @@ function Get-DashboardScreen {
             $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "stats.todayHours" -handler { 
                 param($data) 
                 try {
-                    $newValue = if ($data.NewValue -ne $null) { $data.NewValue } else { $data }
-                    if ($screen -and $screen._todayLabel -and $newValue -ne $null) {
-                        $screen._todayLabel.Text = "Today: ${newValue}h" 
+                    # Extract the actual value from the data parameter
+                    $value = $null
+                    if ($data -is [hashtable] -and $data.ContainsKey('NewValue')) {
+                        $value = $data.NewValue
+                    } elseif ($data -ne $null -and -not ($data -is [hashtable])) {
+                        $value = $data
+                    }
+                    
+                    if ($screen -and $screen._todayLabel -and $value -ne $null) {
+                        $screen._todayLabel.Text = "Today: ${value}h" 
                         Request-TuiRefresh
                     }
                 } catch {
@@ -9487,9 +9358,16 @@ function Get-DashboardScreen {
             $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "stats.weekHours" -handler { 
                 param($data) 
                 try {
-                    $newValue = if ($data.NewValue -ne $null) { $data.NewValue } else { $data }
-                    if ($screen -and $screen._weekLabel -and $newValue -ne $null) {
-                        $screen._weekLabel.Text = "Week: ${newValue}h" 
+                    # Extract the actual value from the data parameter
+                    $value = $null
+                    if ($data -is [hashtable] -and $data.ContainsKey('NewValue')) {
+                        $value = $data.NewValue
+                    } elseif ($data -ne $null -and -not ($data -is [hashtable])) {
+                        $value = $data
+                    }
+                    
+                    if ($screen -and $screen._weekLabel -and $value -ne $null) {
+                        $screen._weekLabel.Text = "Week: ${value}h" 
                         Request-TuiRefresh
                     }
                 } catch {
@@ -9500,9 +9378,16 @@ function Get-DashboardScreen {
             $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "stats.activeTasks" -handler { 
                 param($data) 
                 try {
-                    $newValue = if ($data.NewValue -ne $null) { $data.NewValue } else { $data }
-                    if ($screen -and $screen._tasksLabel -and $newValue -ne $null) {
-                        $screen._tasksLabel.Text = "Tasks: $newValue" 
+                    # Extract the actual value from the data parameter
+                    $value = $null
+                    if ($data -is [hashtable] -and $data.ContainsKey('NewValue')) {
+                        $value = $data.NewValue
+                    } elseif ($data -ne $null -and -not ($data -is [hashtable])) {
+                        $value = $data
+                    }
+                    
+                    if ($screen -and $screen._tasksLabel -and $value -ne $null) {
+                        $screen._tasksLabel.Text = "Tasks: $value" 
                         Request-TuiRefresh
                     }
                 } catch {
@@ -9513,9 +9398,16 @@ function Get-DashboardScreen {
             $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "stats.runningTimers" -handler { 
                 param($data) 
                 try {
-                    $newValue = if ($data.NewValue -ne $null) { $data.NewValue } else { $data }
-                    if ($screen -and $screen._timersLabel -and $newValue -ne $null) {
-                        $screen._timersLabel.Text = "Timers: $newValue" 
+                    # Extract the actual value from the data parameter
+                    $value = $null
+                    if ($data -is [hashtable] -and $data.ContainsKey('NewValue')) {
+                        $value = $data.NewValue
+                    } elseif ($data -ne $null -and -not ($data -is [hashtable])) {
+                        $value = $data
+                    }
+                    
+                    if ($screen -and $screen._timersLabel -and $value -ne $null) {
+                        $screen._timersLabel.Text = "Timers: $value" 
                         Request-TuiRefresh
                     }
                 } catch {
@@ -9784,7 +9676,7 @@ function Initialize-AppStore {
         }
         
         Subscribe = { 
-            param($self, [string]$path, [scriptblock]$handler) 
+            param($self, [string]$path, [scriptblock]$handler, [bool]$DeferInitialCall = $false) 
             if (-not $handler) { throw "Handler scriptblock is required for Subscribe" }
             
             # Manually implement subscribe to avoid $this issues
@@ -9801,12 +9693,14 @@ function Initialize-AppStore {
                 Handler = $handler
             }
             
-            # Call handler with current value
-            $currentValue = & $self.GetState -self $self -path $path
-            try {
-                & $handler @{ NewValue = $currentValue; OldValue = $null; Path = $path }
-            } catch {
-                Write-Warning "State subscriber error: $_"
+            # Call handler with current value unless deferred
+            if (-not $DeferInitialCall) {
+                $currentValue = & $self.GetState -self $self -path $path
+                try {
+                    & $handler @{ NewValue = $currentValue; OldValue = $null; Path = $path }
+                } catch {
+                    Write-Warning "State subscriber error: $_"
+                }
             }
             
             return $subId
@@ -9880,27 +9774,61 @@ function Initialize-AppStore {
                         $store = $storeInstance
                         if (-not $updates -or $updates.Count -eq 0) { return }
                         
-                        Write-Host "[DEBUG] UpdateState called with $($updates.Count) updates" -ForegroundColor Yellow
-                        
-                        # Direct state update without using internal methods
+                        # Direct state update - simpler approach
                         $state = $store._state
                         if (-not $state._data) { $state._data = @{} }
                         
+                        # Helper function to set nested paths
+                        $setNestedValue = {
+                            param($obj, $path, $value)
+                            $parts = $path -split '\.'
+                            $current = $obj
+                            for ($i = 0; $i -lt $parts.Count - 1; $i++) {
+                                if (-not $current.ContainsKey($parts[$i])) {
+                                    $current[$parts[$i]] = @{}
+                                }
+                                $current = $current[$parts[$i]]
+                            }
+                            $current[$parts[-1]] = $value
+                        }
+                        
+                        # Process updates
                         foreach ($key in $updates.Keys) {
-                            $oldValue = $state._data[$key]
                             $newValue = $updates[$key]
-                            $state._data[$key] = $newValue
                             
-                            Write-Host "[DEBUG] Updated '$key': $oldValue -> $newValue" -ForegroundColor Yellow
+                            if ($key.Contains('.')) {
+                                # Handle nested paths like "stats.todayHours"
+                                $oldValue = & $store.GetState -self $store -path $key
+                                & $setNestedValue -obj $state._data -path $key -value $newValue
+                            } else {
+                                # Handle simple keys
+                                $oldValue = $state._data[$key]
+                                $state._data[$key] = $newValue
+                            }
                             
-                            # Notify subscribers
+                            # Notify subscribers for exact path
                             if ($state._subscribers -and $state._subscribers.ContainsKey($key)) {
                                 foreach ($sub in $state._subscribers[$key]) {
                                     try {
-                                        Write-Host "[DEBUG] Notifying subscriber for '$key'" -ForegroundColor Yellow
                                         & $sub.Handler @{ NewValue = $newValue; OldValue = $oldValue; Path = $key }
                                     } catch {
                                         Write-Warning "Subscriber notification error for '$key': $_"
+                                    }
+                                }
+                            }
+                            
+                            # Also notify parent path subscribers for nested updates
+                            if ($key.Contains('.')) {
+                                $parts = $key -split '\.'
+                                $parentPath = $parts[0]
+                                if ($state._subscribers -and $state._subscribers.ContainsKey($parentPath)) {
+                                    $parentValue = $state._data[$parentPath]
+                                    foreach ($sub in $state._subscribers[$parentPath]) {
+                                        try {
+                                            & $sub.Handler @{ NewValue = $parentValue; OldValue = $parentValue; Path = $parentPath }
+                                        } catch {
+                                            Write-Warning "Parent subscriber notification error for '$parentPath': $_"
+                                        }
                                     }
                                 }
                             }
@@ -9925,7 +9853,6 @@ function Initialize-AppStore {
             } 
             catch {
                 if ($self._enableDebugLogging) { Write-Log -Level Error -Message "Error in action handler '$actionName'" -Data $_ }
-                Write-Host "[DEBUG] Action dispatch error: $_" -ForegroundColor Red
                 return @{ Success = $false; Error = $_.ToString() }
             }
         }

@@ -6,22 +6,22 @@ function New-BasePanel {
     
     $panel = @{
         Type = "Panel"
-        Name = $Props.Name ?? "Panel_$([Guid]::NewGuid().ToString('N').Substring(0,8))"
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 40
-        Height = $Props.Height ?? 20
-        Visible = $Props.Visible ?? $true
-        IsFocusable = $Props.IsFocusable ?? $false
-        ZIndex = $Props.ZIndex ?? 0
+        Name = if ($null -ne $Props.Name) { $Props.Name } else { "Panel_$([Guid]::NewGuid().ToString('N').Substring(0,8))" }
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 40 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 20 }
+        Visible = if ($null -ne $Props.Visible) { $Props.Visible } else { $true }
+        IsFocusable = if ($null -ne $Props.IsFocusable) { $Props.IsFocusable } else { $false }
+        ZIndex = if ($null -ne $Props.ZIndex) { $Props.ZIndex } else { 0 }
         Children = @()
         Parent = $null
-        LayoutProps = $Props.LayoutProps ?? @{}
-        ShowBorder = $Props.ShowBorder ?? $false
-        BorderStyle = $Props.BorderStyle ?? "Single"  # Single, Double, Rounded
+        LayoutProps = if ($null -ne $Props.LayoutProps) { $Props.LayoutProps } else { @{} }
+        ShowBorder = if ($null -ne $Props.ShowBorder) { $Props.ShowBorder } else { $false }
+        BorderStyle = if ($null -ne $Props.BorderStyle) { $Props.BorderStyle } else { "Single" }  # Single, Double, Rounded
         Title = $Props.Title
-        Padding = $Props.Padding ?? 0
-        Margin = $Props.Margin ?? 0
+        Padding = if ($null -ne $Props.Padding) { $Props.Padding } else { 0 }
+        Margin = if ($null -ne $Props.Margin) { $Props.Margin } else { 0 }
         BackgroundColor = $Props.BackgroundColor
         ForegroundColor = $Props.ForegroundColor
         _isDirty = $true
@@ -143,17 +143,13 @@ function global:New-TuiStackPanel {
     $panel = New-BasePanel -Props $Props
     $panel.Type = "StackPanel"
     $panel.Layout = 'Stack'
-    $panel.Orientation = $Props.Orientation ?? 'Vertical'
-    $panel.Spacing = $Props.Spacing ?? 1
-    $panel.HorizontalAlignment = $Props.HorizontalAlignment ?? 'Stretch'  # Left, Center, Right, Stretch
-    $panel.VerticalAlignment = $Props.VerticalAlignment ?? 'Stretch'      # Top, Middle, Bottom, Stretch
+    $panel.Orientation = if ($null -ne $Props.Orientation) { $Props.Orientation } else { 'Vertical' }
+    $panel.Spacing = if ($null -ne $Props.Spacing) { $Props.Spacing } else { 1 }
+    $panel.HorizontalAlignment = if ($null -ne $Props.HorizontalAlignment) { $Props.HorizontalAlignment } else { 'Stretch' }  # Left, Center, Right, Stretch
+    $panel.VerticalAlignment = if ($null -ne $Props.VerticalAlignment) { $Props.VerticalAlignment } else { 'Stretch' }      # Top, Middle, Bottom, Stretch
     
     $panel.CalculateLayout = {
         param($self)
-        
-        if (-not $self._isDirty) {
-            return $self._cachedLayout
-        }
         
         $bounds = & $self.GetContentBounds -self $self
         $layout = @{
@@ -216,9 +212,17 @@ function global:New-TuiStackPanel {
             # Apply stretch behavior
             if ($self.Orientation -eq 'Vertical' -and $self.HorizontalAlignment -eq 'Stretch') {
                 $childLayout.Width = $bounds.Width
+                # Update child's actual width for proper rendering
+                if ($child.Width -ne $bounds.Width) {
+                    $child.Width = $bounds.Width
+                }
             }
             elseif ($self.Orientation -eq 'Horizontal' -and $self.VerticalAlignment -eq 'Stretch') {
                 $childLayout.Height = $bounds.Height
+                # Update child's actual height for proper rendering
+                if ($child.Height -ne $bounds.Height) {
+                    $child.Height = $bounds.Height
+                }
             }
             
             # Handle horizontal alignment for vertical stacks
@@ -237,7 +241,7 @@ function global:New-TuiStackPanel {
                 }
             }
             
-            # CRITICAL FIX: Apply calculated positions to child immediately
+            # FIX: CRITICAL - Apply calculated positions and sizes back to the child component
             $child.X = $childLayout.X
             $child.Y = $childLayout.Y
             if ($childLayout.Width -ne $child.Width -and $child.PSObject.Properties['Width'].IsSettable) {
@@ -264,68 +268,20 @@ function global:New-TuiStackPanel {
     
     $panel.Render = {
         param($self)
+        if (-not $self.Visible) { return }
         
-        # Debug: Log panel state for debugging
-        if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
-            Write-Log -Level Debug -Message "StackPanel Render called: Title='$($self.Title)', Visible=$($self.Visible), Position=($($self.X),$($self.Y)), Size=$($self.Width)x$($self.Height), Children=$($self.Children.Count)"
+        # Clear panel area first to prevent bleed-through
+        $bgColor = if ($self.BackgroundColor) { $self.BackgroundColor } else { Get-ThemeColor "Background" -Default Black }
+        for ($y = $self.Y; $y -lt ($self.Y + $self.Height); $y++) {
+            Write-BufferString -X $self.X -Y $y -Text (' ' * $self.Width) -BackgroundColor $bgColor
         }
         
-        if (-not $self.Visible) {
-            if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
-                Write-Log -Level Debug -Message "StackPanel '$($self.Title)' not visible, skipping render"
-            }
-            return
-        }
-        
-        # Clear background if color specified
-        if ($self.BackgroundColor) {
-            for ($y = $self.Y; $y -lt ($self.Y + $self.Height); $y++) {
-                Write-BufferString -X $self.X -Y $y -Text (' ' * $self.Width) -BackgroundColor $self.BackgroundColor
-            }
-        }
-        
-        # Draw border if requested
         if ($self.ShowBorder) {
-            # DIAGNOSTIC: Force visible colors for debugging
-            $borderColor = if ($self.ForegroundColor) { 
-                $self.ForegroundColor 
-            } else { 
-                $themeColor = Get-ThemeColor "Border" -Default Gray
-                # If theme returns black on black background, force a visible color
-                if ($themeColor -eq [ConsoleColor]::Black -and $self.BackgroundColor -eq [ConsoleColor]::Black) {
-                    [ConsoleColor]::Gray
-                } else {
-                    $themeColor
-                }
-            }
-            
-            # Debug logging
-            if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
-                Write-Log -Level Debug -Message "Drawing border at ($($self.X),$($self.Y)) size $($self.Width)x$($self.Height) color $borderColor"
-            }
-            
+            $borderColor = if ($self.ForegroundColor) { $self.ForegroundColor } else { Get-ThemeColor "Border" -Default Gray }
             Write-BufferBox -X $self.X -Y $self.Y -Width $self.Width -Height $self.Height -BorderColor $borderColor -Title $self.Title
         }
-        
-        # FIX: Ensure layout is calculated before Z-Index renderer processes children
+        # FIX: Ensure layout is calculated before Z-Index renderer processes children.
         & $self.CalculateLayout -self $self
-        
-        # Child positions are now applied in CalculateLayout, and children are rendered by the Z-Index renderer.
-        # The loop below is no longer needed here as it was redundant.
-        # foreach ($childLayout in $layout.Children) {
-        #     $child = $childLayout.Component
-        #     # Apply calculated position
-        #     $child.X = $childLayout.X
-        #     $child.Y = $childLayout.Y
-        #     # Apply calculated size if child supports it
-        #     if ($childLayout.Width -ne $child.Width -and $child.PSObject.Properties['Width'].IsSettable) {
-        #         $child.Width = $childLayout.Width
-        #     }
-        #     if ($childLayout.Height -ne $child.Height -and $child.PSObject.Properties['Height'].IsSettable) {
-        #         $child.Height = $childLayout.Height
-        #     }
-        #     # NOTE: Child rendering is now handled by the Z-Index renderer
-        # }
     }
     
     return $panel
@@ -337,67 +293,57 @@ function global:New-TuiGridPanel {
     $panel = New-BasePanel -Props $Props
     $panel.Type = "GridPanel"
     $panel.Layout = 'Grid'
-    $panel.RowDefinitions = $Props.RowDefinitions ?? @("1*")
-    $panel.ColumnDefinitions = $Props.ColumnDefinitions ?? @("1*")
-    $panel.ShowGridLines = $Props.ShowGridLines ?? $false
-    $panel.GridLineColor = $Props.GridLineColor ?? (Get-ThemeColor "BorderDim" -Default DarkGray)
+    $panel.RowDefinitions = if ($null -ne $Props.RowDefinitions) { $Props.RowDefinitions } else { @("1*") }
+    $panel.ColumnDefinitions = if ($null -ne $Props.ColumnDefinitions) { $Props.ColumnDefinitions } else { @("1*") }
+    $panel.ShowGridLines = if ($null -ne $Props.ShowGridLines) { $Props.ShowGridLines } else { $false }
+    $panel.GridLineColor = if ($null -ne $Props.GridLineColor) { $Props.GridLineColor } else { Get-ThemeColor "BorderDim" -Default DarkGray }
     
     $panel._CalculateGridSizes = {
         param($self, $definitions, $totalSize)
         
-        # Parse definitions and calculate sizes
         $parsedDefs = @()
         $totalFixed = 0
-        $totalStars = 0
+        $totalStars = 0.0
         
         foreach ($def in $definitions) {
             if ($def -match '^(\d+)$') {
-                # Fixed size
-                $size = [int]$Matches[1]
-                $parsedDefs += @{ Type = 'Fixed'; Value = $size }
-                $totalFixed += $size
-            }
-            elseif ($def -match '^(\d*\.?\d*)\*$') {
-                # Star size
+                $parsedDefs += @{ Type = 'Fixed'; Value = [int]$Matches[1] }
+                $totalFixed += [int]$Matches[1]
+            } elseif ($def -match '^(\d*\.?\d*)\*$') {
                 $stars = if ($Matches[1]) { [double]$Matches[1] } else { 1.0 }
                 $parsedDefs += @{ Type = 'Star'; Value = $stars }
                 $totalStars += $stars
-            }
-            elseif ($def -eq 'Auto') {
-                # Auto size (not implemented yet, treat as 1*)
+            } elseif ($def -eq 'Auto') {
                 $parsedDefs += @{ Type = 'Star'; Value = 1.0 }
                 $totalStars += 1.0
-            }
-            else {
+            } else {
                 throw "Invalid grid definition: $def"
             }
         }
         
-        # Calculate actual sizes
         $remainingSize = [Math]::Max(0, $totalSize - $totalFixed)
         $sizes = @()
         
         foreach ($def in $parsedDefs) {
             if ($def.Type -eq 'Fixed') {
                 $sizes += $def.Value
-            }
-            else {
-                # Star sizing
-                if ($totalStars -gt 0) {
-                    $size = [Math]::Floor($remainingSize * ($def.Value / $totalStars))
-                    $sizes += $size
-                } else {
-                    $sizes += 0
-                }
+            } else {
+                $size = if ($totalStars -gt 0) { [Math]::Floor($remainingSize * ($def.Value / $totalStars)) } else { 0 }
+                $sizes += $size
             }
         }
         
-        # Adjust last cell to account for rounding
-        if ($sizes.Count -gt 0) {
-            $totalAllocated = ($sizes | Measure-Object -Sum).Sum
-            $difference = $totalSize - $totalAllocated
-            if ($difference -gt 0 -and $sizes[-1] -gt 0) {
-                $sizes[-1] += $difference
+        # FIX: Distribute rounding errors to the last star-sized cell to ensure total size is met.
+        $totalAllocated = ($sizes | Measure-Object -Sum).Sum
+        if ($totalAllocated -ne $totalSize -and $totalStars -gt 0) {
+            $lastStarIndex = -1
+            for($i = $parsedDefs.Count - 1; $i -ge 0; $i--) {
+                if ($parsedDefs[$i].Type -eq 'Star') {
+                    $lastStarIndex = $i; break
+                }
+            }
+            if ($lastStarIndex -ne -1) {
+                $sizes[$lastStarIndex] += ($totalSize - $totalAllocated)
             }
         }
         
@@ -407,107 +353,57 @@ function global:New-TuiGridPanel {
     $panel.CalculateLayout = {
         param($self)
         
-        if (-not $self._isDirty) {
-            return $self._cachedLayout
-        }
-        
         $bounds = & $self.GetContentBounds -self $self
         
-        # Calculate row and column sizes
         $rowHeights = & $self._CalculateGridSizes -self $self -definitions $self.RowDefinitions -totalSize $bounds.Height
         $colWidths = & $self._CalculateGridSizes -self $self -definitions $self.ColumnDefinitions -totalSize $bounds.Width
         
-        # Calculate offsets
-        $rowOffsets = @(0)
-        $colOffsets = @(0)
+        $rowOffsets = @(0); for ($i = 0; $i -lt $rowHeights.Count - 1; $i++) { $rowOffsets += ($rowOffsets[-1] + $rowHeights[$i]) }
+        $colOffsets = @(0); for ($i = 0; $i -lt $colWidths.Count - 1; $i++) { $colOffsets += ($colOffsets[-1] + $colWidths[$i]) }
         
-        for ($i = 0; $i -lt $rowHeights.Count - 1; $i++) {
-            $rowOffsets += ($rowOffsets[-1] + $rowHeights[$i])
-        }
-        
-        for ($i = 0; $i -lt $colWidths.Count - 1; $i++) {
-            $colOffsets += ($colOffsets[-1] + $colWidths[$i])
-        }
-        
-        # Layout children
-        $layout = @{
-            Children = @()
-            Rows = $rowHeights
-            Columns = $colWidths
-            RowOffsets = $rowOffsets
-            ColumnOffsets = $colOffsets
-        }
+        $layout = @{ Children = @(); Rows = $rowHeights; Columns = $colWidths; RowOffsets = $rowOffsets; ColumnOffsets = $colOffsets }
         
         foreach ($child in $self.Children) {
             if (-not $child.Visible) { continue }
             
-            # Get grid position
-            $row = [Math]::Max(0, [Math]::Min($rowHeights.Count - 1, [int]($child.LayoutProps."Grid.Row" ?? 0)))
-            $col = [Math]::Max(0, [Math]::Min($colWidths.Count - 1, [int]($child.LayoutProps."Grid.Column" ?? 0)))
-            $rowSpan = [Math]::Max(1, [Math]::Min($rowHeights.Count - $row, [int]($child.LayoutProps."Grid.RowSpan" ?? 1)))
-            $colSpan = [Math]::Max(1, [Math]::Min($colWidths.Count - $col, [int]($child.LayoutProps."Grid.ColumnSpan" ?? 1)))
+            $gridRow = if ($null -ne $child.LayoutProps."Grid.Row") { [int]$child.LayoutProps."Grid.Row" } else { 0 }
+            $gridCol = if ($null -ne $child.LayoutProps."Grid.Column") { [int]$child.LayoutProps."Grid.Column" } else { 0 }
+            $gridRowSpan = if ($null -ne $child.LayoutProps."Grid.RowSpan") { [int]$child.LayoutProps."Grid.RowSpan" } else { 1 }
+            $gridColSpan = if ($null -ne $child.LayoutProps."Grid.ColumnSpan") { [int]$child.LayoutProps."Grid.ColumnSpan" } else { 1 }
             
-            # Calculate cell bounds
-            $cellX = $bounds.X + $colOffsets[$col]
-            $cellY = $bounds.Y + $rowOffsets[$row]
-            $cellWidth = 0
-            $cellHeight = 0
+            $row = [Math]::Max(0, [Math]::Min($rowHeights.Count - 1, $gridRow))
+            $col = [Math]::Max(0, [Math]::Min($colWidths.Count - 1, $gridCol))
+            $rowSpan = [Math]::Max(1, [Math]::Min($rowHeights.Count - $row, $gridRowSpan))
+            $colSpan = [Math]::Max(1, [Math]::Min($colWidths.Count - $col, $gridColSpan))
             
-            for ($i = 0; $i -lt $colSpan; $i++) {
-                if (($col + $i) -lt $colWidths.Count) {
-                    $cellWidth += $colWidths[$col + $i]
-                }
-            }
+            $cellX = $bounds.X + $colOffsets[$col]; $cellY = $bounds.Y + $rowOffsets[$row]
+            $cellWidth = 0; for ($i = 0; $i -lt $colSpan; $i++) { if (($col + $i) -lt $colWidths.Count) { $cellWidth += $colWidths[$col + $i] } }
+            $cellHeight = 0; for ($i = 0; $i -lt $rowSpan; $i++) { if (($row + $i) -lt $rowHeights.Count) { $cellHeight += $rowHeights[$row + $i] } }
             
-            for ($i = 0; $i -lt $rowSpan; $i++) {
-                if (($row + $i) -lt $rowHeights.Count) {
-                    $cellHeight += $rowHeights[$row + $i]
-                }
-            }
+            $childX = $cellX; $childY = $cellY
+            $childWidth = $child.Width; $childHeight = $child.Height
             
-            # Apply alignment within cell
-            $childX = $cellX
-            $childY = $cellY
-            $childWidth = [Math]::Min($child.Width, $cellWidth)
-            $childHeight = [Math]::Min($child.Height, $cellHeight)
-            
-            # Horizontal alignment
-            $hAlign = $child.LayoutProps."Grid.HorizontalAlignment" ?? "Stretch"
+            $hAlign = if ($null -ne $child.LayoutProps."Grid.HorizontalAlignment") { $child.LayoutProps."Grid.HorizontalAlignment" } else { "Stretch" }
             switch ($hAlign) {
                 "Center" { $childX = $cellX + [Math]::Floor(($cellWidth - $childWidth) / 2) }
                 "Right" { $childX = $cellX + $cellWidth - $childWidth }
                 "Stretch" { $childWidth = $cellWidth }
             }
             
-            # Vertical alignment
-            $vAlign = $child.LayoutProps."Grid.VerticalAlignment" ?? "Stretch"
+            $vAlign = if ($null -ne $child.LayoutProps."Grid.VerticalAlignment") { $child.LayoutProps."Grid.VerticalAlignment" } else { "Stretch" }
             switch ($vAlign) {
                 "Middle" { $childY = $cellY + [Math]::Floor(($cellHeight - $childHeight) / 2) }
                 "Bottom" { $childY = $cellY + $cellHeight - $childHeight }
                 "Stretch" { $childHeight = $cellHeight }
             }
             
-            # CRITICAL FIX: Apply calculated positions to child immediately
+            # FIX: CRITICAL - Apply calculated positions and sizes back to the child component
             $child.X = $childX
             $child.Y = $childY
-            if ($child.PSObject.Properties['Width'] -and $child.Width -ne $childWidth) {
-                $child.Width = $childWidth
-            }
-            if ($child.PSObject.Properties['Height'] -and $child.Height -ne $childHeight) {
-                $child.Height = $childHeight
-            }
+            if ($child.PSObject.Properties['Width'] -and $child.Width -ne $childWidth) { $child.Width = $childWidth }
+            if ($child.PSObject.Properties['Height'] -and $child.Height -ne $childHeight) { $child.Height = $childHeight }
             
-            $layout.Children += @{
-                Component = $child
-                X = $childX
-                Y = $childY
-                Width = $childWidth
-                Height = $childHeight
-                Row = $row
-                Column = $col
-                RowSpan = $rowSpan
-                ColumnSpan = $colSpan
-            }
+            $layout.Children += @{ Component = $child; X = $childX; Y = $childY; Width = $childWidth; Height = $childHeight }
         }
         
         $self._cachedLayout = $layout
@@ -517,110 +413,37 @@ function global:New-TuiGridPanel {
     
     $panel.Render = {
         param($self)
+        if (-not $self.Visible) { return }
         
-        # Debug: Log panel state for debugging
-        if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
-            Write-Log -Level Debug -Message "GridPanel Render called: Title='$($self.Title)', Visible=$($self.Visible), Position=($($self.X),$($self.Y)), Size=$($self.Width)x$($self.Height), Children=$($self.Children.Count)"
+        # Clear panel area first to prevent bleed-through
+        $bgColor = if ($self.BackgroundColor) { $self.BackgroundColor } else { Get-ThemeColor "Background" -Default Black }
+        for ($y = $self.Y; $y -lt ($self.Y + $self.Height); $y++) {
+            Write-BufferString -X $self.X -Y $y -Text (' ' * $self.Width) -BackgroundColor $bgColor
         }
         
-        if (-not $self.Visible) {
-            Write-Log -Level Debug -Message "GridPanel '$($self.Title)' not visible, skipping render"
-            return
-        }
-        
-        # Clear background if color specified
-        if ($self.BackgroundColor) {
-            for ($y = $self.Y; $y -lt ($self.Y + $self.Height); $y++) {
-                Write-BufferString -X $self.X -Y $y -Text (' ' * $self.Width) -BackgroundColor $self.BackgroundColor
-            }
-        }
-        
-        # Draw border if requested
         if ($self.ShowBorder) {
-            # DIAGNOSTIC: Force visible colors for debugging
-            $borderColor = if ($self.ForegroundColor) { 
-                $self.ForegroundColor 
-            } else { 
-                $themeColor = Get-ThemeColor "Border" -Default Gray
-                # If theme returns black on black background, force a visible color
-                if ($themeColor -eq [ConsoleColor]::Black -and $self.BackgroundColor -eq [ConsoleColor]::Black) {
-                    [ConsoleColor]::Gray
-                } else {
-                    $themeColor
-                }
-            }
-            
-            # Debug logging
-            if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
-                Write-Log -Level Debug -Message "GridPanel drawing border at ($($self.X),$($self.Y)) size $($self.Width)x$($self.Height) color $borderColor"
-            }
-            
+            $borderColor = if ($self.ForegroundColor) { $self.ForegroundColor } else { Get-ThemeColor "Border" -Default Gray }
             Write-BufferBox -X $self.X -Y $self.Y -Width $self.Width -Height $self.Height -BorderColor $borderColor -Title $self.Title
         }
         
-        # FIX: Calculate layout to ensure child positions are set
+        # FIX: Calculate layout to set child positions. TUI engine will render the children.
         $layout = & $self.CalculateLayout -self $self
-        Write-Log -Level Debug -Message "GridPanel '$($self.Title)' layout calculated: $($layout.Children.Count) children to render"
         
-        # Draw grid lines if requested
         if ($self.ShowGridLines) {
             $bounds = & $self.GetContentBounds -self $self
-            
-            # Vertical lines
             foreach ($offset in $layout.ColumnOffsets[1..($layout.ColumnOffsets.Count - 1)]) {
-                $x = $bounds.X + $offset - 1
-                if ($x -ge $bounds.X -and $x -lt ($bounds.X + $bounds.Width)) {
-                    for ($y = $bounds.Y; $y -lt ($bounds.Y + $bounds.Height); $y++) {
-                        Write-BufferString -X $x -Y $y -Text "│" -ForegroundColor $self.GridLineColor
-                    }
-                }
+                $x = $bounds.X + $offset; for ($y = $bounds.Y; $y -lt ($bounds.Y + $bounds.Height); $y++) { Write-BufferString -X $x -Y $y -Text "│" -ForegroundColor $self.GridLineColor }
             }
-            
-            # Horizontal lines
             foreach ($offset in $layout.RowOffsets[1..($layout.RowOffsets.Count - 1)]) {
-                $y = $bounds.Y + $offset - 1
-                if ($y -ge $bounds.Y -and $y -lt ($bounds.Y + $bounds.Height)) {
-                    Write-BufferString -X $bounds.X -Y $y -Text ("─" * $bounds.Width) -ForegroundColor $self.GridLineColor
-                }
+                $y = $bounds.Y + $offset; Write-BufferString -X $bounds.X -Y $y -Text ("─" * $bounds.Width) -ForegroundColor $self.GridLineColor
             }
         }
-        
-        # NOTE: Child positions already applied in CalculateLayout
-        # NOTE: Child rendering is now handled by the Z-Index renderer
     }
     
     return $panel
 }
 
-# Additional layout panel types for future extension
-function global:New-TuiDockPanel {
-    param([hashtable]$Props = @{})
-    
-    $panel = New-BasePanel -Props $Props
-    $panel.Type = "DockPanel"
-    $panel.Layout = 'Dock'
-    $panel.LastChildFill = $Props.LastChildFill ?? $true
-    
-    # DockPanel implementation would go here
-    # For now, fallback to StackPanel behavior
-    $stackProps = $Props.Clone()
-    $stackProps.Orientation = 'Vertical'
-    return New-TuiStackPanel -Props $stackProps
-}
-
-function global:New-TuiWrapPanel {
-    param([hashtable]$Props = @{})
-    
-    $panel = New-BasePanel -Props $Props
-    $panel.Type = "WrapPanel"
-    $panel.Layout = 'Wrap'
-    $panel.Orientation = $Props.Orientation ?? 'Horizontal'
-    $panel.ItemWidth = $Props.ItemWidth
-    $panel.ItemHeight = $Props.ItemHeight
-    
-    # WrapPanel implementation would go here
-    # For now, fallback to StackPanel behavior
-    return New-TuiStackPanel -Props $Props
-}
+function global:New-TuiDockPanel { param([hashtable]$Props = @{}) ; return New-TuiStackPanel -Props ($Props.Clone() | Add-Member -MemberType NoteProperty -Name Orientation -Value 'Vertical' -PassThru) }
+function global:New-TuiWrapPanel { param([hashtable]$Props = @{}) ; return New-TuiStackPanel -Props $Props }
 
 Export-ModuleMember -Function "New-BasePanel", "New-TuiStackPanel", "New-TuiGridPanel", "New-TuiDockPanel", "New-TuiWrapPanel"

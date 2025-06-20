@@ -8,15 +8,15 @@ function global:New-TuiDataTable {
     
     $component = @{
         Type = "DataTable"
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 80
-        Height = $Props.Height ?? 20
-        ZIndex = $Props.ZIndex ?? 0
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 80 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 20 }
+        ZIndex = if ($null -ne $Props.ZIndex) { $Props.ZIndex } else { 0 }
         Title = $Props.Title
-        ShowBorder = $Props.ShowBorder ?? $true  # <-- NEW: Controls whether component draws its own border
-        Data = $Props.Data ?? @()
-        Columns = $Props.Columns ?? @()
+        ShowBorder = if ($null -ne $Props.ShowBorder) { $Props.ShowBorder } else { $true }  # <-- NEW: Controls whether component draws its own border
+        Data = if ($null -ne $Props.Data) { $Props.Data } else { @() }
+        Columns = if ($null -ne $Props.Columns) { $Props.Columns } else { @() }
         SelectedRow = 0
         ScrollOffset = 0
         SortColumn = $null
@@ -25,19 +25,21 @@ function global:New-TuiDataTable {
         FilterColumn = $null
         PageSize = 0  # 0 = auto-calculate
         CurrentPage = 0
-        ShowHeader = $Props.ShowHeader ?? $true
-        ShowFooter = $Props.ShowFooter ?? $true
-        ShowRowNumbers = $Props.ShowRowNumbers ?? $false
-        AllowSort = $Props.AllowSort ?? $true
-        AllowFilter = $Props.AllowFilter ?? $true
-        AllowSelection = $Props.AllowSelection ?? $true
-        MultiSelect = $Props.MultiSelect ?? $false
+        ShowHeader = if ($null -ne $Props.ShowHeader) { $Props.ShowHeader } else { $true }
+        ShowFooter = if ($null -ne $Props.ShowFooter) { $Props.ShowFooter } else { $true }
+        ShowRowNumbers = if ($null -ne $Props.ShowRowNumbers) { $Props.ShowRowNumbers } else { $false }
+        AllowSort = if ($null -ne $Props.AllowSort) { $Props.AllowSort } else { $true }
+        AllowFilter = if ($null -ne $Props.AllowFilter) { $Props.AllowFilter } else { $true }
+        AllowSelection = if ($null -ne $Props.AllowSelection) { $Props.AllowSelection } else { $true }
+        MultiSelect = if ($null -ne $Props.MultiSelect) { $Props.MultiSelect } else { $false }
         SelectedRows = @()
-        IsFocusable = $Props.IsFocusable ?? $true
-        Visible = $Props.Visible ?? $true
+        IsFocusable = if ($null -ne $Props.IsFocusable) { $Props.IsFocusable } else { $true }
+        Visible = if ($null -ne $Props.Visible) { $Props.Visible } else { $true }
         Name = $Props.Name
         FilteredData = @()
         ProcessedData = @()
+        _lastRenderedWidth = 0
+        _lastRenderedHeight = 0
         
         # Event handlers from Props
         OnRowSelect = $Props.OnRowSelect
@@ -120,15 +122,17 @@ function global:New-TuiDataTable {
             # CRITICAL: Check if component is visible
             if ($self.Visible -eq $false) { return }
             
+            # Force ProcessData if dimensions changed
+            if ($self._lastRenderedWidth -ne $self.Width -or $self._lastRenderedHeight -ne $self.Height) {
+                & $self.ProcessData -self $self
+                $self._lastRenderedWidth = $self.Width
+                $self._lastRenderedHeight = $self.Height
+            }
+            
             # NOTE: ProcessData is now called by external code when data changes
             # This prevents unnecessary recalculation on every render frame
             
-            # Only draw border if ShowBorder is true
-            $contentX = $self.X
-            $contentY = $self.Y
-            $contentWidth = $self.Width
-            $contentHeight = $self.Height
-            
+            # Calculate content area based on border settings
             if ($self.ShowBorder) {
                 $borderColor = if ($self.IsFocusable -and $self.IsFocused) { 
                     Get-ThemeColor "Accent" -Default ([ConsoleColor]::Cyan)
@@ -136,14 +140,21 @@ function global:New-TuiDataTable {
                     Get-ThemeColor "Border" -Default ([ConsoleColor]::DarkGray)
                 }
                 
+                $titleText = if ($null -ne $self.Title) { $self.Title } else { 'Data Table' }
                 Write-BufferBox -X $self.X -Y $self.Y -Width $self.Width -Height $self.Height `
-                    -BorderColor $borderColor -Title " $($self.Title ?? 'Data Table') "
+                    -BorderColor $borderColor -Title " $titleText "
                 
                 # Adjust content area for border
                 $contentX = $self.X + 1
                 $contentY = $self.Y + 1
                 $contentWidth = $self.Width - 2
                 $contentHeight = $self.Height - 2
+            } else {
+                # No border, use full dimensions
+                $contentX = $self.X
+                $contentY = $self.Y
+                $contentWidth = $self.Width
+                $contentHeight = $self.Height
             }
             
             $currentY = $contentY
@@ -161,7 +172,8 @@ function global:New-TuiDataTable {
                     -ForegroundColor $filterFg -BackgroundColor $filterBg
                 
                 if ($self.FilterColumn) {
-                    $colName = ($self.Columns | Where-Object { $_.Name -eq $self.FilterColumn }).Header ?? $self.FilterColumn
+                    $filterCol = $self.Columns | Where-Object { $_.Name -eq $self.FilterColumn }
+                    $colName = if ($filterCol -and $filterCol.Header) { $filterCol.Header } else { $self.FilterColumn }
                     Write-BufferString -X ($contentX + $contentWidth - 19) -Y $currentY `
                         -Text "Column: $colName" -ForegroundColor (Get-ThemeColor "Info" -Default ([ConsoleColor]::Blue))
                 }
@@ -170,19 +182,16 @@ function global:New-TuiDataTable {
             }
             
             # Calculate column widths - FIXED VERSION
-            $totalDefinedWidth = ($self.Columns | Where-Object { $_.Width } | Measure-Object -Property Width -Sum).Sum ?? 0
+            $totalDefinedWidth = ($self.Columns | Where-Object { $_.Width } | Measure-Object -Property Width -Sum).Sum
+            if ($null -eq $totalDefinedWidth) { $totalDefinedWidth = 0 }
             $flexColumns = @($self.Columns | Where-Object { -not $_.Width })
             $columnSeparators = if ($self.Columns.Count -gt 1) { $self.Columns.Count - 1 } else { 0 }  # Only add separators if multiple columns
             $remainingWidth = $innerWidth - $totalDefinedWidth - ($self.ShowRowNumbers ? 5 : 0) - $columnSeparators
             
             # CRITICAL FIX: Ensure flex columns get adequate width, especially for single-column tables
-            if ($flexColumns.Count -eq 1 -and $self.Columns.Count -eq 1) {
-                # Single flex column should use full available width
-                $flexWidth = $remainingWidth
-            } elseif ($flexColumns.Count -gt 0) {
+            $flexWidth = 0
+            if ($flexColumns.Count -gt 0) {
                 $flexWidth = [Math]::Floor($remainingWidth / $flexColumns.Count)
-            } else {
-                $flexWidth = 0
             }
             
             # Assign calculated widths
@@ -190,13 +199,8 @@ function global:New-TuiDataTable {
                 if ($col.Width) {
                     $col.CalculatedWidth = $col.Width
                 } else {
-                    # For the Quick Actions single column, ensure it gets proper width
-                    if ($self.Title -eq "Quick Actions" -and $self.Columns.Count -eq 1) {
-                        # Table width 35, minus 2 for borders if ShowBorder=false (but content area already adjusted)
-                        $col.CalculatedWidth = $innerWidth - 1  # Leave 1 space for safety
-                    } else {
-                        $col.CalculatedWidth = [Math]::Max(5, $flexWidth)
-                    }
+                    # For flex columns, use the calculated flex width
+                    $col.CalculatedWidth = [Math]::Max(5, $flexWidth)
                 }
             }
             
@@ -213,7 +217,7 @@ function global:New-TuiDataTable {
                 
                 # Column headers
                 foreach ($col in $self.Columns) {
-                    $headerText = $col.Header ?? $col.Name
+                    $headerText = if ($col.Header) { $col.Header } else { $col.Name }
                     $width = $col.CalculatedWidth
                     
                     # Add sort indicator
@@ -274,9 +278,22 @@ function global:New-TuiDataTable {
                 $rowBg = if ($isSelected) { Get-ThemeColor "Accent" -Default ([ConsoleColor]::Cyan) } else { Get-ThemeColor "Background" -Default ([ConsoleColor]::Black) }
                 $rowFg = if ($isSelected) { Get-ThemeColor "Background" -Default ([ConsoleColor]::Black) } else { Get-ThemeColor "Primary" -Default ([ConsoleColor]::White) }
                 
-                # Clear row background if selected
+                # Clear row background if selected - FIXED to respect actual component width
                 if ($isSelected) {
-                    Write-BufferString -X $rowX -Y $currentY -Text (" " * $contentWidth) `
+                    # Calculate actual row width based on column widths and separators
+                    $actualRowWidth = 0
+                    if ($self.ShowRowNumbers) { $actualRowWidth += 5 }
+                    foreach ($col in $self.Columns) {
+                        $actualRowWidth += $col.CalculatedWidth
+                    }
+                    # Add column separators
+                    if ($self.Columns.Count -gt 1) {
+                        $actualRowWidth += ($self.Columns.Count - 1)
+                    }
+                    # Ensure we don't exceed content width
+                    $actualRowWidth = [Math]::Min($actualRowWidth, $contentWidth)
+                    
+                    Write-BufferString -X $rowX -Y $currentY -Text (" " * $actualRowWidth) `
                         -BackgroundColor $rowBg
                 }
                 
@@ -334,8 +351,19 @@ function global:New-TuiDataTable {
                         $rowFg
                     }
                     
-                    Write-BufferString -X $rowX -Y $currentY -Text $alignedValue `
-                        -ForegroundColor $cellFg -BackgroundColor $rowBg
+                    # Ensure we don't write beyond component boundaries
+                    if ($rowX + $alignedValue.Length <= $contentX + $contentWidth) {
+                        Write-BufferString -X $rowX -Y $currentY -Text $alignedValue `
+                            -ForegroundColor $cellFg -BackgroundColor $rowBg
+                    } else {
+                        # Clip the text to fit within boundaries
+                        $availableWidth = ($contentX + $contentWidth) - $rowX
+                        if ($availableWidth -gt 0) {
+                            $clippedText = $alignedValue.Substring(0, [Math]::Min($alignedValue.Length, $availableWidth))
+                            Write-BufferString -X $rowX -Y $currentY -Text $clippedText `
+                                -ForegroundColor $cellFg -BackgroundColor $rowBg
+                        }
+                    }
                     
                     $rowX += $width + 1
                 }
@@ -628,7 +656,8 @@ function global:New-TuiDataTable {
                     # Simple HTML table export
                     $html = "<table border='1'><tr>"
                     foreach ($col in $self.Columns) {
-                        $html += "<th>$($col.Header ?? $col.Name)</th>"
+                        $headerText = if ($col.Header) { $col.Header } else { $col.Name }
+                        $html += "<th>$headerText</th>"
                     }
                     $html += "</tr>"
                     
@@ -663,19 +692,19 @@ function global:New-TuiTreeView {
     
     $component = @{
         Type = "TreeView"
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 40
-        Height = $Props.Height ?? 20
-        ZIndex = $Props.ZIndex ?? 0
-        RootNode = $Props.RootNode ?? @{ Name = "Root"; Children = @(); Expanded = $true }
+        X = if ($null -ne $Props.X) { $Props.X } else { 0 }
+        Y = if ($null -ne $Props.Y) { $Props.Y } else { 0 }
+        Width = if ($null -ne $Props.Width) { $Props.Width } else { 40 }
+        Height = if ($null -ne $Props.Height) { $Props.Height } else { 20 }
+        ZIndex = if ($null -ne $Props.ZIndex) { $Props.ZIndex } else { 0 }
+        RootNode = if ($null -ne $Props.RootNode) { $Props.RootNode } else { @{ Name = "Root"; Children = @(); Expanded = $true } }
         SelectedNode = $null
         SelectedPath = @()
         FlattenedNodes = @()
         ScrollOffset = 0
-        ShowRoot = $Props.ShowRoot ?? $true
+        ShowRoot = if ($null -ne $Props.ShowRoot) { $Props.ShowRoot } else { $true }
         IsFocusable = $true
-        Visible = $Props.Visible ?? $true
+        Visible = if ($null -ne $Props.Visible) { $Props.Visible } else { $true }
         Name = $Props.Name
         
         # Node structure:

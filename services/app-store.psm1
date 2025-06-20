@@ -36,7 +36,7 @@ function Initialize-AppStore {
         }
         
         Subscribe = { 
-            param($self, [string]$path, [scriptblock]$handler) 
+            param($self, [string]$path, [scriptblock]$handler, [bool]$DeferInitialCall = $false) 
             if (-not $handler) { throw "Handler scriptblock is required for Subscribe" }
             
             # Manually implement subscribe to avoid $this issues
@@ -53,12 +53,14 @@ function Initialize-AppStore {
                 Handler = $handler
             }
             
-            # Call handler with current value
-            $currentValue = & $self.GetState -self $self -path $path
-            try {
-                & $handler @{ NewValue = $currentValue; OldValue = $null; Path = $path }
-            } catch {
-                Write-Warning "State subscriber error: $_"
+            # Call handler with current value unless deferred
+            if (-not $DeferInitialCall) {
+                $currentValue = & $self.GetState -self $self -path $path
+                try {
+                    & $handler @{ NewValue = $currentValue; OldValue = $null; Path = $path }
+                } catch {
+                    Write-Warning "State subscriber error: $_"
+                }
             }
             
             return $subId
@@ -132,27 +134,61 @@ function Initialize-AppStore {
                         $store = $storeInstance
                         if (-not $updates -or $updates.Count -eq 0) { return }
                         
-                        Write-Host "[DEBUG] UpdateState called with $($updates.Count) updates" -ForegroundColor Yellow
-                        
-                        # Direct state update without using internal methods
+                        # Direct state update - simpler approach
                         $state = $store._state
                         if (-not $state._data) { $state._data = @{} }
                         
+                        # Helper function to set nested paths
+                        $setNestedValue = {
+                            param($obj, $path, $value)
+                            $parts = $path -split '\.'
+                            $current = $obj
+                            for ($i = 0; $i -lt $parts.Count - 1; $i++) {
+                                if (-not $current.ContainsKey($parts[$i])) {
+                                    $current[$parts[$i]] = @{}
+                                }
+                                $current = $current[$parts[$i]]
+                            }
+                            $current[$parts[-1]] = $value
+                        }
+                        
+                        # Process updates
                         foreach ($key in $updates.Keys) {
-                            $oldValue = $state._data[$key]
                             $newValue = $updates[$key]
-                            $state._data[$key] = $newValue
                             
-                            Write-Host "[DEBUG] Updated '$key': $oldValue -> $newValue" -ForegroundColor Yellow
+                            if ($key.Contains('.')) {
+                                # Handle nested paths like "stats.todayHours"
+                                $oldValue = & $store.GetState -self $store -path $key
+                                & $setNestedValue -obj $state._data -path $key -value $newValue
+                            } else {
+                                # Handle simple keys
+                                $oldValue = $state._data[$key]
+                                $state._data[$key] = $newValue
+                            }
                             
-                            # Notify subscribers
+                            # Notify subscribers for exact path
                             if ($state._subscribers -and $state._subscribers.ContainsKey($key)) {
                                 foreach ($sub in $state._subscribers[$key]) {
                                     try {
-                                        Write-Host "[DEBUG] Notifying subscriber for '$key'" -ForegroundColor Yellow
                                         & $sub.Handler @{ NewValue = $newValue; OldValue = $oldValue; Path = $key }
                                     } catch {
                                         Write-Warning "Subscriber notification error for '$key': $_"
+                                    }
+                                }
+                            }
+                            
+                            # Also notify parent path subscribers for nested updates
+                            if ($key.Contains('.')) {
+                                $parts = $key -split '\.'
+                                $parentPath = $parts[0]
+                                if ($state._subscribers -and $state._subscribers.ContainsKey($parentPath)) {
+                                    $parentValue = $state._data[$parentPath]
+                                    foreach ($sub in $state._subscribers[$parentPath]) {
+                                        try {
+                                            & $sub.Handler @{ NewValue = $parentValue; OldValue = $parentValue; Path = $parentPath }
+                                        } catch {
+                                            Write-Warning "Parent subscriber notification error for '$parentPath': $_"
+                                        }
                                     }
                                 }
                             }
@@ -177,7 +213,6 @@ function Initialize-AppStore {
             } 
             catch {
                 if ($self._enableDebugLogging) { Write-Log -Level Error -Message "Error in action handler '$actionName'" -Data $_ }
-                Write-Host "[DEBUG] Action dispatch error: $_" -ForegroundColor Red
                 return @{ Success = $false; Error = $_.ToString() }
             }
         }

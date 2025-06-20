@@ -54,8 +54,7 @@ function Get-DashboardScreen {
             Title = " Quick Actions "
             ShowBorder = $true
             Padding = 1
-            ForegroundColor = [ConsoleColor]::White
-            BorderColor = [ConsoleColor]::Gray
+            ForegroundColor = [ConsoleColor]::Gray
         }
         
         # Store services on self BEFORE creating components
@@ -66,7 +65,7 @@ function Get-DashboardScreen {
         
         $quickActions = New-TuiDataTable -Props @{
             Name = "quickActions"; IsFocusable = $true; ShowBorder = $false; ShowHeader = $false; ShowFooter = $false
-            Columns = @( @{ Name = "Action"; Width = 32 } )
+            Columns = @( @{ Name = "Action" } )  # Let it calculate width automatically
             Data = @(
                 @{ Action = "[1] New Time Entry" },
                 @{ Action = "[2] Start Timer" },
@@ -154,7 +153,8 @@ function Get-DashboardScreen {
             }
             
             Write-Log -Level Debug -Message "Creating quickActions subscription..."
-            $subId = & $services.Store.Subscribe -self $services.Store -path "quickActions" -handler { 
+            # Defer initial call since component might not be ready yet
+            $subId = & $services.Store.Subscribe -self $services.Store -path "quickActions" -DeferInitialCall $true -handler { 
                 param($data) 
                 try {
                     # Handle both parameter styles
@@ -171,7 +171,7 @@ function Get-DashboardScreen {
                             Write-Log -Level Debug -Message "quickActions NewValue is null or empty"
                         }
                     } else {
-                        Write-Log -Level Error -Message "quickActions component not accessible"
+                        Write-Log -Level Warning -Message "quickActions component not ready yet"
                     }
                 } catch {
                     Write-Log -Level Error -Message "quickActions handler error: $_"
@@ -214,9 +214,16 @@ function Get-DashboardScreen {
             $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "stats.todayHours" -handler { 
                 param($data) 
                 try {
-                    $newValue = if ($data.NewValue -ne $null) { $data.NewValue } else { $data }
-                    if ($screen -and $screen._todayLabel -and $newValue -ne $null) {
-                        $screen._todayLabel.Text = "Today: ${newValue}h" 
+                    # Extract the actual value from the data parameter
+                    $value = $null
+                    if ($data -is [hashtable] -and $data.ContainsKey('NewValue')) {
+                        $value = $data.NewValue
+                    } elseif ($data -ne $null -and -not ($data -is [hashtable])) {
+                        $value = $data
+                    }
+                    
+                    if ($screen -and $screen._todayLabel -and $value -ne $null) {
+                        $screen._todayLabel.Text = "Today: ${value}h" 
                         Request-TuiRefresh
                     }
                 } catch {
@@ -227,9 +234,16 @@ function Get-DashboardScreen {
             $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "stats.weekHours" -handler { 
                 param($data) 
                 try {
-                    $newValue = if ($data.NewValue -ne $null) { $data.NewValue } else { $data }
-                    if ($screen -and $screen._weekLabel -and $newValue -ne $null) {
-                        $screen._weekLabel.Text = "Week: ${newValue}h" 
+                    # Extract the actual value from the data parameter
+                    $value = $null
+                    if ($data -is [hashtable] -and $data.ContainsKey('NewValue')) {
+                        $value = $data.NewValue
+                    } elseif ($data -ne $null -and -not ($data -is [hashtable])) {
+                        $value = $data
+                    }
+                    
+                    if ($screen -and $screen._weekLabel -and $value -ne $null) {
+                        $screen._weekLabel.Text = "Week: ${value}h" 
                         Request-TuiRefresh
                     }
                 } catch {
@@ -240,9 +254,16 @@ function Get-DashboardScreen {
             $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "stats.activeTasks" -handler { 
                 param($data) 
                 try {
-                    $newValue = if ($data.NewValue -ne $null) { $data.NewValue } else { $data }
-                    if ($screen -and $screen._tasksLabel -and $newValue -ne $null) {
-                        $screen._tasksLabel.Text = "Tasks: $newValue" 
+                    # Extract the actual value from the data parameter
+                    $value = $null
+                    if ($data -is [hashtable] -and $data.ContainsKey('NewValue')) {
+                        $value = $data.NewValue
+                    } elseif ($data -ne $null -and -not ($data -is [hashtable])) {
+                        $value = $data
+                    }
+                    
+                    if ($screen -and $screen._tasksLabel -and $value -ne $null) {
+                        $screen._tasksLabel.Text = "Tasks: $value" 
                         Request-TuiRefresh
                     }
                 } catch {
@@ -253,9 +274,16 @@ function Get-DashboardScreen {
             $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "stats.runningTimers" -handler { 
                 param($data) 
                 try {
-                    $newValue = if ($data.NewValue -ne $null) { $data.NewValue } else { $data }
-                    if ($screen -and $screen._timersLabel -and $newValue -ne $null) {
-                        $screen._timersLabel.Text = "Timers: $newValue" 
+                    # Extract the actual value from the data parameter
+                    $value = $null
+                    if ($data -is [hashtable] -and $data.ContainsKey('NewValue')) {
+                        $value = $data.NewValue
+                    } elseif ($data -ne $null -and -not ($data -is [hashtable])) {
+                        $value = $data
+                    }
+                    
+                    if ($screen -and $screen._timersLabel -and $value -ne $null) {
+                        $screen._timersLabel.Text = "Timers: $value" 
                         Request-TuiRefresh
                     }
                 } catch {

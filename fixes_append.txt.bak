@@ -1,0 +1,10 @@
+
+**FIX: Store Actions Defensive Checks & Startup Logic - COMPLETED 2025-06-20**
+   Problem: Store actions could fail if data structures weren't proper arrays; no flexible startup screen selection
+   Root Cause: Tasks/timers could be non-array types; startup hardcoded to dashboard
+   Fix Applied:
+   - main-helios.ps1: Added array type checks in TASKS_REFRESH and TIMERS_REFRESH actions
+   - Added flexible startup with -start <path> parameter support
+   - Fixed simple test screen route to use /simple-test to match module name
+   - Added validation and fallback for invalid startup paths
+   Result: More robust data handling and easier testing of specific screens

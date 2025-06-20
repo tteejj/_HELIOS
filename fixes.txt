@@ -208,16 +208,15 @@ RESULT: Dashboard and task screens now render properly with full functionality
    - Now calls: & $storeInstance._updateState -self $storeInstance -updates $updates
    Result: Store actions can now properly update state using the store's existing pattern
 
-**FIX: AppStore UpdateState Direct Implementation - COMPLETED 2025-06-20**
-   Problem: UpdateState still failing due to complex internal state structure
-   Root Cause: Trying to use internal _updateState method that relies on state object structure
+**FIX: Store Actions Defensive Checks & Startup Logic - COMPLETED 2025-06-20**
+   Problem: Store actions could fail if data structures weren't proper arrays; no flexible startup screen selection
+   Root Cause: Tasks/timers could be non-array types; startup hardcoded to dashboard
    Fix Applied:
-   - app-store.psm1: Implemented direct state update in UpdateState closure
-   - Added debug logging to trace state updates and subscriber notifications
-   - Fixed Subscribe handler to pass parameters as hashtable: @{ NewValue = ...; OldValue = ...; Path = ... }
-   - dashboard-screen-helios.psm1: Updated all subscription handlers to accept single $data parameter
-   - Handlers now extract NewValue from $data.NewValue or fallback to $data itself
-   Result: State updates work directly without complex internal dependencies
+   - main-helios.ps1: Added array type checks in TASKS_REFRESH and TIMERS_REFRESH actions
+   - Added flexible startup with -start <path> parameter support
+   - Fixed simple test screen route to use /simple-test to match module name
+   - Added validation and fallback for invalid startup paths
+   Result: More robust data handling and easier testing of specific screens
 
 **DIAGNOSTIC: Simple Test Screen - COMPLETED 2025-06-20**
    Purpose: Created minimal test screen to verify TUI engine functionality
@@ -312,3 +311,53 @@ RESULT: Dashboard and task screens now render properly with full functionality
    - app-store.psm1: Changed UpdateState in actionContext to use: & $storeInstance._updateState -self $storeInstance -updates $updates
    - This properly invokes the store's internal _updateState method instead of trying to manipulate state directly
    Result: Store actions now properly update state and notify subscribers
+
+**FIX: Dashboard Panel Layout & Highlight Rendering - COMPLETED 2025-06-20**
+   Problem: Panel content rendering outside boundaries, highlights extending beyond panel width, z-order issues
+   Root Cause: Multiple issues - DataTable not respecting actual width, panels not updating child dimensions, no clipping
+   Fix Applied:
+   - advanced-data-components.psm1: Fixed highlight row to calculate actual width based on columns instead of contentWidth
+   - advanced-data-components.psm1: Added dimension change tracking to force recalculation when panel resizes component
+   - advanced-data-components.psm1: Added boundary clipping to prevent text overflow
+   - layout/panels.psm1: Fixed StackPanel to update child dimensions when using Stretch alignment
+   - layout/panels.psm1: Added background clearing to prevent bleed-through between panels
+   - dashboard-screen-helios.psm1: Removed fixed width from quickActions column to allow auto-sizing
+   Result: Panel content now properly contained, highlights respect boundaries, proper layout calculation
+
+**FIX: Dashboard Stats Display & quickActions Error - COMPLETED 2025-06-20**
+   Problem: Stats showing "System.Collections.Hashtable" and "quickActions component not accessible" errors
+   Root Cause: Two issues - subscription handlers receiving wrong data format and timing issue with component references
+   Fix Applied:
+   - app-store.psm1: Added DeferInitialCall parameter to Subscribe method to prevent immediate handler execution
+   - app-store.psm1: Enhanced UpdateState to notify parent path subscribers for nested updates
+   - dashboard-screen-helios.psm1: Used DeferInitialCall for quickActions subscription
+   - dashboard-screen-helios.psm1: Fixed all stats subscription handlers to properly extract value from data parameter
+   Result: Stats now display correct values, quickActions error resolved
+
+**FIX: PowerShell 5.1 Compatibility - Null-Coalescing Operator - COMPLETED 2025-06-20**
+   Problem: Multiple modules using ?? operator which only works in PowerShell 7+
+   Root Cause: Code was written for PowerShell 7+ but needs to work in PowerShell 5.1
+   Fix Applied:
+   - advanced-data-components.psm1: Replaced all ?? operators with if/else statements
+     - Fixed in New-TuiDataTable component property initialization
+     - Fixed in New-TuiTreeView component property initialization  
+     - Fixed in Render methods for title text, header text, and filter column display
+     - Fixed in ExportData method for HTML header generation
+   - layout/panels.psm1: Replaced all ?? operators with if/else statements
+     - Fixed in New-BasePanel property initialization
+     - Fixed in New-TuiStackPanel orientation and alignment properties
+     - Fixed in New-TuiGridPanel definitions and layout properties
+     - Fixed Grid.Row, Grid.Column, and alignment handling in CalculateLayout
+   Result: All modules now compatible with PowerShell 5.1
+
+**SUMMARY OF DASHBOARD FIXES - 2025-06-20**
+   All dashboard panel rendering issues have been resolved:
+   1. Highlight bars now properly contained within panel boundaries
+   2. Stats display actual values instead of "System.Collections.Hashtable"
+   3. Quick Actions no longer shows "component not accessible" errors
+   4. Panel content no longer renders outside boundaries
+   5. All code now compatible with PowerShell 5.1
+   
+   The dashboard should now display correctly with proper panel alignment, contained highlights,
+   and functional navigation. The fixes ensure components respect their parent panel dimensions
+   and the layout system properly calculates and applies positions.

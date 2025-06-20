@@ -178,7 +178,7 @@ function Initialize-PMCServices {
             param($Context)
             # Ensure data structure exists
             if (-not $global:Data) { $global:Data = @{} }
-            if (-not $global:Data.tasks) { $global:Data.tasks = @() }
+            if (-not ($global:Data.tasks -is [System.Collections.IEnumerable])) { $global:Data.tasks = @() } # FIX: Ensure tasks is an array
             
             # Load raw tasks data
             $rawTasks = $global:Data.tasks
@@ -225,7 +225,7 @@ function Initialize-PMCServices {
             param($Context)
             # Ensure data structure exists
             if (-not $global:Data) { $global:Data = @{} }
-            if (-not $global:Data.timers) { $global:Data.timers = @() }
+            if (-not ($global:Data.timers -is [System.Collections.IEnumerable])) { $global:Data.timers = @() } # FIX: Ensure timers is an array
             
             # Load active timers
             $activeTimers = @()
@@ -429,8 +429,8 @@ function Initialize-PMCServices {
             Write-Host "  Navigation Service initialized" -ForegroundColor Gray
         }
         
-        # Add simple test screen route
-        & $services.Navigation.AddRoute -self $services.Navigation -Path "/test" -RouteConfig @{
+        # FIX: Align the route path with the screen module name for clarity
+        & $services.Navigation.AddRoute -self $services.Navigation -Path "/simple-test" -RouteConfig @{
             Factory = { param($Services) Get-SimpleTestScreen -Services $Services }
             Title = "Simple Test"
             RequiresAuth = $false
@@ -507,10 +507,22 @@ function Start-PMCTerminal {
         # Clear the console before starting
         Clear-Host
         
+        # FIX: Flexible startup path logic to allow testing specific screens.
+        $startPath = "/dashboard" # Default
+        if ($args -contains "-start") {
+            $startIndex = [array]::IndexOf($args, "-start")
+            if (($startIndex + 1) -lt $args.Count) {
+                $startPath = $args[$startIndex + 1]
+            }
+        } elseif ($args -contains "-demo") {
+            $startPath = "/demo"
+        }
+        
         # Navigate to initial screen
-        if ($args -contains "-demo" -and (& $services.Navigation.IsValidRoute -self $services.Navigation -Path "/demo")) {
-            & $services.Navigation.GoTo -self $services.Navigation -Path "/demo" -Services $services
+        if ((& $services.Navigation.IsValidRoute -self $services.Navigation -Path $startPath)) {
+            & $services.Navigation.GoTo -self $services.Navigation -Path $startPath -Services $services
         } else {
+            Write-Log -Level Warning -Message "Startup path '$startPath' is not a valid route. Defaulting to /dashboard."
             & $services.Navigation.GoTo -self $services.Navigation -Path "/dashboard" -Services $services
         }
         
