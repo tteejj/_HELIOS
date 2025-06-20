@@ -134,9 +134,14 @@ function Initialize-NavigationService {
                 return $true
             }
             catch {
-                Write-Log -Level Error -Message "Failed to navigate to '$Path': $_"
-                Show-AlertDialog -Title "Navigation Error" -Message "Failed to load screen: $_"
-                return $false
+                throw [NavigationException]::new(
+                    "Failed to create or navigate to screen for route '$Path'",
+                    @{
+                        Route = $Path
+                        RouteConfig = $route
+                        OriginalException = $_
+                    }
+                )
             }
         }
         

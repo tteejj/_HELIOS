@@ -127,8 +127,14 @@ function global:Save-UnifiedData {
         Publish-Event -EventName "Data.Saved" -Data @{ Path = $script:DataPath }
         
     } catch {
-        Write-Error "Failed to save data: $_"
-        Publish-Event -EventName "Data.SaveError" -Data @{ Error = $_.ToString() }
+        # This is a critical but potentially recoverable error. We'll use a generic TuiException.
+        throw [TuiException]::new(
+            "Failed to save application data to disk.",
+            @{
+                FilePath = $script:DataPath
+                OriginalException = $_
+            }
+        )
     }
 }
 

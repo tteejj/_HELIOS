@@ -463,9 +463,12 @@ function global:Start-TuiLoop {
         $targetFrameTime = 1000.0 / $script:TuiState.RenderStats.TargetFPS
         
         while ($script:TuiState.Running) {
-            $frameTime.Restart()
-            
+            # ==========================================================
+            # === BEGIN CENTRAL EXCEPTION HANDLING BLOCK ===
+            # ==========================================================
             try {
+                $frameTime.Restart()
+
                 # Process input
                 $hadInput = Process-TuiInput
                 
@@ -486,10 +489,36 @@ function global:Start-TuiLoop {
                     $sleepTime = [Math]::Max(1, $targetFrameTime - $elapsed)
                     Start-Sleep -Milliseconds $sleepTime
                 }
-            } catch {
-                Write-Warning "Main loop error: $_"
-                $script:TuiState.IsDirty = $true  # Force redraw on error
             }
+            catch [TuiException] {
+                # --- This block handles our custom, "recoverable" errors ---
+                $exception = $_.Exception
+                
+                # 1. Log the rich, detailed error for developers
+                Write-Log -Level Error -Message "A TUI Exception occurred: $($exception.Message)" -Data $exception.Data
+                
+                # 2. Show a simple, clean dialog to the user
+                Show-AlertDialog -Title "Application Error" -Message "An operation failed: $($exception.Message)"
+                
+                # 3. Force a full re-render to clean up any UI artifacts from the failed operation
+                $script:TuiState.IsDirty = $true
+            }
+            catch {
+                # --- This block handles unexpected, potentially fatal errors ---
+                $exception = $_.Exception
+                
+                # 1. Log the catastrophic failure
+                Write-Log -Level Error -Message "A FATAL, unhandled exception occurred: $($exception.Message)" -Data $_
+                
+                # 2. Inform the user and prepare for shutdown
+                Show-AlertDialog -Title "Fatal Error" -Message "A critical error occurred. The application will now close."
+                
+                # 3. Stop the main loop to exit gracefully
+                $script:TuiState.Running = $false
+            }
+            # ==========================================================
+            # === END CENTRAL EXCEPTION HANDLING BLOCK ===
+            # ==========================================================
         }
     }
     finally {
@@ -587,8 +616,18 @@ function Render-Frame {
         # 4. DRAW the sorted components
         foreach ($componentToRender in $sortedQueue) {
             if ($componentToRender.Render) {
-                try { & $componentToRender.Render -self $componentToRender }
-                catch { Write-Log -Level Error -Message "Component render error in '$($componentToRender.Name)'" -Data $_ }
+                try {
+                    & $componentToRender.Render -self $componentToRender
+                }
+                catch {
+                    throw [ComponentRenderException]::new(
+                        "Failed to render component '$($componentToRender.Name ?? $componentToRender.Type)'",
+                        @{
+                            FailingComponent = $componentToRender
+                            OriginalException = $_ # Preserve the original error object
+                        }
+                    )
+                }
             }
         }
         
@@ -670,7 +709,7 @@ function Cleanup-EventHandlers {
     }
     $script:TuiState.EventHandlers.Clear()
     
-    # Clean up any Ctrl+C event handler if it exists
+    # Clean up any orphaned Ctrl+C event handler if it exists
     try {
         Get-EventSubscriber -SourceIdentifier "TuiCtrlC" -ErrorAction SilentlyContinue | Unregister-Event
     } catch { }
@@ -701,7 +740,8 @@ function global:Push-Screen {
             try {
                 & $script:TuiState.FocusedComponent.OnBlur -self $script:TuiState.FocusedComponent
             } catch {
-                Write-Warning "Component blur error: $_"
+                # This is less critical, so a log is acceptable, but we can be more specific.
+                Write-Log -Level Warning -Message "Error in OnBlur for component '$($script:TuiState.FocusedComponent.Name)'" -Data $_
             }
         }
         
@@ -728,7 +768,13 @@ function global:Push-Screen {
                     & $Screen.Init -self $Screen
                 }
             } catch {
-                Write-Warning "Screen init error: $_"
+                throw [InitializationException]::new(
+                    "Failed to initialize screen '$($Screen.Name)'",
+                    @{
+                        FailingScreen = $Screen
+                        OriginalException = $_
+                    }
+                )
             }
         }
         

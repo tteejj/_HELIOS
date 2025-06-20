@@ -12,6 +12,7 @@ $script:BasePath = Split-Path -Parent $MyInvocation.MyCommand.Path
 $script:ModulesToLoad = @(
     # Core infrastructure (no dependencies)
     @{ Name = "logger"; Path = "modules\logger.psm1"; Required = $true },
+    @{ Name = "exceptions"; Path = "modules\exceptions.psm1"; Required = $true }, # <-- MODULE ADDED HERE
     @{ Name = "event-system"; Path = "modules\event-system.psm1"; Required = $true },
     
     # Data and theme (depend on event system)

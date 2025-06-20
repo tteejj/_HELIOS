@@ -1,0 +1,386 @@
+Of course. Here is a detailed, step-by-step guide for an LLM to perform the refactoring. The instructions are explicit and designed to be executed sequentially.
+
+### **Mission Brief for LLM**
+
+Your primary task is to refactor the PMC Terminal application to use a new custom exception framework. This will replace the current pattern of `Write-Warning` or `Write-Log` inside `catch` blocks with a more robust `throw [CustomException]` pattern. The goal is to centralize error handling, improve application resilience, and provide better diagnostic information.
+
+**Guiding Principle:** When refactoring a `catch` block, your goal is to `throw` a new, more specific exception that wraps the original error (`$_`). Always choose the most specific custom exception type that fits the context.
+
+---
+
+### **Step 1: Create the Custom Exception Module**
+
+Create a new file named `modules/exceptions.psm1` with the following content. This file defines the custom exception classes we will use throughout the application.
+
+```powershell
+# FILE: modules/exceptions.psm1
+# PURPOSE: Defines the custom exception framework for PMC Terminal.
+
+# 1. Base TUI Exception
+# All our custom exceptions will inherit from this, so we can catch them generically.
+class TuiException : System.Exception {
+    [hashtable]$Data
+
+    TuiException([string]$Message, [hashtable]$Data = @{}) : base($Message) {
+        $this.Data = $Data
+    }
+}
+
+# 2. Specific Exception Types
+# These give us context about *where* and *why* the error occurred.
+
+class ComponentRenderException : TuiException {
+    ComponentRenderException([string]$Message, [hashtable]$Data = @{}) : base($Message, $Data) {}
+}
+
+class StateMutationException : TuiException {
+    StateMutationException([string]$Message, [hashtable]$Data = @{}) : base($Message, $Data) {}
+}
+
+class NavigationException : TuiException {
+    NavigationException([string]$Message, [hashtable]$Data = @{}) : base($Message, $Data) {}
+}
+
+class InitializationException : TuiException {
+    InitializationException([string]$Message, [hashtable]$Data = @{}) : base($Message, $Data) {}
+}
+
+
+# Export the new classes so they are available globally after import.
+Export-ModuleMember -Class 'TuiException', 'ComponentRenderException', 'StateMutationException', 'NavigationException', 'InitializationException'
+```
+
+### **Step 2: Integrate the New Module into the Application**
+
+Modify the main script `All.txt` to load the new `exceptions.psm1` module.
+
+**File to Modify:** `All.txt`
+
+**Instruction:** Find the `$script:ModulesToLoad` array and add the new exception module right after the logger.
+
+**BEFORE:**
+```powershell
+$script:ModulesToLoad = @(
+    # Core infrastructure (no dependencies)
+    @{ Name = "logger"; Path = "modules\logger.psm1"; Required = $true },
+    @{ Name = "event-system"; Path = "modules\event-system.psm1"; Required = $true },
+```
+
+**AFTER:**
+```powershell
+$script:ModulesToLoad = @(
+    # Core infrastructure (no dependencies)
+    @{ Name = "logger"; Path = "modules\logger.psm1"; Required = $true },
+    @{ Name = "exceptions"; Path = "modules\exceptions.psm1"; Required = $true }, # <-- MODULE ADDED HERE
+    @{ Name = "event-system"; Path = "modules\event-system.psm1"; Required = $true },
+```
+
+### **Step 3: Implement the Central Error Handler in the Main Loop**
+
+Modify the `Start-TuiLoop` function in the TUI engine to catch the new exceptions. This is the most important step.
+
+**File to Modify:** `modules/tui-engine-v2.psm1`
+
+**Instruction:** Replace the entire `Start-TuiLoop` function with the following refactored version. The new version wraps the `while` loop's contents in a master `try/catch` block.
+
+```powershell
+function global:Start-TuiLoop {
+    param([hashtable]$InitialScreen = $null)
+
+    try {
+        # Only initialize if not already initialized
+        if (-not $script:TuiState.BufferWidth -or $script:TuiState.BufferWidth -eq 0) {
+            Initialize-TuiEngine
+        }
+        
+        if ($InitialScreen) {
+            Push-Screen -Screen $InitialScreen
+        }
+        
+        # If no screen is active and no initial screen provided, we can't start
+        if (-not $script:TuiState.CurrentScreen -and $script:TuiState.ScreenStack.Count -eq 0) {
+            throw "No screen available to display. Push a screen before calling Start-TuiLoop or provide an InitialScreen parameter."
+        }
+
+        $script:TuiState.Running = $true
+        $frameTime = New-Object System.Diagnostics.Stopwatch
+        $targetFrameTime = 1000.0 / $script:TuiState.RenderStats.TargetFPS
+        
+        while ($script:TuiState.Running) {
+            # ==========================================================
+            # === BEGIN CENTRAL EXCEPTION HANDLING BLOCK ===
+            # ==========================================================
+            try {
+                $frameTime.Restart()
+
+                # Process input
+                $hadInput = Process-TuiInput
+                
+                # Update dialog system
+                if (Get-Command -Name "Update-DialogSystem" -ErrorAction SilentlyContinue) { 
+                    try { Update-DialogSystem } catch { Write-Warning "Dialog update error: $_" }
+                }
+
+                # Render if dirty or had input
+                if ($script:TuiState.IsDirty -or $hadInput) {
+                    Render-Frame
+                    $script:TuiState.IsDirty = $false
+                }
+                
+                # Adaptive frame timing
+                $elapsed = $frameTime.ElapsedMilliseconds
+                if ($elapsed -lt $targetFrameTime) {
+                    $sleepTime = [Math]::Max(1, $targetFrameTime - $elapsed)
+                    Start-Sleep -Milliseconds $sleepTime
+                }
+            }
+            catch [TuiException] {
+                # --- This block handles our custom, "recoverable" errors ---
+                $exception = $_.Exception
+                
+                # 1. Log the rich, detailed error for developers
+                Write-Log -Level Error -Message "A TUI Exception occurred: $($exception.Message)" -Data $exception.Data
+                
+                # 2. Show a simple, clean dialog to the user
+                Show-AlertDialog -Title "Application Error" -Message "An operation failed: $($exception.Message)"
+                
+                # 3. Force a full re-render to clean up any UI artifacts from the failed operation
+                $script:TuiState.IsDirty = $true
+            }
+            catch {
+                # --- This block handles unexpected, potentially fatal errors ---
+                $exception = $_.Exception
+                
+                # 1. Log the catastrophic failure
+                Write-Log -Level Error -Message "A FATAL, unhandled exception occurred: $($exception.Message)" -Data $_
+                
+                # 2. Inform the user and prepare for shutdown
+                Show-AlertDialog -Title "Fatal Error" -Message "A critical error occurred. The application will now close."
+                
+                # 3. Stop the main loop to exit gracefully
+                $script:TuiState.Running = $false
+            }
+            # ==========================================================
+            # === END CENTRAL EXCEPTION HANDLING BLOCK ===
+            # ==========================================================
+        }
+    }
+    finally {
+        Cleanup-TuiEngine
+    }
+}
+```
+
+---
+
+### **Phase 1: Refactor Critical Display and Input Modules**
+
+Now, we will refactor the most error-prone parts of the UI system.
+
+#### **Target 1: Component Rendering**
+
+**File to Modify:** `modules/tui-engine-v2.psm1`
+**Function to Modify:** `Render-Frame`
+
+**Instruction:** In the `foreach` loop that draws components, modify the `catch` block.
+
+**BEFORE:**
+```powershell
+# ... inside the foreach ($componentToRender in $sortedQueue) loop ...
+            if ($componentToRender.Render) {
+                try { & $componentToRender.Render -self $componentToRender }
+                catch { Write-Log -Level Error -Message "Component render error in '$($componentToRender.Name)'" -Data $_ }
+            }
+```
+
+**AFTER:**
+```powershell
+# ... inside the foreach ($componentToRender in $sortedQueue) loop ...
+            if ($componentToRender.Render) {
+                try {
+                    & $componentToRender.Render -self $componentToRender
+                }
+                catch {
+                    throw [ComponentRenderException]::new(
+                        "Failed to render component '$($componentToRender.Name ?? $componentToRender.Type)'",
+                        @{
+                            FailingComponent = $componentToRender
+                            OriginalException = $_ # Preserve the original error object
+                        }
+                    )
+                }
+            }
+```
+
+#### **Target 2: Screen Initialization**
+
+**File to Modify:** `modules/tui-engine-v2.psm1`
+**Function to Modify:** `Push-Screen`
+
+**Instruction:** Modify the `catch` blocks for component `OnBlur` and screen `Init`.
+
+**BEFORE:**
+```powershell
+# ... inside Push-Screen ...
+        if ($script:TuiState.FocusedComponent -and $script:TuiState.FocusedComponent.OnBlur) {
+            try {
+                & $script:TuiState.FocusedComponent.OnBlur -self $script:TuiState.FocusedComponent
+            } catch {
+                Write-Warning "Component blur error: $_"
+            }
+        }
+# ...
+        if ($Screen.Init) { 
+            try {
+                # ...
+            } catch {
+                Write-Warning "Screen init error: $_"
+            }
+        }
+```
+
+**AFTER:**
+```powershell
+# ... inside Push-Screen ...
+        if ($script:TuiState.FocusedComponent -and $script:TuiState.FocusedComponent.OnBlur) {
+            try {
+                & $script:TuiState.FocusedComponent.OnBlur -self $script:TuiState.FocusedComponent
+            } catch {
+                # This is less critical, so a log is acceptable, but we can be more specific.
+                Write-Log -Level Warning -Message "Error in OnBlur for component '$($script:TuiState.FocusedComponent.Name)'" -Data $_
+            }
+        }
+# ...
+        if ($Screen.Init) { 
+            try {
+                # ...
+            } catch {
+                throw [InitializationException]::new(
+                    "Failed to initialize screen '$($Screen.Name)'",
+                    @{
+                        FailingScreen = $Screen
+                        OriginalException = $_
+                    }
+                )
+            }
+        }
+```
+
+---
+
+### **Phase 2: Refactor Service and Logic Modules**
+
+Now, apply the same pattern to the non-visual backend services.
+
+#### **Target 1: Navigation Service**
+
+**File to Modify:** `services/navigation.psm1`
+**Function to Modify:** `GoTo`
+
+**Instruction:** Modify the main `try/catch` block inside the `GoTo` method.
+
+**BEFORE:**
+```powershell
+# ... inside GoTo ...
+            try {
+                # ... screen factory logic ...
+            }
+            catch {
+                Write-Log -Level Error -Message "Failed to navigate to '$Path': $_"
+                Show-AlertDialog -Title "Navigation Error" -Message "Failed to load screen: $_"
+                return $false
+            }
+```
+
+**AFTER:**
+```powershell
+# ... inside GoTo ...
+            try {
+                # ... screen factory logic ...
+            }
+            catch {
+                throw [NavigationException]::new(
+                    "Failed to create or navigate to screen for route '$Path'",
+                    @{
+                        Route = $Path
+                        RouteConfig = $route
+                        OriginalException = $_
+                    }
+                )
+            }
+```
+
+#### **Target 2: App Store Service**
+
+**File to Modify:** `services/app-store.psm1`
+**Function to Modify:** `Dispatch`
+
+**Instruction:** Modify the `catch` block that wraps the action execution.
+
+**BEFORE:**
+```powershell
+# ... inside Dispatch ...
+            try {
+                # ... action execution logic ...
+            } 
+            catch {
+                if ($self._enableDebugLogging) { Write-Log -Level Error -Message "Error in action handler '$actionName'" -Data $_ }
+                Write-Host "[DEBUG] Action dispatch error: $_" -ForegroundColor Red
+                return @{ Success = $false; Error = $_.ToString() }
+            }
+```
+
+**AFTER:**
+```powershell
+# ... inside Dispatch ...
+            try {
+                # ... action execution logic ...
+            } 
+            catch {
+                throw [StateMutationException]::new(
+                    "Error executing action '$actionName'",
+                    @{
+                        ActionName = $actionName
+                        Payload = $payload
+                        OriginalException = $_
+                    }
+                )
+            }
+```
+
+#### **Target 3: Data Manager Service**
+
+**File to Modify:** `modules/data-manager.psm1`
+**Function to Modify:** `Save-UnifiedData`
+
+**Instruction:** Modify the `catch` block.
+
+**BEFORE:**
+```powershell
+# ... inside Save-UnifiedData ...
+    } catch {
+        Write-Error "Failed to save data: $_"
+        Publish-Event -EventName "Data.SaveError" -Data @{ Error = $_.ToString() }
+    }
+```
+
+**AFTER:**
+```powershell
+# ... inside Save-UnifiedData ...
+    } catch {
+        # This is a critical but potentially recoverable error. We'll use a generic TuiException.
+        throw [TuiException]::new(
+            "Failed to save application data to disk.",
+            @{
+                FilePath = $script:DataPath
+                OriginalException = $_
+            }
+        )
+    }
+```
+
+---
+
+### **Conclusion**
+
+This completes the refactoring. The application now has a tiered error-handling system. Component-level failures will be caught and reported without crashing, while more critical failures in navigation or state will also be handled gracefully by the central loop. This makes the entire application more robust and easier to debug.

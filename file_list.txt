@@ -12,6 +12,7 @@ C:\Users\jhnhe\Documents\GitHub\_HELIOS\modules\logger.psm1
 C:\Users\jhnhe\Documents\GitHub\_HELIOS\modules\event-system.psm1
 C:\Users\jhnhe\Documents\GitHub\_HELIOS\modules\dialog-system.psm1
 C:\Users\jhnhe\Documents\GitHub\_HELIOS\modules\data-manager.psm1
+C:\Users\jhnhe\Documents\GitHub\_HELIOS\modules\exceptions.psm1
 C:\Users\jhnhe\Documents\GitHub\_HELIOS\screens\task-screen-helios.psm1
 C:\Users\jhnhe\Documents\GitHub\_HELIOS\screens\dashboard-screen-helios.psm1
 C:\Users\jhnhe\Documents\GitHub\_HELIOS\services\app-store.psd1

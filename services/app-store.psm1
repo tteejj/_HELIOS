@@ -212,8 +212,14 @@ function Initialize-AppStore {
                 return @{ Success = $true }
             } 
             catch {
-                if ($self._enableDebugLogging) { Write-Log -Level Error -Message "Error in action handler '$actionName'" -Data $_ }
-                return @{ Success = $false; Error = $_.ToString() }
+                throw [StateMutationException]::new(
+                    "Error executing action '$actionName'",
+                    @{
+                        ActionName = $actionName
+                        Payload = $payload
+                        OriginalException = $_
+                    }
+                )
             }
         }
         
