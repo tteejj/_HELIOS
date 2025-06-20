@@ -352,7 +352,7 @@ function global:New-TuiDataTable {
                     }
                     
                     # Ensure we don't write beyond component boundaries
-                    if ($rowX + $alignedValue.Length <= $contentX + $contentWidth) {
+                    if ($rowX + $alignedValue.Length -le $contentX + $contentWidth) {
                         Write-BufferString -X $rowX -Y $currentY -Text $alignedValue `
                             -ForegroundColor $cellFg -BackgroundColor $rowBg
                     } else {

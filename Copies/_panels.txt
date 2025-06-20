@@ -36,8 +36,8 @@ function New-BasePanel {
             
             $Child.Parent = $self
             $Child.LayoutProps = $LayoutProps
-            $self.Children += $Child
-            $self._isDirty = $true
+	    [void]($self.Children += $Child) # <<< FIX: Cast to [void] to suppress pipeline output
+	    $self._isDirty = $true
             
             # Propagate visibility
             if (-not $self.Visible) {

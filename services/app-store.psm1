@@ -1,6 +1,6 @@
 # FILE: services/app-store.psm1
 # PURPOSE: Provides a single, reactive source of truth for all shared application state using a Redux-like pattern.
-
+using module '..\modules\exceptions.psm1'
 function Initialize-AppStore {
     param(
         [hashtable]$InitialData = @{},
@@ -132,66 +132,20 @@ function Initialize-AppStore {
                     UpdateState = { 
                         param($updates) 
                         $store = $storeInstance
-                        if (-not $updates -or $updates.Count -eq 0) { return }
-                        
-                        # Direct state update - simpler approach
-                        $state = $store._state
-                        if (-not $state._data) { $state._data = @{} }
-                        
-                        # Helper function to set nested paths
-                        $setNestedValue = {
-                            param($obj, $path, $value)
-                            $parts = $path -split '\.'
-                            $current = $obj
-                            for ($i = 0; $i -lt $parts.Count - 1; $i++) {
-                                if (-not $current.ContainsKey($parts[$i])) {
-                                    $current[$parts[$i]] = @{}
-                                }
-                                $current = $current[$parts[$i]]
-                            }
-                            $current[$parts[-1]] = $value
+                        if (-not $updates -or $updates.Count -eq 0) { 
+                            Write-Log -Level Debug -Message "UpdateState called with empty updates"
+                            return 
                         }
                         
-                        # Process updates
-                        foreach ($key in $updates.Keys) {
-                            $newValue = $updates[$key]
-                            
-                            if ($key.Contains('.')) {
-                                # Handle nested paths like "stats.todayHours"
-                                $oldValue = & $store.GetState -self $store -path $key
-                                & $setNestedValue -obj $state._data -path $key -value $newValue
-                            } else {
-                                # Handle simple keys
-                                $oldValue = $state._data[$key]
-                                $state._data[$key] = $newValue
-                            }
-                            
-                            # Notify subscribers for exact path
-                            if ($state._subscribers -and $state._subscribers.ContainsKey($key)) {
-                                foreach ($sub in $state._subscribers[$key]) {
-                                    try {
-                                        & $sub.Handler @{ NewValue = $newValue; OldValue = $oldValue; Path = $key }
-                                    } catch {
-                                        Write-Warning "Subscriber notification error for '$key': $_"
-                                    }
-                                }
-                            }
-                            
-                            # Also notify parent path subscribers for nested updates
-                            if ($key.Contains('.')) {
-                                $parts = $key -split '\.'
-                                $parentPath = $parts[0]
-                                if ($state._subscribers -and $state._subscribers.ContainsKey($parentPath)) {
-                                    $parentValue = $state._data[$parentPath]
-                                    foreach ($sub in $state._subscribers[$parentPath]) {
-                                        try {
-                                            & $sub.Handler @{ NewValue = $parentValue; OldValue = $parentValue; Path = $parentPath }
-                                        } catch {
-                                            Write-Warning "Parent subscriber notification error for '$parentPath': $_"
-                                        }
-                                    }
-                                }
-                            }
+                        Write-Log -Level Debug -Message "UpdateState called with keys: $($updates.Keys -join ', ')"
+                        
+                        # Always use the _updateState method on the store
+                        try {
+                            & $store._updateState -self $store -updates $updates
+                            Write-Log -Level Debug -Message "UpdateState: Successfully updated state"
+                        } catch {
+                            Write-Log -Level Error -Message "UpdateState failed: $_"
+                            throw
                         }
                     }.GetNewClosure()
                     
@@ -238,6 +192,73 @@ function Initialize-AppStore {
                                 & $sub.Handler @{ NewValue = $updates[$key]; OldValue = $oldValue; Path = $key }
                             } catch {
                                 Write-Warning "State notification error: $_"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        _directUpdateState = {
+            param($self, [hashtable]$updates)
+            if (-not $updates -or $updates.Count -eq 0) { return }
+            
+            Write-Log -Level Debug -Message "_directUpdateState called with $($updates.Count) updates"
+            
+            # Ensure state structure exists
+            $state = $self._state
+            if (-not $state._data) { $state._data = @{} }
+            
+            # Helper function to set nested paths
+            $setNestedValue = {
+                param($obj, $path, $value)
+                $parts = $path -split '\.'
+                $current = $obj
+                for ($i = 0; $i -lt $parts.Count - 1; $i++) {
+                    if (-not $current.ContainsKey($parts[$i])) {
+                        $current[$parts[$i]] = @{}
+                    }
+                    $current = $current[$parts[$i]]
+                }
+                $current[$parts[-1]] = $value
+            }
+            
+            # Process updates
+            foreach ($key in $updates.Keys) {
+                $newValue = $updates[$key]
+                
+                if ($key.Contains('.')) {
+                    # Handle nested paths like "stats.todayHours"
+                    $oldValue = & $self.GetState -self $self -path $key
+                    & $setNestedValue -obj $state._data -path $key -value $newValue
+                } else {
+                    # Handle simple keys
+                    $oldValue = $state._data[$key]
+                    $state._data[$key] = $newValue
+                }
+                
+                # Notify subscribers for exact path
+                if ($state._subscribers -and $state._subscribers.ContainsKey($key)) {
+                    foreach ($sub in $state._subscribers[$key]) {
+                        try {
+                            & $sub.Handler @{ NewValue = $newValue; OldValue = $oldValue; Path = $key }
+                        } catch {
+                            Write-Warning "Subscriber notification error for '$key': $_"
+                        }
+                    }
+                }
+                
+                # Also notify parent path subscribers for nested updates
+                if ($key.Contains('.')) {
+                    $parts = $key -split '\.'
+                    $parentPath = $parts[0]
+                    if ($state._subscribers -and $state._subscribers.ContainsKey($parentPath)) {
+                        $parentValue = $state._data[$parentPath]
+                        foreach ($sub in $state._subscribers[$parentPath]) {
+                            try {
+                                & $sub.Handler @{ NewValue = $parentValue; OldValue = $parentValue; Path = $parentPath }
+                            } catch {
+                                Write-Warning "Parent subscriber notification error for '$parentPath': $_"
                             }
                         }
                     }

@@ -189,7 +189,9 @@ function Initialize-PMCServices {
             
             $today = (Get-Date).Date
             $dashboardTasks = $rawTasks | Where-Object {
-                -not $_.completed -or ([DateTime]::Parse($_.updated_at).Date -eq $today)
+                $updatedDate = $null
+                try { $updatedDate = [DateTime]::Parse($_.updated_at).Date } catch { }
+                -not $_.completed -or ($updatedDate -and $updatedDate -eq $today)
             } | Select-Object -First 10 | ForEach-Object {
                 @{
                     Priority = switch($_.priority) {
@@ -205,13 +207,17 @@ function Initialize-PMCServices {
 
             # --- Data for Task Screen (mapped correctly) ---
             $tasksForTable = $rawTasks | ForEach-Object {
+                $dueDateText = "N/A"
+                if ($_.due_date) {
+                    try { $dueDateText = ([DateTime]$_.due_date).ToString("yyyy-MM-dd") } catch { }
+                }
                 @{
                     Id = $_.id # Pass the ID through for actions
                     Status = if ($_.completed) { "✓" } else { "○" }
                     Priority = if ($_.priority) { $_.priority } else { "Medium" }
                     Title = if ($_.title) { $_.title } else { "Untitled" }
                     Category = if ($_.project) { $_.project } else { "General" }
-                    DueDate = if ($_.due_date) { ([DateTime]$_.due_date).ToString("yyyy-MM-dd") } else { "N/A" }
+                    DueDate = $dueDateText
                 }
             }
             
@@ -235,11 +241,16 @@ function Initialize-PMCServices {
             if ($global:Data.timers) {
                 $runningTimers = ($global:Data.timers | Where-Object { $_.is_running }).Count
                 $activeTimers = $global:Data.timers | Where-Object { $_.is_running } | ForEach-Object {
-                    $duration = if ($_.start_time) {
-                        $start = [DateTime]::Parse($_.start_time)
-                        $elapsed = (Get-Date) - $start
-                        "{0:hh\:mm\:ss}" -f $elapsed
-                    } else { "00:00:00" }
+                    $duration = "00:00:00"
+                    if ($_.start_time) {
+                        try {
+                            $start = [DateTime]::Parse($_.start_time)
+                            $elapsed = (Get-Date) - $start
+                            $duration = "{0:hh\:mm\:ss}" -f $elapsed
+                        } catch {
+                            # Keep default duration if parse fails
+                        }
+                    }
                     
                     @{
                         Project = if ($_.project) { $_.project } else { "No Project" }
@@ -949,7 +960,7 @@ function global:New-TuiDataTable {
                     }
                     
                     # Ensure we don't write beyond component boundaries
-                    if ($rowX + $alignedValue.Length <= $contentX + $contentWidth) {
+                    if ($rowX + $alignedValue.Length -le $contentX + $contentWidth) {
                         Write-BufferString -X $rowX -Y $currentY -Text $alignedValue `
                             -ForegroundColor $cellFg -BackgroundColor $rowBg
                     } else {
@@ -3727,8 +3738,8 @@ function New-BasePanel {
             
             $Child.Parent = $self
             $Child.LayoutProps = $LayoutProps
-            $self.Children += $Child
-            $self._isDirty = $true
+	    [void]($self.Children += $Child) # <<< FIX: Cast to [void] to suppress pipeline output
+	    $self._isDirty = $true
             
             # Propagate visibility
             if (-not $self.Visible) {
@@ -8875,6 +8886,280 @@ Export-ModuleMember -Function @(
     'Get-WeekDates',
     'Get-WeekStart'
 ) -Variable @('Data')
+# Enhanced Exception Module for Helios
+# Provides detailed error tracking and context capture
+
+# Custom exception types for better error handling
+class HeliosException : System.Exception {
+    [hashtable]$Context
+    [string]$Component
+    [System.Management.Automation.ErrorRecord]$OriginalError
+    
+    HeliosException([string]$message, [hashtable]$context) : base($message) {
+        $this.Context = $context
+        $this.Component = $context.Component
+    }
+}
+
+class NavigationException : HeliosException {
+    NavigationException([string]$message, [hashtable]$context) : base($message, $context) { }
+}
+
+class ServiceInitializationException : HeliosException {
+    ServiceInitializationException([string]$message, [hashtable]$context) : base($message, $context) { }
+}
+
+class ComponentRenderException : HeliosException {
+    ComponentRenderException([string]$message, [hashtable]$context) : base($message, $context) { }
+}
+
+class StateMutationException : HeliosException {
+    StateMutationException([string]$message, [hashtable]$context) : base($message, $context) { }
+}
+
+class InputHandlingException : HeliosException {
+    InputHandlingException([string]$message, [hashtable]$context) : base($message, $context) { }
+}
+
+# Global error handler with detailed context capture
+function Set-HeliosErrorHandler {
+    param(
+        [scriptblock]$CustomHandler = $null
+    )
+    
+    $Global:ErrorActionPreference = 'Stop'
+    
+    # Set up error trap
+    trap {
+        $errorInfo = Get-DetailedError -ErrorRecord $_
+        
+        # Log the detailed error
+        if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+            Write-Log -Level Error -Message $errorInfo.Summary -Data $errorInfo
+        } else {
+            Write-Host "ERROR: $($errorInfo.Summary)" -ForegroundColor Red
+            Write-Host "Details: $($errorInfo | ConvertTo-Json -Depth 3)" -ForegroundColor Yellow
+        }
+        
+        if ($CustomHandler) {
+            & $CustomHandler -ErrorInfo $errorInfo
+        }
+        
+        continue
+    }
+}
+
+# Get detailed error information including stack trace
+function Get-DetailedError {
+    param(
+        [System.Management.Automation.ErrorRecord]$ErrorRecord
+    )
+    
+    $errorInfo = @{
+        Summary = $ErrorRecord.Exception.Message
+        Type = $ErrorRecord.Exception.GetType().FullName
+        Category = $ErrorRecord.CategoryInfo.Category
+        TargetObject = $ErrorRecord.TargetObject
+        ScriptName = $ErrorRecord.InvocationInfo.ScriptName
+        LineNumber = $ErrorRecord.InvocationInfo.ScriptLineNumber
+        ColumnNumber = $ErrorRecord.InvocationInfo.OffsetInLine
+        Line = $ErrorRecord.InvocationInfo.Line
+        PositionMessage = $ErrorRecord.InvocationInfo.PositionMessage
+        StackTrace = @()
+        InnerException = $null
+        HeliosContext = @{}
+    }
+    
+    # Capture call stack
+    $callStack = Get-PSCallStack
+    $errorInfo.StackTrace = $callStack | ForEach-Object {
+        @{
+            Command = $_.Command
+            Location = $_.Location
+            ScriptName = $_.ScriptName
+            ScriptLineNumber = $_.ScriptLineNumber
+            Arguments = $_.Arguments
+        }
+    }
+    
+    # Capture inner exceptions
+    $innerEx = $ErrorRecord.Exception.InnerException
+    $innerExceptions = @()
+    while ($innerEx) {
+        $innerExceptions += @{
+            Message = $innerEx.Message
+            Type = $innerEx.GetType().FullName
+            StackTrace = $innerEx.StackTrace
+        }
+        $innerEx = $innerEx.InnerException
+    }
+    if ($innerExceptions.Count -gt 0) {
+        $errorInfo.InnerException = $innerExceptions
+    }
+    
+    # Extract Helios-specific context if available
+    if ($ErrorRecord.Exception -is [HeliosException]) {
+        $errorInfo.HeliosContext = $ErrorRecord.Exception.Context
+        $errorInfo.Component = $ErrorRecord.Exception.Component
+    }
+    
+    # Try to identify the Helios component/service involved
+    $errorInfo.HeliosComponent = Identify-HeliosComponent -ErrorRecord $ErrorRecord
+    
+    return $errorInfo
+}
+
+# Identify which Helios component caused the error
+function Identify-HeliosComponent {
+    param(
+        [System.Management.Automation.ErrorRecord]$ErrorRecord
+    )
+    
+    $scriptName = $ErrorRecord.InvocationInfo.ScriptName
+    if (-not $scriptName) { return "Unknown" }
+    
+    $fileName = [System.IO.Path]::GetFileNameWithoutExtension($scriptName)
+    
+    # Map file patterns to components
+    $componentMap = @{
+        'app-store' = 'AppStore'
+        'navigation' = 'Navigation Service'
+        'tui-engine' = 'TUI Engine'
+        'dashboard-screen' = 'Dashboard Screen'
+        'task-screen' = 'Task Screen'
+        'timer' = 'Timer Service'
+        'dialog' = 'Dialog System'
+        'focus-manager' = 'Focus Manager'
+        'layout' = 'Layout System'
+        'panel' = 'Panel Component'
+        'main-helios' = 'Main Application'
+    }
+    
+    foreach ($pattern in $componentMap.Keys) {
+        if ($fileName -match $pattern) {
+            return $componentMap[$pattern]
+        }
+    }
+    
+    return $fileName
+}
+
+# Wrap a scriptblock with comprehensive error handling
+function Invoke-WithErrorHandling {
+    param(
+        [scriptblock]$ScriptBlock,
+        [string]$Component = "Unknown",
+        [hashtable]$Context = @{},
+        [scriptblock]$ErrorHandler = $null
+    )
+    
+    try {
+        & $ScriptBlock
+    }
+    catch {
+        $errorContext = $Context.Clone()
+        $errorContext.Component = $Component
+        $errorContext.Timestamp = Get-Date
+        
+        # Create appropriate exception type
+        $heliosEx = switch -Regex ($Component) {
+            'Navigation' { [NavigationException]::new($_.Exception.Message, $errorContext) }
+            'Store|State' { [StateMutationException]::new($_.Exception.Message, $errorContext) }
+            'Render' { [ComponentRenderException]::new($_.Exception.Message, $errorContext) }
+            'Input' { [InputHandlingException]::new($_.Exception.Message, $errorContext) }
+            'Service' { [ServiceInitializationException]::new($_.Exception.Message, $errorContext) }
+            default { [HeliosException]::new($_.Exception.Message, $errorContext) }
+        }
+        
+        # Store original error
+        $heliosEx.OriginalError = $_
+        
+        if ($ErrorHandler) {
+            & $ErrorHandler -Exception $heliosEx
+        }
+        else {
+            throw $heliosEx
+        }
+    }
+}
+
+# Create a diagnostic report for debugging
+function Get-HeliosDiagnosticReport {
+    $report = @{
+        Timestamp = Get-Date
+        PowerShellVersion = $PSVersionTable
+        LoadedModules = Get-Module | Select-Object Name, Version, Path
+        GlobalVariables = @{}
+        Services = @{}
+        ErrorHistory = @()
+    }
+    
+    # Capture relevant global variables
+    $relevantGlobals = @('Data', 'Services', 'CurrentScreen')
+    foreach ($varName in $relevantGlobals) {
+        $var = Get-Variable -Name $varName -Scope Global -ErrorAction SilentlyContinue
+        if ($var) {
+            $report.GlobalVariables[$varName] = @{
+                Type = $var.Value.GetType().FullName
+                Properties = if ($var.Value -is [hashtable]) { $var.Value.Keys } else { $null }
+            }
+        }
+    }
+    
+    # Capture service states if available
+    if ($global:Services) {
+        foreach ($serviceName in $global:Services.Keys) {
+            $service = $global:Services[$serviceName]
+            $report.Services[$serviceName] = @{
+                Type = $service.GetType().FullName
+                Methods = if ($service -is [hashtable]) { 
+                    $service.Keys | Where-Object { $service[$_] -is [scriptblock] }
+                } else { $null }
+            }
+        }
+    }
+    
+    # Get recent errors
+    $report.ErrorHistory = $global:Error[0..4] | ForEach-Object {
+        Get-DetailedError -ErrorRecord $_
+    }
+    
+    return $report
+}
+
+# Export all functions and classes
+Export-ModuleMember -Function @(
+    'Set-HeliosErrorHandler',
+    'Get-DetailedError',
+    'Identify-HeliosComponent',
+    'Invoke-WithErrorHandling',
+    'Get-HeliosDiagnosticReport'
+) -Variable @() -Cmdlet @() -Alias @()
+
+# Export exception classes
+$ExceptionTypes = @(
+    'HeliosException',
+    'NavigationException',
+    'ServiceInitializationException',
+    'ComponentRenderException',
+    'StateMutationException',
+    'InputHandlingException'
+)
+
+foreach ($type in $ExceptionTypes) {
+    Add-Type -TypeDefinition @"
+using System;
+public class $type : Exception {
+    public System.Collections.Hashtable Context { get; set; }
+    public string Component { get; set; }
+    
+    public $type(string message, System.Collections.Hashtable context) : base(message) {
+        this.Context = context;
+        this.Component = context.ContainsKey("Component") ? context["Component"].ToString() : "Unknown";
+    }
+}
+"@ -ErrorAction SilentlyContinue
+}
 # Task Management Screen - Helios Service-Based Version (CORRECTED)
 # Conforms to Z-Index rendering and proper service injection patterns
 
@@ -8977,20 +9262,23 @@ function Get-TaskManagementScreen {
                 
                 # Subscribe to store updates
                 $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "tasks" -handler { 
-                    param($NewValue, $OldValue, $Path) 
-                    if ($taskTable -and $NewValue) {
-                        $taskTable.Data = $NewValue 
+                    param($data) 
+                    # Handle both parameter styles
+                    $newValue = if ($data.NewValue -ne $null) { $data.NewValue } else { $data }
+                    if ($taskTable -and $newValue) {
+                        $taskTable.Data = $newValue 
                         & $taskTable.ProcessData -self $taskTable
+                        Write-Log -Level Debug -Message "Tasks table updated with $($newValue.Count) items"
                     }
                 }
                 $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "taskFilter" -handler { 
-                    param($NewValue, $OldValue, $Path) 
+                    param($data) 
                     if ($storeRef) {
                         & $storeRef.Dispatch -self $storeRef -actionName "TASKS_REFRESH" 
                     }
                 }
                 $self._subscriptions += & $services.Store.Subscribe -self $services.Store -path "taskSort" -handler { 
-                    param($NewValue, $OldValue, $Path) 
+                    param($data) 
                     if ($storeRef) {
                         & $storeRef.Dispatch -self $storeRef -actionName "TASKS_REFRESH" 
                     }
@@ -9220,7 +9508,7 @@ function Get-DashboardScreen {
             ShowGridLines = $false  # Set to true to debug layout
         }
         $self.Components.rootPanel = $rootPanel
-        $self.Children += $rootPanel
+        [void]($self.Children += $rootPanel)
         
         Write-Log -Level Debug -Message "Dashboard: Created rootPanel, Children count=$($self.Children.Count)"
 
@@ -9330,8 +9618,8 @@ function Get-DashboardScreen {
             }
             
             Write-Log -Level Debug -Message "Creating quickActions subscription..."
-            # Defer initial call since component might not be ready yet
-            $subId = & $services.Store.Subscribe -self $services.Store -path "quickActions" -DeferInitialCall $true -handler { 
+            # Don't defer - let it get the initial value
+            $subId = & $services.Store.Subscribe -self $services.Store -path "quickActions" -handler { 
                 param($data) 
                 try {
                     # Handle both parameter styles
@@ -9476,20 +9764,28 @@ function Get-DashboardScreen {
         
         # Initial data load with error handling
         try {
-            # Small delay to ensure components are ready
-            Start-Sleep -Milliseconds 50
-            
+            # Dispatch initial data load immediately to populate the store
+            Write-Log -Level Debug -Message "Dispatching initial LOAD_DASHBOARD_DATA..."
             $result = & $services.Store.Dispatch -self $services.Store -actionName "LOAD_DASHBOARD_DATA"
             if (-not $result.Success) {
                 Write-Log -Level Error -Message "Failed to load dashboard data: $($result.Error)"
+            } else {
+                Write-Log -Level Debug -Message "LOAD_DASHBOARD_DATA completed successfully"
             }
             
+            # Small delay before full refresh to ensure UI is ready
+            Start-Sleep -Milliseconds 100
+            
+            Write-Log -Level Debug -Message "Dispatching DASHBOARD_REFRESH..."
             $result = & $services.Store.Dispatch -self $services.Store -actionName "DASHBOARD_REFRESH"
             if (-not $result.Success) {
                 Write-Log -Level Error -Message "Failed to refresh dashboard: $($result.Error)"
+            } else {
+                Write-Log -Level Debug -Message "DASHBOARD_REFRESH completed successfully"
             }
         } catch {
             Write-Log -Level Error -Message "Error dispatching initial actions: $_"
+            Write-Log -Level Error -Message "Stack trace: $($_.ScriptStackTrace)"
         }
         
         if (Get-Command -Name "Register-ScreenForFocus" -ErrorAction SilentlyContinue) {
@@ -9504,11 +9800,22 @@ function Get-DashboardScreen {
         # Set up refresh timer with proper service capture
         $timerServices = $services
         $self._refreshTimer = [System.Timers.Timer]::new(5000)
-        $self._timerSubscription = Register-ObjectEvent -InputObject $self._refreshTimer -EventName Elapsed -MessageData $timerServices -Action {
-            $passedServices = $Event.MessageData
+        $capturedScreen = $self
+        $self._timerSubscription = Register-ObjectEvent -InputObject $self._refreshTimer -EventName Elapsed -MessageData @{Services = $timerServices; Screen = $capturedScreen} -Action {
+            $context = $Event.MessageData
+            $passedServices = $context.Services
+            $screen = $context.Screen
             try {
                 if ($passedServices -and $passedServices.Store) {
-                    & $passedServices.Store.Dispatch -self $passedServices.Store -actionName "DASHBOARD_REFRESH"
+                    # Check if screen components are ready before refreshing
+                    if ($screen -and $screen._quickActions -and $screen._activeTimers) {
+                        $result = & $passedServices.Store.Dispatch -self $passedServices.Store -actionName "DASHBOARD_REFRESH"
+                        if (-not $result.Success) {
+                            Write-Log -Level Error -Message "Timer DASHBOARD_REFRESH dispatch failed: $($result.Error)"
+                        }
+                    } else {
+                        Write-Log -Level Debug -Message "Timer: Screen components not ready yet, skipping refresh"
+                    }
                 } else {
                     Write-Log -Level Error -Message "Timer event: services not available via MessageData"
                 }
@@ -9693,7 +10000,7 @@ Export-ModuleMember -Function Get-DashboardScreen
 }
 # FILE: services/app-store.psm1
 # PURPOSE: Provides a single, reactive source of truth for all shared application state using a Redux-like pattern.
-
+using module '..\modules\exceptions.psm1'
 function Initialize-AppStore {
     param(
         [hashtable]$InitialData = @{},
@@ -9825,66 +10132,20 @@ function Initialize-AppStore {
                     UpdateState = { 
                         param($updates) 
                         $store = $storeInstance
-                        if (-not $updates -or $updates.Count -eq 0) { return }
-                        
-                        # Direct state update - simpler approach
-                        $state = $store._state
-                        if (-not $state._data) { $state._data = @{} }
-                        
-                        # Helper function to set nested paths
-                        $setNestedValue = {
-                            param($obj, $path, $value)
-                            $parts = $path -split '\.'
-                            $current = $obj
-                            for ($i = 0; $i -lt $parts.Count - 1; $i++) {
-                                if (-not $current.ContainsKey($parts[$i])) {
-                                    $current[$parts[$i]] = @{}
-                                }
-                                $current = $current[$parts[$i]]
-                            }
-                            $current[$parts[-1]] = $value
+                        if (-not $updates -or $updates.Count -eq 0) { 
+                            Write-Log -Level Debug -Message "UpdateState called with empty updates"
+                            return 
                         }
                         
-                        # Process updates
-                        foreach ($key in $updates.Keys) {
-                            $newValue = $updates[$key]
-                            
-                            if ($key.Contains('.')) {
-                                # Handle nested paths like "stats.todayHours"
-                                $oldValue = & $store.GetState -self $store -path $key
-                                & $setNestedValue -obj $state._data -path $key -value $newValue
-                            } else {
-                                # Handle simple keys
-                                $oldValue = $state._data[$key]
-                                $state._data[$key] = $newValue
-                            }
-                            
-                            # Notify subscribers for exact path
-                            if ($state._subscribers -and $state._subscribers.ContainsKey($key)) {
-                                foreach ($sub in $state._subscribers[$key]) {
-                                    try {
-                                        & $sub.Handler @{ NewValue = $newValue; OldValue = $oldValue; Path = $key }
-                                    } catch {
-                                        Write-Warning "Subscriber notification error for '$key': $_"
-                                    }
-                                }
-                            }
-                            
-                            # Also notify parent path subscribers for nested updates
-                            if ($key.Contains('.')) {
-                                $parts = $key -split '\.'
-                                $parentPath = $parts[0]
-                                if ($state._subscribers -and $state._subscribers.ContainsKey($parentPath)) {
-                                    $parentValue = $state._data[$parentPath]
-                                    foreach ($sub in $state._subscribers[$parentPath]) {
-                                        try {
-                                            & $sub.Handler @{ NewValue = $parentValue; OldValue = $parentValue; Path = $parentPath }
-                                        } catch {
-                                            Write-Warning "Parent subscriber notification error for '$parentPath': $_"
-                                        }
-                                    }
-                                }
-                            }
+                        Write-Log -Level Debug -Message "UpdateState called with keys: $($updates.Keys -join ', ')"
+                        
+                        # Always use the _updateState method on the store
+                        try {
+                            & $store._updateState -self $store -updates $updates
+                            Write-Log -Level Debug -Message "UpdateState: Successfully updated state"
+                        } catch {
+                            Write-Log -Level Error -Message "UpdateState failed: $_"
+                            throw
                         }
                     }.GetNewClosure()
                     
@@ -9931,6 +10192,73 @@ function Initialize-AppStore {
                                 & $sub.Handler @{ NewValue = $updates[$key]; OldValue = $oldValue; Path = $key }
                             } catch {
                                 Write-Warning "State notification error: $_"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        _directUpdateState = {
+            param($self, [hashtable]$updates)
+            if (-not $updates -or $updates.Count -eq 0) { return }
+            
+            Write-Log -Level Debug -Message "_directUpdateState called with $($updates.Count) updates"
+            
+            # Ensure state structure exists
+            $state = $self._state
+            if (-not $state._data) { $state._data = @{} }
+            
+            # Helper function to set nested paths
+            $setNestedValue = {
+                param($obj, $path, $value)
+                $parts = $path -split '\.'
+                $current = $obj
+                for ($i = 0; $i -lt $parts.Count - 1; $i++) {
+                    if (-not $current.ContainsKey($parts[$i])) {
+                        $current[$parts[$i]] = @{}
+                    }
+                    $current = $current[$parts[$i]]
+                }
+                $current[$parts[-1]] = $value
+            }
+            
+            # Process updates
+            foreach ($key in $updates.Keys) {
+                $newValue = $updates[$key]
+                
+                if ($key.Contains('.')) {
+                    # Handle nested paths like "stats.todayHours"
+                    $oldValue = & $self.GetState -self $self -path $key
+                    & $setNestedValue -obj $state._data -path $key -value $newValue
+                } else {
+                    # Handle simple keys
+                    $oldValue = $state._data[$key]
+                    $state._data[$key] = $newValue
+                }
+                
+                # Notify subscribers for exact path
+                if ($state._subscribers -and $state._subscribers.ContainsKey($key)) {
+                    foreach ($sub in $state._subscribers[$key]) {
+                        try {
+                            & $sub.Handler @{ NewValue = $newValue; OldValue = $oldValue; Path = $key }
+                        } catch {
+                            Write-Warning "Subscriber notification error for '$key': $_"
+                        }
+                    }
+                }
+                
+                # Also notify parent path subscribers for nested updates
+                if ($key.Contains('.')) {
+                    $parts = $key -split '\.'
+                    $parentPath = $parts[0]
+                    if ($state._subscribers -and $state._subscribers.ContainsKey($parentPath)) {
+                        $parentValue = $state._data[$parentPath]
+                        foreach ($sub in $state._subscribers[$parentPath]) {
+                            try {
+                                & $sub.Handler @{ NewValue = $parentValue; OldValue = $parentValue; Path = $parentPath }
+                            } catch {
+                                Write-Warning "Parent subscriber notification error for '$parentPath': $_"
                             }
                         }
                     }

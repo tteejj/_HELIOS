@@ -189,7 +189,9 @@ function Initialize-PMCServices {
             
             $today = (Get-Date).Date
             $dashboardTasks = $rawTasks | Where-Object {
-                -not $_.completed -or ([DateTime]::Parse($_.updated_at).Date -eq $today)
+                $updatedDate = $null
+                try { $updatedDate = [DateTime]::Parse($_.updated_at).Date } catch { }
+                -not $_.completed -or ($updatedDate -and $updatedDate -eq $today)
             } | Select-Object -First 10 | ForEach-Object {
                 @{
                     Priority = switch($_.priority) {
@@ -205,13 +207,17 @@ function Initialize-PMCServices {
 
             # --- Data for Task Screen (mapped correctly) ---
             $tasksForTable = $rawTasks | ForEach-Object {
+                $dueDateText = "N/A"
+                if ($_.due_date) {
+                    try { $dueDateText = ([DateTime]$_.due_date).ToString("yyyy-MM-dd") } catch { }
+                }
                 @{
                     Id = $_.id # Pass the ID through for actions
                     Status = if ($_.completed) { "✓" } else { "○" }
                     Priority = if ($_.priority) { $_.priority } else { "Medium" }
                     Title = if ($_.title) { $_.title } else { "Untitled" }
                     Category = if ($_.project) { $_.project } else { "General" }
-                    DueDate = if ($_.due_date) { ([DateTime]$_.due_date).ToString("yyyy-MM-dd") } else { "N/A" }
+                    DueDate = $dueDateText
                 }
             }
             
@@ -235,11 +241,16 @@ function Initialize-PMCServices {
             if ($global:Data.timers) {
                 $runningTimers = ($global:Data.timers | Where-Object { $_.is_running }).Count
                 $activeTimers = $global:Data.timers | Where-Object { $_.is_running } | ForEach-Object {
-                    $duration = if ($_.start_time) {
-                        $start = [DateTime]::Parse($_.start_time)
-                        $elapsed = (Get-Date) - $start
-                        "{0:hh\:mm\:ss}" -f $elapsed
-                    } else { "00:00:00" }
+                    $duration = "00:00:00"
+                    if ($_.start_time) {
+                        try {
+                            $start = [DateTime]::Parse($_.start_time)
+                            $elapsed = (Get-Date) - $start
+                            $duration = "{0:hh\:mm\:ss}" -f $elapsed
+                        } catch {
+                            # Keep default duration if parse fails
+                        }
+                    }
                     
                     @{
                         Project = if ($_.project) { $_.project } else { "No Project" }

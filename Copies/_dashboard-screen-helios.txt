@@ -43,7 +43,7 @@ function Get-DashboardScreen {
             ShowGridLines = $false  # Set to true to debug layout
         }
         $self.Components.rootPanel = $rootPanel
-        $self.Children += $rootPanel
+        [void]($self.Children += $rootPanel)
         
         Write-Log -Level Debug -Message "Dashboard: Created rootPanel, Children count=$($self.Children.Count)"
 
@@ -153,8 +153,8 @@ function Get-DashboardScreen {
             }
             
             Write-Log -Level Debug -Message "Creating quickActions subscription..."
-            # Defer initial call since component might not be ready yet
-            $subId = & $services.Store.Subscribe -self $services.Store -path "quickActions" -DeferInitialCall $true -handler { 
+            # Don't defer - let it get the initial value
+            $subId = & $services.Store.Subscribe -self $services.Store -path "quickActions" -handler { 
                 param($data) 
                 try {
                     # Handle both parameter styles
@@ -299,20 +299,28 @@ function Get-DashboardScreen {
         
         # Initial data load with error handling
         try {
-            # Small delay to ensure components are ready
-            Start-Sleep -Milliseconds 50
-            
+            # Dispatch initial data load immediately to populate the store
+            Write-Log -Level Debug -Message "Dispatching initial LOAD_DASHBOARD_DATA..."
             $result = & $services.Store.Dispatch -self $services.Store -actionName "LOAD_DASHBOARD_DATA"
             if (-not $result.Success) {
                 Write-Log -Level Error -Message "Failed to load dashboard data: $($result.Error)"
+            } else {
+                Write-Log -Level Debug -Message "LOAD_DASHBOARD_DATA completed successfully"
             }
             
+            # Small delay before full refresh to ensure UI is ready
+            Start-Sleep -Milliseconds 100
+            
+            Write-Log -Level Debug -Message "Dispatching DASHBOARD_REFRESH..."
             $result = & $services.Store.Dispatch -self $services.Store -actionName "DASHBOARD_REFRESH"
             if (-not $result.Success) {
                 Write-Log -Level Error -Message "Failed to refresh dashboard: $($result.Error)"
+            } else {
+                Write-Log -Level Debug -Message "DASHBOARD_REFRESH completed successfully"
             }
         } catch {
             Write-Log -Level Error -Message "Error dispatching initial actions: $_"
+            Write-Log -Level Error -Message "Stack trace: $($_.ScriptStackTrace)"
         }
         
         if (Get-Command -Name "Register-ScreenForFocus" -ErrorAction SilentlyContinue) {
@@ -327,11 +335,22 @@ function Get-DashboardScreen {
         # Set up refresh timer with proper service capture
         $timerServices = $services
         $self._refreshTimer = [System.Timers.Timer]::new(5000)
-        $self._timerSubscription = Register-ObjectEvent -InputObject $self._refreshTimer -EventName Elapsed -MessageData $timerServices -Action {
-            $passedServices = $Event.MessageData
+        $capturedScreen = $self
+        $self._timerSubscription = Register-ObjectEvent -InputObject $self._refreshTimer -EventName Elapsed -MessageData @{Services = $timerServices; Screen = $capturedScreen} -Action {
+            $context = $Event.MessageData
+            $passedServices = $context.Services
+            $screen = $context.Screen
             try {
                 if ($passedServices -and $passedServices.Store) {
-                    & $passedServices.Store.Dispatch -self $passedServices.Store -actionName "DASHBOARD_REFRESH"
+                    # Check if screen components are ready before refreshing
+                    if ($screen -and $screen._quickActions -and $screen._activeTimers) {
+                        $result = & $passedServices.Store.Dispatch -self $passedServices.Store -actionName "DASHBOARD_REFRESH"
+                        if (-not $result.Success) {
+                            Write-Log -Level Error -Message "Timer DASHBOARD_REFRESH dispatch failed: $($result.Error)"
+                        }
+                    } else {
+                        Write-Log -Level Debug -Message "Timer: Screen components not ready yet, skipping refresh"
+                    }
                 } else {
                     Write-Log -Level Error -Message "Timer event: services not available via MessageData"
                 }

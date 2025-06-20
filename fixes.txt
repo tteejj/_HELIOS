@@ -208,6 +208,18 @@ RESULT: Dashboard and task screens now render properly with full functionality
    - Now calls: & $storeInstance._updateState -self $storeInstance -updates $updates
    Result: Store actions can now properly update state using the store's existing pattern
 
+**FIX: UI Corruption and Runtime Errors - COMPLETED 2025-06-20**
+   Problem: Dashboard showing debug text (RowOffsets, Children) and "Error executing action 'DASHBOARD_REFRESH'"
+   Root Causes: 
+   1. UI Corruption: $self.Children += $rootPanel outputting to console (needed [void] wrapper)
+   2. Runtime Errors: Date parsing failures in TASKS_REFRESH and TIMERS_REFRESH actions
+   Fix Applied:
+   - dashboard-screen-helios.psm1: Wrapped Children assignment with [void]() to suppress output
+   - main-helios.ps1: Added try/catch blocks around all date parsing in TASKS_REFRESH
+   - main-helios.ps1: Added try/catch blocks around all date parsing in TIMERS_REFRESH
+   - Enhanced exceptions.psm1 with detailed error tracking and context capture
+   Result: UI corruption fixed, date parsing errors handled gracefully
+
 **FIX: Store Actions Defensive Checks & Startup Logic - COMPLETED 2025-06-20**
    Problem: Store actions could fail if data structures weren't proper arrays; no flexible startup screen selection
    Root Cause: Tasks/timers could be non-array types; startup hardcoded to dashboard
@@ -361,3 +373,23 @@ RESULT: Dashboard and task screens now render properly with full functionality
    The dashboard should now display correctly with proper panel alignment, contained highlights,
    and functional navigation. The fixes ensure components respect their parent panel dimensions
    and the layout system properly calculates and applies positions.
+
+**FIX: AppStore UpdateState Method Final Fix - COMPLETED 2025-06-20**
+   Problem: Dashboard and task screens still showing runtime errors with UpdateState
+   Root Cause: ActionContext UpdateState was trying to call a method that doesn't exist properly
+   Fix Applied:
+   - app-store.psm1: Simplified UpdateState in actionContext to directly use store's _updateState method
+   - Changed from complex state.Update() call to & $store._updateState -self $store -updates $updates
+   - Added comprehensive error logging throughout UpdateState flow
+   - Enhanced timer refresh to check component readiness before dispatching
+   Result: Store updates now work properly, dashboard loads without errors
+
+**FIX: Dashboard and Task Screen Subscription Handlers - COMPLETED 2025-06-20**
+   Problem: Subscription handlers had inconsistent parameter handling
+   Root Cause: Some handlers expected separate parameters, others expected hashtable
+   Fix Applied:
+   - dashboard-screen-helios.psm1: Fixed all subscription handlers to handle both formats
+   - dashboard-screen-helios.psm1: Enhanced timer refresh to skip if components not ready
+   - task-screen-helios.psm1: Updated all subscription handlers to use consistent $data parameter
+   - Both screens now handle null/empty data gracefully with proper logging
+   Result: Consistent subscription handling across all screens
