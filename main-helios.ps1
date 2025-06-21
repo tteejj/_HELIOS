@@ -1,3 +1,4 @@
+
 # PMC Terminal v4.2 "Helios" - Main Entry Point (FIXED WITH PROPER ERROR HANDLING)
 # This file orchestrates module loading and application startup with the new service architecture
 
@@ -9,10 +10,10 @@ $ErrorActionPreference = "Stop"
 $script:BasePath = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 # Module loading order is critical - dependencies must load first
+# FIX: Logger and Exceptions are now pre-loaded in the main execution block to ensure
+# tracing and error handling are available immediately.
 $script:ModulesToLoad = @(
     # Core infrastructure (no dependencies)
-    @{ Name = "logger"; Path = "modules\logger.psm1"; Required = $true },
-    @{ Name = "exceptions"; Path = "modules\exceptions.psm1"; Required = $true },
     @{ Name = "event-system"; Path = "modules\event-system.psm1"; Required = $true },
     
     # Data and theme (depend on event system)
@@ -666,6 +667,8 @@ function Start-PMCTerminal {
         Trace-Step -StepName "Starting PMC Terminal initialization sequence"
         
         $loadedModules = Initialize-PMCModules -Silent:$Silent
+        # Prepend the manually loaded modules for complete logging
+        $loadedModules = @("logger", "exceptions") + $loadedModules
         Trace-Step -StepName "Module initialization completed" -StepData @{
             LoadedModuleCount = $loadedModules.Count
             LoadedModules = $loadedModules
@@ -673,21 +676,12 @@ function Start-PMCTerminal {
         
         if (-not $Silent) { Write-Host "`nInitializing subsystems..." -ForegroundColor Cyan }
         
-        # Initialize logger first - CRITICAL FOR DEBUGGING
-        Trace-Step -StepName "Checking for logger availability"
-        if (Get-Command Initialize-Logger -ErrorAction SilentlyContinue) {
-            Trace-Step -StepName "Initializing logger system"
-            
-            Initialize-Logger
-            Write-Log -Level Info -Message "PMC Terminal v4.2 'Helios' startup initiated"
-            Write-Log -Level Info -Message "Loaded modules: $($loadedModules -join ', ')"
-            
-            Trace-Step -StepName "Logger system initialized successfully" -StepData @{
-                LogPath = Get-LogPath
-            }
-        } else {
-            Write-Host "WARNING: Logger not available - continuing without logging" -ForegroundColor Yellow
-            Trace-Step -StepName "Logger not available - continuing without logging"
+        # Initialize logger first - CRITICAL FOR DEBUGGING (already loaded)
+        Write-Log -Level Info -Message "PMC Terminal v4.2 'Helios' startup initiated"
+        Write-Log -Level Info -Message "Loaded modules: $($loadedModules -join ', ')"
+        
+        Trace-Step -StepName "Logger system initialized successfully" -StepData @{
+            LogPath = Get-LogPath
         }
         
         # Initialize Event System
@@ -973,11 +967,12 @@ function Start-PMCTerminal {
         # Dispatch initial actions to populate dashboard data
         Trace-Step -StepName "Dispatching initial actions to populate data"
         try {
-            Write-Log -Level Info -Message "Error dispatching initial actions: Error executing action 'DASHBOARD_REFRESH'"
+            # Note: The original log message here was confusingly worded. It's now corrected.
+            Write-Log -Level Info -Message "Dispatching initial 'DASHBOARD_REFRESH' action"
             & $services.Store.Dispatch -self $services.Store -actionName "DASHBOARD_REFRESH"
             Trace-Step -StepName "Initial DASHBOARD_REFRESH action dispatched successfully"
         } catch {
-            Write-Log -Level Error -Message "Error dispatching initial actions: Error executing action 'DASHBOARD_REFRESH'" -Data @{
+            Write-Log -Level Error -Message "Error dispatching initial 'DASHBOARD_REFRESH' action" -Data @{
                 Exception = $_.Exception.Message
                 StackTrace = $_.Exception.StackTrace
             }
@@ -1116,6 +1111,24 @@ $ErrorActionPreference = "Stop"
 try {
     # Clear host and start tracing immediately
     Clear-Host
+
+    # FIX: CRITICAL - Pre-load essential modules (logger, exceptions) BEFORE anything else.
+    # This resolves the chicken-and-egg dependency issue where tracing and error handling
+    # functions were being called before they were loaded.
+    $exceptionsModulePath = Join-Path $script:BasePath "modules\exceptions.psm1"
+    $loggerModulePath = Join-Path $script:BasePath "modules\logger.psm1"
+    
+    if (-not (Test-Path $exceptionsModulePath)) {
+        throw "CRITICAL FAILURE: The core exception handling module is missing at '$exceptionsModulePath'. Cannot continue."
+    }
+    if (-not (Test-Path $loggerModulePath)) {
+        throw "CRITICAL FAILURE: The core logger module is missing at '$loggerModulePath'. Cannot continue."
+    }
+    Import-Module $exceptionsModulePath -Force -Global
+    Import-Module $loggerModulePath -Force -Global
+
+    # Now that logger is available, initialize it.
+    Initialize-Logger
     
     # Initialize basic logging even before modules are loaded
     Write-Host "PMC Terminal v4.2 'Helios' - Enhanced Diagnostics Mode" -ForegroundColor Cyan
@@ -1125,13 +1138,13 @@ try {
     
     # Trace the very beginning
     if (-not $script:Silent) {
-        Write-Host "TRACE: Main execution block started" -ForegroundColor Gray
-        Write-Host "TRACE: Arguments: $($args -join ', ')" -ForegroundColor Gray
-        Write-Host "TRACE: Silent mode: $script:Silent" -ForegroundColor Gray
-        Write-Host "TRACE: Base path: $script:BasePath" -ForegroundColor Gray
-        Write-Host "TRACE: PowerShell version: $($PSVersionTable.PSVersion)" -ForegroundColor Gray
-        Write-Host "TRACE: Process ID: $PID" -ForegroundColor Gray
-        Write-Host ""
+        Write-Log -Level Trace -Message "Main execution block started" -Data @{
+            Arguments = $args
+            SilentMode = $script:Silent
+            BasePath = $script:BasePath
+            PowerShellVersion = $PSVersionTable.PSVersion.ToString()
+            ProcessId = $PID
+        }
     }
     
     # Start the terminal with enhanced error context

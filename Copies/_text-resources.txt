@@ -103,31 +103,36 @@ function global:Get-Text {
         [Parameter(ValueFromRemainingArguments=$true)]
         [object[]]$Format
     )
-    
-    # Navigate the nested hashtable
-    $parts = $Key -split '\.'
-    $current = $script:TextResources
-    
-    foreach ($part in $parts) {
-        if ($current -is [hashtable] -and $current.ContainsKey($part)) {
-            $current = $current[$part]
-        } else {
-            Write-Warning "Text resource not found: '$Key'"
-            return $Key  # Return the key as fallback
+    Invoke-WithErrorHandling -Component "TextResources.GetText" -ScriptBlock {
+        # Navigate the nested hashtable
+        $parts = $Key -split '\.'
+        $current = $script:TextResources
+        
+        foreach ($part in $parts) {
+            if ($current -is [hashtable] -and $current.ContainsKey($part)) {
+                $current = $current[$part]
+            } else {
+                Write-Warning "Text resource not found: '$Key'"
+                return $Key  # Return the key as fallback
+            }
         }
-    }
-    
-    # Format the string if arguments provided
-    if ($Format -and $Format.Count -gt 0) {
-        try {
-            return $current -f $Format
-        } catch {
-            Write-Warning "Failed to format text resource '$Key': $_"
-            return $current
+        
+        # Format the string if arguments provided
+        if ($Format -and $Format.Count -gt 0) {
+            try {
+                return $current -f $Format
+            } catch {
+                Write-Warning "Failed to format text resource '$Key': $_"
+                return $current
+            }
         }
+        
+        return $current
+    } -Context @{ Key = $Key; FormatArgs = $Format } -ErrorHandler {
+        param($Exception)
+        Write-Log -Level Error -Message "Failed to retrieve text resource for key '$($Exception.Context.Key)': $($Exception.Message)" -Data $Exception.Context
+        return $Key # Return key as fallback on error
     }
-    
-    return $current
 }
 
 function global:Set-TextResource {
@@ -151,21 +156,25 @@ function global:Set-TextResource {
         [Parameter(Mandatory=$true)]
         [string]$Value
     )
-    
-    $parts = $Key -split '\.'
-    $current = $script:TextResources
-    
-    # Navigate to the parent
-    for ($i = 0; $i -lt $parts.Count - 1; $i++) {
-        $part = $parts[$i]
-        if (-not $current.ContainsKey($part)) {
-            $current[$part] = @{}
+    Invoke-WithErrorHandling -Component "TextResources.SetTextResource" -ScriptBlock {
+        $parts = $Key -split '\.'
+        $current = $script:TextResources
+        
+        # Navigate to the parent
+        for ($i = 0; $i -lt $parts.Count - 1; $i++) {
+            $part = $parts[$i]
+            if (-not $current.ContainsKey($part)) {
+                $current[$part] = @{}
+            }
+            $current = $current[$part]
         }
-        $current = $current[$part]
+        
+        # Set the value
+        $current[$parts[-1]] = $Value
+    } -Context @{ Key = $Key; Value = $Value } -ErrorHandler {
+        param($Exception)
+        Write-Log -Level Error -Message "Failed to set text resource for key '$($Exception.Context.Key)': $($Exception.Message)" -Data $Exception.Context
     }
-    
-    # Set the value
-    $current[$parts[-1]] = $Value
 }
 
 function global:Get-TextResources {
@@ -173,7 +182,13 @@ function global:Get-TextResources {
     .SYNOPSIS
     Gets all text resources (useful for export/import)
     #>
-    return $script:TextResources.Clone()
+    Invoke-WithErrorHandling -Component "TextResources.GetTextResources" -ScriptBlock {
+        return $script:TextResources.Clone()
+    } -Context @{} -ErrorHandler {
+        param($Exception)
+        Write-Log -Level Error -Message "Failed to get all text resources: $($Exception.Message)" -Data $Exception.Context
+        return @{} # Return empty hashtable on error
+    }
 }
 
 function global:Import-TextResources {
@@ -188,17 +203,21 @@ function global:Import-TextResources {
         [Parameter(Mandatory=$true)]
         [string]$Path
     )
-    
-    if (Test-Path $Path) {
-        try {
-            $imported = Get-Content $Path -Raw | ConvertFrom-Json -AsHashtable
-            $script:TextResources = $imported
-            Write-Host "Text resources imported successfully"
-        } catch {
-            Write-Error "Failed to import text resources: $_"
+    Invoke-WithErrorHandling -Component "TextResources.ImportTextResources" -ScriptBlock {
+        if (Test-Path $Path) {
+            try {
+                $imported = Get-Content $Path -Raw | ConvertFrom-Json -AsHashtable
+                $script:TextResources = $imported
+                Write-Host "Text resources imported successfully"
+            } catch {
+                Write-Log -Level Error -Message "Failed to import text resources from '$Path': $_" -Data @{ FilePath = $Path; Exception = $_ }
+            }
+        } else {
+            Write-Log -Level Error -Message "File not found: $Path" -Data @{ FilePath = $Path }
         }
-    } else {
-        Write-Error "File not found: $Path"
+    } -Context @{ FilePath = $Path } -ErrorHandler {
+        param($Exception)
+        Write-Log -Level Error -Message "Failed to import text resources from '$($Exception.Context.FilePath)': $($Exception.Message)" -Data $Exception.Context
     }
 }
 
@@ -214,12 +233,16 @@ function global:Export-TextResources {
         [Parameter(Mandatory=$true)]
         [string]$Path
     )
-    
-    try {
-        $script:TextResources | ConvertTo-Json -Depth 10 | Set-Content $Path
-        Write-Host "Text resources exported successfully"
-    } catch {
-        Write-Error "Failed to export text resources: $_"
+    Invoke-WithErrorHandling -Component "TextResources.ExportTextResources" -ScriptBlock {
+        try {
+            $script:TextResources | ConvertTo-Json -Depth 10 | Set-Content $Path
+            Write-Host "Text resources exported successfully"
+        } catch {
+            Write-Log -Level Error -Message "Failed to export text resources to '$Path': $_" -Data @{ FilePath = $Path; Exception = $_ }
+        }
+    } -Context @{ FilePath = $Path } -ErrorHandler {
+        param($Exception)
+        Write-Log -Level Error -Message "Failed to export text resources to '$($Exception.Context.FilePath)': $($Exception.Message)" -Data $Exception.Context
     }
 }
 

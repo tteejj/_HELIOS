@@ -1,6 +1,6 @@
 # FILE: services/app-store.psm1
 # PURPOSE: Provides a single, reactive source of truth for all shared application state using a Redux-like pattern.
-using module '..\modules\exceptions.psm1'
+
 function Initialize-AppStore {
     param(
         [hashtable]$InitialData = @{},

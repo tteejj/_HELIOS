@@ -1,1204 +1,869 @@
+# Enhanced Exception Module for Helios
+# Provides EXTREMELY detailed error tracking and context capture
 
-# TUI Component Library - COMPLIANT VERSION
-# Stateful component factories following the canonical architecture
-# LEGACY New-TuiPanel has been REMOVED.
+# Define custom exception types using PowerShell 5-compatible approach
+# NOTE: Disabled C# exceptions in favor of PowerShell objects for startup safety
+<#
+Add-Type -TypeDefinition @"
+using System;
+using System.Collections;
 
-#region Basic Components
-
-function global:New-TuiLabel {
-    param([hashtable]$Props = @{})
-    
-    $component = @{
-        # Metadata
-        Type = "Label"
-        IsFocusable = $false
+namespace Helios {
+    public class HeliosException : Exception {
+        public Hashtable Context { get; set; }
+        public string Component { get; set; }
+        public object OriginalError { get; set; }
+        public DateTime Timestamp { get; set; }
         
-        # Properties (from Props)
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 10
-        Height = $Props.Height ?? 1
-        Visible = $Props.Visible ?? $true
-        ZIndex = $Props.ZIndex ?? 0
-        Text = $Props.Text ?? ""
-        ForegroundColor = $Props.ForegroundColor
-        Name = $Props.Name
-        
-        # Methods
-        Render = {
-            param($self)
-            if (-not $self.Visible) { return }
-            
-            $fg = if ($self.ForegroundColor) { $self.ForegroundColor } else { Get-ThemeColor "Primary" }
-            Write-BufferString -X $self.X -Y $self.Y -Text $self.Text -ForegroundColor $fg
-        }
-        
-        HandleInput = {
-            param($self, $Key)
-            return $false
+        public HeliosException(string message, Hashtable context) : base(message) {
+            this.Context = context ?? new Hashtable();
+            this.Component = context != null && context.ContainsKey("Component") ? context["Component"].ToString() : "Unknown";
+            this.Timestamp = DateTime.Now;
         }
     }
     
-    # Return as hashtable to allow dynamic property assignment
-    return $component
+    public class NavigationException : HeliosException {
+        public NavigationException(string message, Hashtable context) : base(message, context) { }
+    }
+    
+    public class ServiceInitializationException : HeliosException {
+        public ServiceInitializationException(string message, Hashtable context) : base(message, context) { }
+    }
+    
+    public class ComponentRenderException : HeliosException {
+        public ComponentRenderException(string message, Hashtable context) : base(message, context) { }
+    }
+    
+    public class StateMutationException : HeliosException {
+        public StateMutationException(string message, Hashtable context) : base(message, context) { }
+    }
+    
+    public class InputHandlingException : HeliosException {
+        public InputHandlingException(string message, Hashtable context) : base(message, context) { }
+    }
+    
+    public class DataLoadException : HeliosException {
+        public DataLoadException(string message, Hashtable context) : base(message, context) { }
+    }
+    
+    public class ThemeException : HeliosException {
+        public ThemeException(string message, Hashtable context) : base(message, context) { }
+    }
+}
+"@ -ErrorAction SilentlyContinue
+#>
+
+# Global error tracking
+$script:ErrorHistory = @()
+$script:MaxErrorHistory = 500
+$script:GlobalErrorHandler = $null
+
+# Enhanced error handler with automatic logging
+function global:Set-HeliosErrorHandler {
+    param(
+        [scriptblock]$CustomHandler = $null
+    )
+    
+    $script:GlobalErrorHandler = $CustomHandler
+    
+    # Don't set global error action preference as it can break things
+    # Instead we'll use try/catch patterns everywhere
+    
+    # Safely log if available
+    if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+        Write-Log -Level Info -Message "Helios error handler configured" -Data @{
+            HasCustomHandler = ($null -ne $CustomHandler)
+            Timestamp = Get-Date
+        }
+    }
 }
 
-function global:New-TuiButton {
-    param([hashtable]$Props = @{})
+# Get EXTREMELY detailed error information
+function global:Get-DetailedError {
+    param(
+        [System.Management.Automation.ErrorRecord]$ErrorRecord,
+        [hashtable]$AdditionalContext = @{}
+    )
     
-    $component = @{
-        # Metadata
-        Type = "Button"
-        IsFocusable = $true
+    try {
+        # Capture full call stack
+        $callStack = Get-PSCallStack
         
-        # Properties (from Props)
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 10
-        Height = $Props.Height ?? 3
-        Visible = $Props.Visible ?? $true
-        ZIndex = $Props.ZIndex ?? 0
-        Text = $Props.Text ?? "Button"
-        Name = $Props.Name
+        $errorInfo = @{
+            Timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff"
+            Summary = $ErrorRecord.Exception.Message
+            Type = $ErrorRecord.Exception.GetType().FullName
+            Category = $ErrorRecord.CategoryInfo.Category.ToString()
+            CategoryActivity = $ErrorRecord.CategoryInfo.Activity
+            CategoryReason = $ErrorRecord.CategoryInfo.Reason
+            CategoryTargetName = $ErrorRecord.CategoryInfo.TargetName
+            CategoryTargetType = $ErrorRecord.CategoryInfo.TargetType
+            TargetObject = $null  # We'll handle this carefully
+            ScriptName = $ErrorRecord.InvocationInfo.ScriptName
+            LineNumber = $ErrorRecord.InvocationInfo.ScriptLineNumber
+            ColumnNumber = $ErrorRecord.InvocationInfo.OffsetInLine
+            Line = $ErrorRecord.InvocationInfo.Line
+            Command = $ErrorRecord.InvocationInfo.InvocationName
+            PositionMessage = $ErrorRecord.InvocationInfo.PositionMessage
+            StackTrace = @()
+            InnerExceptions = @()
+            HeliosContext = @{}
+            SystemContext = @{}
+            AdditionalContext = $AdditionalContext
+        }
         
-        # Internal State
-        IsPressed = $false
-        
-        # Event Handlers (from Props)
-        OnClick = $Props.OnClick
-        
-        # Methods
-        Render = {
-            param($self)
-            if (-not $self.Visible) { return }
-            
-            $borderColor = if ($self.IsFocused) { Get-ThemeColor "Accent" } else { Get-ThemeColor "Primary" }
-            $bgColor = if ($self.IsPressed) { Get-ThemeColor "Accent" } else { Get-ThemeColor "Background" }
-            $fgColor = if ($self.IsPressed) { Get-ThemeColor "Background" } else { $borderColor }
-            
-            Write-BufferBox -X $self.X -Y $self.Y -Width $self.Width -Height $self.Height `
-                -BorderColor $borderColor -BackgroundColor $bgColor
+        # Safely capture target object
+        try {
+            if ($ErrorRecord.TargetObject) {
+                $errorInfo.TargetObject = @{
+                    Type = $ErrorRecord.TargetObject.GetType().FullName
+                    ToString = $ErrorRecord.TargetObject.ToString()
+                    Properties = @{}
+                }
                 
-            $textX = $self.X + [Math]::Floor(($self.Width - $self.Text.Length) / 2)
-            Write-BufferString -X $textX -Y ($self.Y + 1) -Text $self.Text `
-                -ForegroundColor $fgColor -BackgroundColor $bgColor
+                # Try to capture key properties safely
+                if ($ErrorRecord.TargetObject -is [hashtable]) {
+                    $errorInfo.TargetObject.Properties = @{
+                        Keys = $ErrorRecord.TargetObject.Keys
+                        Count = $ErrorRecord.TargetObject.Count
+                    }
+                }
+            }
+        } catch {
+            $errorInfo.TargetObject = "Failed to serialize target object: $($_.Exception.Message)"
         }
         
-        HandleInput = {
-            param($self, $Key)
-            if ($Key.Key -in @([ConsoleKey]::Enter, [ConsoleKey]::Spacebar)) {
-                if ($self.OnClick) {
-                    & $self.OnClick
+        # Capture complete call stack with maximum detail
+        foreach ($frame in $callStack) {
+            try {
+                $frameInfo = @{
+                    Command = $frame.Command
+                    Location = $frame.Location
+                    ScriptName = $frame.ScriptName
+                    ScriptLineNumber = $frame.ScriptLineNumber
+                    Arguments = @()
+                    Module = if ($frame.ScriptName) { 
+                        [System.IO.Path]::GetFileNameWithoutExtension($frame.ScriptName) 
+                    } else { "Interactive" }
                 }
-                Request-TuiRefresh
-                return $true
-            }
-            return $false
-        }
-    }
-    
-    # Return as hashtable to allow dynamic property assignment
-    return $component
-}
-
-function global:New-TuiTextBox {
-    param([hashtable]$Props = @{})
-    
-    $component = @{
-        # Metadata
-        Type = "TextBox"
-        IsFocusable = $true
-        
-        # Properties (from Props)
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 20
-        Height = $Props.Height ?? 3
-        Visible = $Props.Visible ?? $true
-        ZIndex = $Props.ZIndex ?? 0
-        Text = $Props.Text ?? ""
-        Placeholder = $Props.Placeholder ?? ""
-        MaxLength = $Props.MaxLength ?? 100
-        Name = $Props.Name
-        
-        # Internal State
-        CursorPosition = $Props.CursorPosition ?? 0
-        
-        # Event Handlers (from Props)
-        OnChange = $Props.OnChange
-        
-        # Methods
-        Render = {
-            param($self)
-            if (-not $self.Visible) { return }
-            
-            $borderColor = if ($self.IsFocused) { Get-ThemeColor "Accent" } else { Get-ThemeColor "Secondary" }
-            Write-BufferBox -X $self.X -Y $self.Y -Width $self.Width -Height 3 -BorderColor $borderColor
-            
-            $displayText = if ($self.Text) { $self.Text } else { "" }
-            if ([string]::IsNullOrEmpty($displayText) -and -not $self.IsFocused) { 
-                $displayText = if ($self.Placeholder) { $self.Placeholder } else { "" }
-            }
-            
-            $maxDisplayLength = $self.Width - 4
-            if ($displayText.Length -gt $maxDisplayLength) {
-                $displayText = $displayText.Substring(0, $maxDisplayLength)
-            }
-            
-            Write-BufferString -X ($self.X + 2) -Y ($self.Y + 1) -Text $displayText
-            
-            if ($self.IsFocused -and $self.CursorPosition -le $displayText.Length) {
-                $cursorX = $self.X + 2 + $self.CursorPosition
-                Write-BufferString -X $cursorX -Y ($self.Y + 1) -Text "_" `
-                    -BackgroundColor (Get-ThemeColor "Accent")
-            }
-        }
-        
-        HandleInput = {
-            param($self, $Key)
-            $text = if ($self.Text) { $self.Text } else { "" }
-            $cursorPos = if ($null -ne $self.CursorPosition) { $self.CursorPosition } else { 0 }
-            $oldText = $text
-            
-            switch ($Key.Key) {
-                ([ConsoleKey]::Backspace) { 
-                    if ($cursorPos -gt 0) { 
-                        $text = $text.Remove($cursorPos - 1, 1)
-                        $cursorPos-- 
-                    }
-                }
-                ([ConsoleKey]::Delete) { 
-                    if ($cursorPos -lt $text.Length) { 
-                        $text = $text.Remove($cursorPos, 1) 
-                    }
-                }
-                ([ConsoleKey]::LeftArrow) { 
-                    if ($cursorPos -gt 0) { $cursorPos-- }
-                }
-                ([ConsoleKey]::RightArrow) { 
-                    if ($cursorPos -lt $text.Length) { $cursorPos++ }
-                }
-                ([ConsoleKey]::Home) { $cursorPos = 0 }
-                ([ConsoleKey]::End) { $cursorPos = $text.Length }
-                ([ConsoleKey]::V) {
-                    # Handle Ctrl+V (paste)
-                    if ($Key.Modifiers -band [ConsoleModifiers]::Control) {
-                        try {
-                            # Get clipboard text (Windows only)
-                            $clipboardText = if (Get-Command Get-Clipboard -ErrorAction SilentlyContinue) {
-                                Get-Clipboard -Format Text -ErrorAction SilentlyContinue
-                            } else {
-                                $null
-                            }
-                            
-                            if ($clipboardText) {
-                                # Remove newlines for single-line textbox
-                                $clipboardText = $clipboardText -replace '[\r\n]+', ' '
-                                
-                                # Insert as much as will fit
-                                $remainingSpace = $self.MaxLength - $text.Length
-                                if ($remainingSpace -gt 0) {
-                                    $toInsert = if ($clipboardText.Length -gt $remainingSpace) {
-                                        $clipboardText.Substring(0, $remainingSpace)
-                                    } else {
-                                        $clipboardText
-                                    }
-                                    
-                                    $text = $text.Insert($cursorPos, $toInsert)
-                                    $cursorPos += $toInsert.Length
-                                }
-                            }
-                        } catch {
-                            # Silently ignore clipboard errors
-                        }
-                    } else {
-                        # Regular 'V' key
-                        if (-not [char]::IsControl($Key.KeyChar) -and $text.Length -lt $self.MaxLength) {
-                            $text = $text.Insert($cursorPos, $Key.KeyChar)
-                            $cursorPos++
-                        } else {
-                            return $false
-                        }
-                    }
-                }
-                default {
-                    if ($Key.KeyChar -and -not [char]::IsControl($Key.KeyChar) -and $text.Length -lt $self.MaxLength) {
-                        $text = $text.Insert($cursorPos, $Key.KeyChar)
-                        $cursorPos++
-                    } else { 
-                        return $false 
-                    }
-                }
-            }
-            
-            if ($text -ne $oldText -or $cursorPos -ne $self.CursorPosition) {
-                $self.Text = $text
-                $self.CursorPosition = $cursorPos
                 
-                if ($self.OnChange) { 
-                    & $self.OnChange -NewValue $text
-                }
-                Request-TuiRefresh
-            }
-            return $true
-        }
-    }
-    
-    # Return as hashtable to allow dynamic property assignment
-    return $component
-}
-
-function global:New-TuiCheckBox {
-    param([hashtable]$Props = @{})
-    
-    $component = @{
-        # Metadata
-        Type = "CheckBox"
-        IsFocusable = $true
-        
-        # Properties (from Props)
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 20
-        Height = $Props.Height ?? 1
-        Visible = $Props.Visible ?? $true
-        ZIndex = $Props.ZIndex ?? 0
-        Text = $Props.Text ?? "Checkbox"
-        Checked = $Props.Checked ?? $false
-        Name = $Props.Name
-        
-        # Event Handlers (from Props)
-        OnChange = $Props.OnChange
-        
-        # Methods
-        Render = {
-            param($self)
-            if (-not $self.Visible) { return }
-            
-            $fg = if ($self.IsFocused) { Get-ThemeColor "Accent" } else { Get-ThemeColor "Primary" }
-            $checkbox = if ($self.Checked) { "[X]" } else { "[ ]" }
-            Write-BufferString -X $self.X -Y $self.Y -Text "$checkbox $($self.Text)" -ForegroundColor $fg
-        }
-        
-        HandleInput = {
-            param($self, $Key)
-            if ($Key.Key -in @([ConsoleKey]::Enter, [ConsoleKey]::Spacebar)) {
-                $self.Checked = -not $self.Checked
-                
-                if ($self.OnChange) { 
-                    & $self.OnChange -NewValue $self.Checked 
-                }
-                Request-TuiRefresh
-                return $true
-            }
-            return $false
-        }
-    }
-    
-    # Return as hashtable to allow dynamic property assignment
-    return $component
-}
-
-function global:New-TuiDropdown {
-    param([hashtable]$Props = @{})
-    
-    $component = @{
-        # Metadata
-        Type = "Dropdown"
-        IsFocusable = $true
-        
-        # Properties (from Props)
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 20
-        Height = $Props.Height ?? 3
-        Visible = $Props.Visible ?? $true
-        ZIndex = $Props.ZIndex ?? 10
-        Options = $Props.Options ?? @()
-        Value = $Props.Value
-        Placeholder = $Props.Placeholder ?? "Select..."
-        Name = $Props.Name
-        
-        # Internal State
-        IsOpen = $false
-        SelectedIndex = 0
-        
-        # Event Handlers (from Props)
-        OnChange = $Props.OnChange
-        
-        # Methods
-        Render = {
-            param($self)
-            if (-not $self.Visible) { return }
-            
-            $borderColor = if ($self.IsFocused) { Get-ThemeColor "Accent" } else { Get-ThemeColor "Secondary" }
-            Write-BufferBox -X $self.X -Y $self.Y -Width $self.Width -Height 3 -BorderColor $borderColor
-            
-            $displayText = $self.Placeholder
-            if ($self.Value -and $self.Options) {
-                $selected = $self.Options | Where-Object { $_.Value -eq $self.Value } | Select-Object -First 1
-                if ($selected) { $displayText = $selected.Display }
-            }
-            
-            Write-BufferString -X ($self.X + 2) -Y ($self.Y + 1) -Text $displayText
-            $indicator = if ($self.IsOpen) { "▲" } else { "▼" }
-            Write-BufferString -X ($self.X + $self.Width - 3) -Y ($self.Y + 1) -Text $indicator
-            
-            if ($self.IsOpen -and $self.Options.Count -gt 0) {
-                $listHeight = [Math]::Min($self.Options.Count + 2, 8)
-                Write-BufferBox -X $self.X -Y ($self.Y + 3) -Width $self.Width -Height $listHeight `
-                    -BorderColor $borderColor -BackgroundColor (Get-ThemeColor "Background")
-                
-                $displayCount = [Math]::Min($self.Options.Count, 6)
-                for ($i = 0; $i -lt $displayCount; $i++) {
-                    $option = $self.Options[$i]
-                    $y = $self.Y + 4 + $i
-                    $fg = if ($i -eq $self.SelectedIndex) { Get-ThemeColor "Accent" } else { Get-ThemeColor "Primary" }
-                    $bg = if ($i -eq $self.SelectedIndex) { Get-ThemeColor "Secondary" } else { Get-ThemeColor "Background" }
-                    $text = $option.Display
-                    if ($text.Length -gt ($self.Width - 4)) { 
-                        $text = $text.Substring(0, $self.Width - 7) + "..." 
-                    }
-                    Write-BufferString -X ($self.X + 2) -Y $y -Text $text -ForegroundColor $fg -BackgroundColor $bg
-                }
-            }
-        }
-        
-        HandleInput = {
-            param($self, $Key)
-            if (-not $self.IsOpen) {
-                if ($Key.Key -in @([ConsoleKey]::Enter, [ConsoleKey]::Spacebar, [ConsoleKey]::DownArrow)) {
-                    $self.IsOpen = $true
-                    Request-TuiRefresh
-                    return $true
-                }
-            } else {
-                switch ($Key.Key) {
-                    ([ConsoleKey]::UpArrow) { 
-                        if ($self.SelectedIndex -gt 0) { 
-                            $self.SelectedIndex--
-                            Request-TuiRefresh 
-                        }
-                        return $true 
-                    }
-                    ([ConsoleKey]::DownArrow) { 
-                        if ($self.SelectedIndex -lt ($self.Options.Count - 1)) { 
-                            $self.SelectedIndex++
-                            Request-TuiRefresh 
-                        }
-                        return $true 
-                    }
-                    ([ConsoleKey]::Enter) {
-                        if ($self.Options.Count -gt 0) {
-                            $selected = $self.Options[$self.SelectedIndex]
-                            $self.Value = $selected.Value
-                            
-                            if ($self.OnChange) { 
-                                & $self.OnChange -NewValue $selected.Value 
-                            }
-                        }
-                        $self.IsOpen = $false
-                        Request-TuiRefresh
-                        return $true
-                    }
-                    ([ConsoleKey]::Escape) { 
-                        $self.IsOpen = $false
-                        Request-TuiRefresh
-                        return $true 
-                    }
-                }
-            }
-            return $false
-        }
-    }
-    
-    # Return as hashtable to allow dynamic property assignment
-    return $component
-}
-
-function global:New-TuiProgressBar {
-    param([hashtable]$Props = @{})
-    
-    $component = @{
-        # Metadata
-        Type = "ProgressBar"
-        IsFocusable = $false
-        
-        # Properties (from Props)
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 20
-        Height = $Props.Height ?? 1
-        Visible = $Props.Visible ?? $true
-        ZIndex = $Props.ZIndex ?? 0
-        Value = $Props.Value ?? 0
-        Max = $Props.Max ?? 100
-        ShowPercent = $Props.ShowPercent ?? $false
-        Name = $Props.Name
-        
-        # Methods
-        Render = {
-            param($self)
-            if (-not $self.Visible) { return }
-            
-            $percent = [Math]::Min(100, [Math]::Max(0, ($self.Value / $self.Max) * 100))
-            $filled = [Math]::Floor(($self.Width - 2) * ($percent / 100))
-            $empty = ($self.Width - 2) - $filled
-            
-            $bar = "█" * $filled + "░" * $empty
-            Write-BufferString -X $self.X -Y $self.Y -Text "[$bar]" -ForegroundColor (Get-ThemeColor "Accent")
-            
-            if ($self.ShowPercent) {
-                $percentText = "$([Math]::Round($percent))%"
-                $textX = $self.X + [Math]::Floor(($self.Width - $percentText.Length) / 2)
-                Write-BufferString -X $textX -Y $self.Y -Text $percentText -ForegroundColor (Get-ThemeColor "Primary")
-            }
-        }
-        
-        HandleInput = {
-            param($self, $Key)
-            return $false
-        }
-    }
-    
-    # Return as hashtable to allow dynamic property assignment
-    return $component
-}
-
-function global:New-TuiTextArea {
-    param([hashtable]$Props = @{})
-    
-    $component = @{
-        # Metadata
-        Type = "TextArea"
-        IsFocusable = $true
-        
-        # Properties (from Props)
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 40
-        Height = $Props.Height ?? 6
-        Visible = $Props.Visible ?? $true
-        ZIndex = $Props.ZIndex ?? 0
-        Text = $Props.Text ?? ""
-        Placeholder = $Props.Placeholder ?? "Enter text..."
-        WrapText = $Props.WrapText ?? $true
-        Name = $Props.Name
-        
-        # Internal State
-        Lines = @($Props.Text -split "`n")
-        CursorX = 0
-        CursorY = 0
-        ScrollOffset = 0
-        
-        # Event Handlers (from Props)
-        OnChange = $Props.OnChange
-        
-        # Methods
-        Render = {
-            param($self)
-            if (-not $self.Visible) { return }
-            
-            $borderColor = if ($self.IsFocused) { Get-ThemeColor "Accent" } else { Get-ThemeColor "Secondary" }
-            Write-BufferBox -X $self.X -Y $self.Y -Width $self.Width -Height $self.Height -BorderColor $borderColor
-            
-            $innerWidth = $self.Width - 4
-            $innerHeight = $self.Height - 2
-            $displayLines = @()
-            if ($self.Lines.Count -eq 0) { $self.Lines = @("") }
-            
-            foreach ($line in $self.Lines) {
-                if ($self.WrapText -and $line.Length -gt $innerWidth) {
-                    for ($i = 0; $i -lt $line.Length; $i += $innerWidth) {
-                        $displayLines += $line.Substring($i, [Math]::Min($innerWidth, $line.Length - $i))
-                    }
-                } else { 
-                    $displayLines += $line 
-                }
-            }
-            
-            if ($displayLines.Count -eq 1 -and $displayLines[0] -eq "" -and -not $self.IsFocused) {
-                Write-BufferString -X ($self.X + 2) -Y ($self.Y + 1) -Text $self.Placeholder
-                return
-            }
-            
-            $startLine = $self.ScrollOffset
-            $endLine = [Math]::Min($displayLines.Count - 1, $startLine + $innerHeight - 1)
-            
-            for ($i = $startLine; $i -le $endLine; $i++) {
-                $y = $self.Y + 1 + ($i - $startLine)
-                $line = $displayLines[$i]
-                Write-BufferString -X ($self.X + 2) -Y $y -Text $line
-            }
-            
-            if ($self.IsFocused -and $self.CursorY -ge $startLine -and $self.CursorY -le $endLine) {
-                $cursorScreenY = $self.Y + 1 + ($self.CursorY - $startLine)
-                $cursorX = [Math]::Min($self.CursorX, $displayLines[$self.CursorY].Length)
-                Write-BufferString -X ($self.X + 2 + $cursorX) -Y $cursorScreenY -Text "_" `
-                    -BackgroundColor (Get-ThemeColor "Accent")
-            }
-            
-            if ($displayLines.Count -gt $innerHeight) {
-                $scrollbarHeight = $innerHeight
-                $scrollPosition = [Math]::Floor(($self.ScrollOffset / ($displayLines.Count - $innerHeight)) * ($scrollbarHeight - 1))
-                for ($i = 0; $i -lt $scrollbarHeight; $i++) {
-                    $char = if ($i -eq $scrollPosition) { "█" } else { "│" }
-                    $color = if ($i -eq $scrollPosition) { Get-ThemeColor "Accent" } else { Get-ThemeColor "Subtle" }
-                    Write-BufferString -X ($self.X + $self.Width - 2) -Y ($self.Y + 1 + $i) -Text $char -ForegroundColor $color
-                }
-            }
-        }
-        
-        HandleInput = {
-            param($self, $Key)
-            $lines = $self.Lines
-            $cursorY = $self.CursorY
-            $cursorX = $self.CursorX
-            $innerHeight = $self.Height - 2
-            
-            switch ($Key.Key) {
-                ([ConsoleKey]::UpArrow) {
-                    if ($cursorY -gt 0) {
-                        $cursorY--
-                        $cursorX = [Math]::Min($cursorX, $lines[$cursorY].Length)
-                        if ($cursorY -lt $self.ScrollOffset) { 
-                            $self.ScrollOffset = $cursorY 
-                        }
-                    }
-                }
-                ([ConsoleKey]::DownArrow) {
-                    if ($cursorY -lt $lines.Count - 1) {
-                        $cursorY++
-                        $cursorX = [Math]::Min($cursorX, $lines[$cursorY].Length)
-                        if ($cursorY -ge $self.ScrollOffset + $innerHeight) { 
-                            $self.ScrollOffset = $cursorY - $innerHeight + 1 
-                        }
-                    }
-                }
-                ([ConsoleKey]::LeftArrow) {
-                    if ($cursorX -gt 0) { 
-                        $cursorX-- 
-                    } elseif ($cursorY -gt 0) { 
-                        $cursorY--
-                        $cursorX = $lines[$cursorY].Length 
-                    }
-                }
-                ([ConsoleKey]::RightArrow) {
-                    if ($cursorX -lt $lines[$cursorY].Length) { 
-                        $cursorX++ 
-                    } elseif ($cursorY -lt $lines.Count - 1) { 
-                        $cursorY++
-                        $cursorX = 0 
-                    }
-                }
-                ([ConsoleKey]::Home) { $cursorX = 0 }
-                ([ConsoleKey]::End) { $cursorX = $lines[$cursorY].Length }
-                ([ConsoleKey]::Enter) {
-                    $currentLine = $lines[$cursorY]
-                    $beforeCursor = $currentLine.Substring(0, $cursorX)
-                    $afterCursor = $currentLine.Substring($cursorX)
-                    $lines[$cursorY] = $beforeCursor
-                    $lines = @($lines[0..$cursorY]) + @($afterCursor) + @($lines[($cursorY + 1)..($lines.Count - 1)])
-                    $cursorY++
-                    $cursorX = 0
-                    if ($cursorY -ge $self.ScrollOffset + $innerHeight) { 
-                        $self.ScrollOffset = $cursorY - $innerHeight + 1 
-                    }
-                }
-                ([ConsoleKey]::Backspace) {
-                    if ($cursorX -gt 0) { 
-                        $lines[$cursorY] = $lines[$cursorY].Remove($cursorX - 1, 1)
-                        $cursorX-- 
-                    } elseif ($cursorY -gt 0) {
-                        $prevLineLength = $lines[$cursorY - 1].Length
-                        $lines[$cursorY - 1] += $lines[$cursorY]
-                        $newLines = @()
-                        for ($i = 0; $i -lt $lines.Count; $i++) { 
-                            if ($i -ne $cursorY) { $newLines += $lines[$i] } 
-                        }
-                        $lines = $newLines
-                        $cursorY--
-                        $cursorX = $prevLineLength
-                    }
-                }
-                ([ConsoleKey]::Delete) {
-                    if ($cursorX -lt $lines[$cursorY].Length) { 
-                        $lines[$cursorY] = $lines[$cursorY].Remove($cursorX, 1) 
-                    } elseif ($cursorY -lt $lines.Count - 1) {
-                        $lines[$cursorY] += $lines[$cursorY + 1]
-                        $newLines = @()
-                        for ($i = 0; $i -lt $lines.Count; $i++) { 
-                            if ($i -ne ($cursorY + 1)) { $newLines += $lines[$i] } 
-                        }
-                        $lines = $newLines
-                    }
-                }
-                ([ConsoleKey]::V) {
-                    # Handle Ctrl+V (paste)
-                    if ($Key.Modifiers -band [ConsoleModifiers]::Control) {
-                        try {
-                            # Get clipboard text (Windows only)
-                            $clipboardText = if (Get-Command Get-Clipboard -ErrorAction SilentlyContinue) {
-                                Get-Clipboard -Format Text -ErrorAction SilentlyContinue
-                            } else {
-                                $null
-                            }
-                            
-                            if ($clipboardText) {
-                                # Split clipboard text into lines
-                                $clipboardLines = $clipboardText -split '[\r\n]+'
-                                
-                                if ($clipboardLines.Count -eq 1) {
-                                    # Single line paste - insert at cursor
-                                    $lines[$cursorY] = $lines[$cursorY].Insert($cursorX, $clipboardLines[0])
-                                    $cursorX += $clipboardLines[0].Length
+                # Safely capture arguments
+                try {
+                    if ($frame.Arguments) {
+                        $frameInfo.Arguments = $frame.Arguments | ForEach-Object {
+                            try {
+                                if ($_ -is [string] -or $_ -is [int] -or $_ -is [bool]) {
+                                    $_
                                 } else {
-                                    # Multi-line paste
-                                    $currentLine = $lines[$cursorY]
-                                    $beforeCursor = $currentLine.Substring(0, $cursorX)
-                                    $afterCursor = $currentLine.Substring($cursorX)
-                                    
-                                    # First line
-                                    $lines[$cursorY] = $beforeCursor + $clipboardLines[0]
-                                    
-                                    # Insert middle lines
-                                    $insertLines = @()
-                                    for ($i = 1; $i -lt $clipboardLines.Count - 1; $i++) {
-                                        $insertLines += $clipboardLines[$i]
-                                    }
-                                    
-                                    # Last line
-                                    $lastLine = $clipboardLines[-1] + $afterCursor
-                                    $insertLines += $lastLine
-                                    
-                                    # Insert all new lines
-                                    $newLines = @()
-                                    for ($i = 0; $i -le $cursorY; $i++) {
-                                        $newLines += $lines[$i]
-                                    }
-                                    $newLines += $insertLines
-                                    for ($i = $cursorY + 1; $i -lt $lines.Count; $i++) {
-                                        $newLines += $lines[$i]
-                                    }
-                                    
-                                    $lines = $newLines
-                                    $cursorY += $clipboardLines.Count - 1
-                                    $cursorX = $clipboardLines[-1].Length
+                                    $_.ToString()
                                 }
-                                
-                                # Adjust scroll if needed
-                                $innerHeight = $self.Height - 2
-                                if ($cursorY -ge $self.ScrollOffset + $innerHeight) { 
-                                    $self.ScrollOffset = $cursorY - $innerHeight + 1 
-                                }
+                            } catch {
+                                "<arg-serialization-failed>"
                             }
-                        } catch {
-                            # Silently ignore clipboard errors
-                        }
-                    } else {
-                        # Regular 'V' key
-                        if (-not [char]::IsControl($Key.KeyChar)) {
-                            $lines[$cursorY] = $lines[$cursorY].Insert($cursorX, $Key.KeyChar)
-                            $cursorX++
-                        } else {
-                            return $false
                         }
                     }
+                } catch {
+                    $frameInfo.Arguments = @("<arguments-capture-failed>")
                 }
-                default {
-                    if ($Key.KeyChar -and -not [char]::IsControl($Key.KeyChar)) {
-                        $lines[$cursorY] = $lines[$cursorY].Insert($cursorX, $Key.KeyChar)
-                        $cursorX++
-                    } else { 
-                        return $false 
+                
+                $errorInfo.StackTrace += $frameInfo
+            } catch {
+                $errorInfo.StackTrace += @{
+                    Command = "Failed to capture frame"
+                    Error = $_.Exception.Message
+                }
+            }
+        }
+        
+        # Capture all inner exceptions
+        $innerEx = $ErrorRecord.Exception.InnerException
+        while ($innerEx) {
+            try {
+                $innerInfo = @{
+                    Message = $innerEx.Message
+                    Type = $innerEx.GetType().FullName
+                    StackTrace = $innerEx.StackTrace
+                    Data = @{}
+                }
+                
+                # Safely capture exception data
+                try {
+                    if ($innerEx.Data -and $innerEx.Data.Count -gt 0) {
+                        foreach ($key in $innerEx.Data.Keys) {
+                            try {
+                                $innerInfo.Data[$key] = $innerEx.Data[$key].ToString()
+                            } catch {
+                                $innerInfo.Data[$key] = "<data-serialization-failed>"
+                            }
+                        }
                     }
+                } catch {
+                    $innerInfo.Data = "<data-capture-failed>"
                 }
-            }
-            
-            $self.Lines = $lines
-            $self.CursorX = $cursorX
-            $self.CursorY = $cursorY
-            $self.Text = $lines -join "`n"
-            
-            if ($self.OnChange) { 
-                & $self.OnChange -NewValue $self.Text 
-            }
-            Request-TuiRefresh
-            return $true
-        }
-    }
-    
-    # Return as hashtable to allow dynamic property assignment
-    return $component
-}
-
-#endregion
-
-#region DateTime Components
-
-function global:New-TuiDatePicker {
-    param([hashtable]$Props = @{})
-    
-    $component = @{
-        # Metadata
-        Type = "DatePicker"
-        IsFocusable = $true
-        
-        # Properties (from Props)
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 20
-        Height = $Props.Height ?? 3
-        Visible = $Props.Visible ?? $true
-        ZIndex = $Props.ZIndex ?? 0
-        Value = $Props.Value ?? (Get-Date)
-        Format = $Props.Format ?? "yyyy-MM-dd"
-        Name = $Props.Name
-        
-        # Event Handlers (from Props)
-        OnChange = $Props.OnChange
-        
-        # Methods
-        Render = {
-            param($self)
-            if (-not $self.Visible) { return }
-            
-            $borderColor = if ($self.IsFocused) { Get-ThemeColor "Accent" } else { Get-ThemeColor "Secondary" }
-            Write-BufferBox -X $self.X -Y $self.Y -Width $self.Width -Height 3 -BorderColor $borderColor
-            $dateStr = $self.Value.ToString($self.Format)
-            
-            # Truncate date string if too long
-            $maxLength = $self.Width - 6
-            if ($dateStr.Length -gt $maxLength) {
-                $dateStr = $dateStr.Substring(0, $maxLength)
-            }
-            
-            Write-BufferString -X ($self.X + 2) -Y ($self.Y + 1) -Text $dateStr
-            if ($self.IsFocused -and $self.Width -ge 6) { 
-                Write-BufferString -X ($self.X + $self.Width - 4) -Y ($self.Y + 1) -Text "📅" -ForegroundColor $borderColor 
+                
+                $errorInfo.InnerExceptions += $innerInfo
+                $innerEx = $innerEx.InnerException
+            } catch {
+                $errorInfo.InnerExceptions += @{
+                    Message = "Failed to capture inner exception"
+                    Error = $_.Exception.Message
+                }
+                break
             }
         }
         
-        HandleInput = {
-            param($self, $Key)
-            $date = $self.Value
-            $handled = $true
-            
-            switch ($Key.Key) {
-                ([ConsoleKey]::UpArrow)   { $date = $date.AddDays(1) }
-                ([ConsoleKey]::DownArrow) { $date = $date.AddDays(-1) }
-                ([ConsoleKey]::PageUp)    { $date = $date.AddMonths(1) }
-                ([ConsoleKey]::PageDown)  { $date = $date.AddMonths(-1) }
-                ([ConsoleKey]::Home)      { $date = Get-Date }
-                ([ConsoleKey]::T) { 
-                    if ($Key.Modifiers -band [ConsoleModifiers]::Control) { 
-                        $date = Get-Date 
-                    } else { 
-                        $handled = $false 
-                    } 
-                }
-                default { $handled = $false }
-            }
-            
-            if ($handled) {
-                $self.Value = $date
-                if ($self.OnChange) { 
-                    & $self.OnChange -NewValue $date 
-                }
-                Request-TuiRefresh
-            }
-            return $handled
-        }
-    }
-    
-    # Return as hashtable to allow dynamic property assignment
-    return $component
-}
-
-function global:New-TuiTimePicker {
-    param([hashtable]$Props = @{})
-    
-    $component = @{
-        # Metadata
-        Type = "TimePicker"
-        IsFocusable = $true
-        
-        # Properties (from Props)
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 15
-        Height = $Props.Height ?? 3
-        Visible = $Props.Visible ?? $true
-        ZIndex = $Props.ZIndex ?? 0
-        Hour = $Props.Hour ?? 0
-        Minute = $Props.Minute ?? 0
-        Format24H = $Props.Format24H ?? $true
-        Name = $Props.Name
-        
-        # Event Handlers (from Props)
-        OnChange = $Props.OnChange
-        
-        # Methods
-        Render = {
-            param($self)
-            if (-not $self.Visible) { return }
-            
-            $borderColor = if ($self.IsFocused) { Get-ThemeColor "Accent" } else { Get-ThemeColor "Secondary" }
-            Write-BufferBox -X $self.X -Y $self.Y -Width $self.Width -Height 3 -BorderColor $borderColor
-            
-            if ($self.Format24H) { 
-                $timeStr = "{0:D2}:{1:D2}" -f $self.Hour, $self.Minute 
+        # Extract Helios-specific context if available
+        try {
+            if ($ErrorRecord.Exception.GetType().Namespace -eq "Helios") {
+                $errorInfo.HeliosContext = $ErrorRecord.Exception.Context
+                $errorInfo.Component = $ErrorRecord.Exception.Component
             } else {
-                $displayHour = if ($self.Hour -eq 0) { 12 } elseif ($self.Hour -gt 12) { $self.Hour - 12 } else { $self.Hour }
-                $ampm = if ($self.Hour -lt 12) { "AM" } else { "PM" }
-                $timeStr = "{0:D2}:{1:D2} {2}" -f $displayHour, $self.Minute, $ampm
+                # Identify component from call stack
+                $errorInfo.Component = Identify-HeliosComponent -ErrorRecord $ErrorRecord
+            }
+        } catch {
+            $errorInfo.Component = "Unknown"
+            $errorInfo.HeliosContext = @{ Error = "Failed to extract Helios context" }
+        }
+        
+        # Capture system context
+        try {
+            $errorInfo.SystemContext = @{
+                ProcessId = $PID
+                ThreadId = [System.Threading.Thread]::CurrentThread.ManagedThreadId
+                PowerShellVersion = $PSVersionTable.PSVersion.ToString()
+                ExecutionPolicy = (Get-ExecutionPolicy).ToString()
+                CurrentLocation = (Get-Location).Path
+                MemoryUsage = [System.GC]::GetTotalMemory($false)
+                LoadedModules = (Get-Module).Name
+                GlobalVariables = @()
             }
             
-            # Truncate time string if too long
-            $maxLength = $self.Width - 6
-            if ($timeStr.Length -gt $maxLength) {
-                $timeStr = $timeStr.Substring(0, $maxLength)
+            # Capture relevant global variables safely
+            $relevantGlobals = @('Data', 'Services', 'CurrentScreen', 'Store')
+            foreach ($varName in $relevantGlobals) {
+                try {
+                    $var = Get-Variable -Name $varName -Scope Global -ErrorAction SilentlyContinue
+                    if ($var) {
+                        $errorInfo.SystemContext.GlobalVariables += @{
+                            Name = $varName
+                            Type = $var.Value.GetType().FullName
+                            HasValue = $null -ne $var.Value
+                        }
+                    }
+                } catch {
+                    $errorInfo.SystemContext.GlobalVariables += @{
+                        Name = $varName
+                        Error = "Failed to capture variable"
+                    }
+                }
             }
-            
-            Write-BufferString -X ($self.X + 2) -Y ($self.Y + 1) -Text $timeStr
-            if ($self.IsFocused -and $self.Width -ge 6) { 
-                Write-BufferString -X ($self.X + $self.Width - 4) -Y ($self.Y + 1) -Text "⏰" -ForegroundColor $borderColor 
+        } catch {
+            $errorInfo.SystemContext = @{ Error = "Failed to capture system context" }
+        }
+        
+        return $errorInfo
+        
+    } catch {
+        # If error analysis itself fails, return minimal info
+        return @{
+            Timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff"
+            Summary = "CRITICAL: Error analysis failed"
+            OriginalError = $ErrorRecord.Exception.Message
+            AnalysisError = $_.Exception.Message
+            Type = "ErrorAnalysisFailure"
+        }
+    }
+}
+
+# Identify which Helios component caused the error with enhanced detection
+function global:Identify-HeliosComponent {
+    param(
+        [System.Management.Automation.ErrorRecord]$ErrorRecord
+    )
+    
+    try {
+        $scriptName = $ErrorRecord.InvocationInfo.ScriptName
+        if (-not $scriptName) { 
+            # Try to get component from call stack
+            $callStack = Get-PSCallStack
+            foreach ($frame in $callStack) {
+                if ($frame.ScriptName) {
+                    $scriptName = $frame.ScriptName
+                    break
+                }
             }
         }
         
-        HandleInput = {
-            param($self, $Key)
-            $handled = $true
-            $hour = $self.Hour
-            $minute = $self.Minute
-            
-            switch ($Key.Key) {
-                ([ConsoleKey]::UpArrow) { 
-                    $minute = ($minute + 15) % 60
-                    if ($minute -eq 0) { $hour = ($hour + 1) % 24 } 
-                }
-                ([ConsoleKey]::DownArrow) { 
-                    $minute = ($minute - 15 + 60) % 60
-                    if ($minute -eq 45) { $hour = ($hour - 1 + 24) % 24 } 
-                }
-                ([ConsoleKey]::LeftArrow)  { $hour = ($hour - 1 + 24) % 24 }
-                ([ConsoleKey]::RightArrow) { $hour = ($hour + 1) % 24 }
-                default { $handled = $false }
+        if (-not $scriptName) { return "Interactive/Unknown" }
+        
+        $fileName = [System.IO.Path]::GetFileNameWithoutExtension($scriptName)
+        
+        # Enhanced component mapping
+        $componentMap = @{
+            'app-store' = 'AppStore/State Management'
+            'navigation' = 'Navigation Service'
+            'tui-engine' = 'TUI Engine/Renderer'
+            'tui-framework' = 'TUI Framework'
+            'dashboard-screen' = 'Dashboard Screen'
+            'task-screen' = 'Task Management Screen'
+            'timer' = 'Timer Service'
+            'dialog' = 'Dialog System'
+            'focus-manager' = 'Focus Manager'
+            'layout' = 'Layout System'
+            'panel' = 'Panel Components'
+            'main-helios' = 'Main Application'
+            'data-manager' = 'Data Manager'
+            'theme-manager' = 'Theme Manager'
+            'keybindings' = 'Keybinding Service'
+            'exceptions' = 'Exception Handler'
+            'logger' = 'Logging Service'
+            'advanced-data-components' = 'Data Components'
+            'advanced-input-components' = 'Input Components'
+            'tui-components' = 'UI Components'
+        }
+        
+        foreach ($pattern in $componentMap.Keys) {
+            if ($fileName -match $pattern) {
+                return $componentMap[$pattern]
             }
-            
-            if ($handled) {
-                $self.Hour = $hour
-                $self.Minute = $minute
-                
-                if ($self.OnChange) { 
-                    & $self.OnChange -NewHour $hour -NewMinute $minute 
-                }
-                Request-TuiRefresh
-            }
-            return $handled
+        }
+        
+        return "Unknown Component ($fileName)"
+        
+    } catch {
+        return "Component Identification Failed"
+    }
+}
+
+# Enhanced error handling wrapper with automatic context capture
+function global:Invoke-WithErrorHandling {
+    param(
+        [scriptblock]$ScriptBlock,
+        [string]$Component = "Unknown",
+        [hashtable]$Context = @{},
+        [scriptblock]$ErrorHandler = $null,
+        [string]$OperationName = "Unknown Operation"
+    )
+    
+    # Safely trace function entry if available
+    if (Get-Command Trace-FunctionEntry -ErrorAction SilentlyContinue) {
+        Trace-FunctionEntry -FunctionName "Invoke-WithErrorHandling" -Parameters @{
+            Component = $Component
+            OperationName = $OperationName
+            HasCustomErrorHandler = ($null -ne $ErrorHandler)
         }
     }
     
-    # Return as hashtable to allow dynamic property assignment
-    return $component
+    try {
+        # Safely trace step if available
+        if (Get-Command Trace-Step -ErrorAction SilentlyContinue) {
+            Trace-Step -StepName "Starting protected operation" -StepData @{
+                Component = $Component
+                Operation = $OperationName
+            }
+        }
+        
+        $result = & $ScriptBlock
+        
+        # Safely trace completion if available
+        if (Get-Command Trace-Step -ErrorAction SilentlyContinue) {
+            Trace-Step -StepName "Protected operation completed successfully" -StepData @{
+                Component = $Component
+                Operation = $OperationName
+                ResultType = if ($result) { $result.GetType().Name } else { "null" }
+            }
+        }
+        
+        # Safely trace function exit if available
+        if (Get-Command Trace-FunctionExit -ErrorAction SilentlyContinue) {
+            Trace-FunctionExit -FunctionName "Invoke-WithErrorHandling" -ReturnValue @{
+                Success = $true
+                Component = $Component
+            }
+        }
+        
+        return $result
+        
+    } catch {
+        # Safely clone the context hashtable
+        $errorContext = @{}
+        if ($Context) {
+            foreach ($key in $Context.Keys) {
+                $errorContext[$key] = $Context[$key]
+            }
+        }
+        $errorContext.Component = $Component
+        $errorContext.OperationName = $OperationName
+        $errorContext.Timestamp = Get-Date
+        $errorContext.ThreadId = [System.Threading.Thread]::CurrentThread.ManagedThreadId
+        
+        # --- START OF FIX: Handle any type of thrown object ---
+        $errorMessage = "An unknown error occurred in $Component"
+        $detailedError = $null
+        $originalExceptionObject = $_
+
+        if ($originalExceptionObject -is [System.Management.Automation.ErrorRecord]) {
+            $errorMessage = $originalExceptionObject.Exception.Message
+            $detailedError = Get-DetailedError -ErrorRecord $originalExceptionObject -AdditionalContext $errorContext
+        } elseif ($originalExceptionObject -is [Exception]) {
+            $errorMessage = $originalExceptionObject.Message
+            $detailedError = @{
+                Timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff"
+                Summary = $errorMessage; Type = $originalExceptionObject.GetType().FullName
+                StackTrace = $originalExceptionObject.StackTrace; Component = $Component
+                AdditionalContext = $errorContext
+            }
+        } elseif ($originalExceptionObject -is [string]) {
+            $errorMessage = $originalExceptionObject
+            $detailedError = @{
+                Timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff"
+                Summary = $errorMessage; Type = "StringException"; Component = $Component
+                AdditionalContext = $errorContext
+            }
+        } else {
+            try { $errorMessage = $originalExceptionObject.ToString() } catch {}
+            $detailedError = @{
+                Timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff"
+                Summary = $errorMessage; Type = "UnknownThrownObject"; Component = $Component
+                AdditionalContext = $errorContext
+            }
+        }
+        # --- END OF FIX ---
+        
+        # Safely log the error if available
+        if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+            Write-Log -Level Error -Message "Error in $Component during $OperationName" -Data $detailedError
+        }
+        
+        # Add to error history
+        $script:ErrorHistory += $detailedError
+        if ($script:ErrorHistory.Count -gt $script:MaxErrorHistory) {
+            $script:ErrorHistory = $script:ErrorHistory[-$script:MaxErrorHistory..-1]
+        }
+        
+        # Create PowerShell-based Helios exception using the correctly captured message
+        $heliosEx = New-Object PSObject
+        $heliosEx | Add-Member -MemberType NoteProperty -Name Message -Value $errorMessage
+        $heliosEx | Add-Member -MemberType NoteProperty -Name Component -Value $Component
+        $heliosEx | Add-Member -MemberType NoteProperty -Name Context -Value $errorContext
+        $heliosEx | Add-Member -MemberType NoteProperty -Name Timestamp -Value (Get-Date)
+        $heliosEx | Add-Member -MemberType NoteProperty -Name OriginalError -Value $originalExceptionObject
+        $heliosEx | Add-Member -MemberType NoteProperty -Name OperationName -Value $OperationName
+        
+        # Determine exception type based on component
+        $exceptionType = switch -Regex ($Component) {
+            'Navigation' { 'NavigationException' }
+            'Store|State|AppStore' { 'StateMutationException' }
+            'Render|TUI|Component' { 'ComponentRenderException' }
+            'Input|Focus' { 'InputHandlingException' }
+            'Service|Manager' { 'ServiceInitializationException' }
+            'Data|Load' { 'DataLoadException' }
+            'Theme' { 'ThemeException' }
+            default { 'HeliosException' }
+        }
+        
+        $heliosEx | Add-Member -MemberType NoteProperty -Name ExceptionType -Value $exceptionType
+        
+        # Safely trace function exit if available
+        if (Get-Command Trace-FunctionExit -ErrorAction SilentlyContinue) {
+            Trace-FunctionExit -FunctionName "Invoke-WithErrorHandling" -ReturnValue @{
+                Success = $false
+                Component = $Component
+                ErrorType = $exceptionType
+            } -WithError
+        }
+        
+        if ($ErrorHandler) {
+            try {
+                & $ErrorHandler -Exception $heliosEx -DetailedError $detailedError
+            } catch {
+                if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+                    Write-Log -Level Error -Message "Error handler itself failed" -Data @{
+                        Component = $Component
+                        OriginalError = $heliosEx.Message
+                        HandlerError = $_.Exception.Message
+                    }
+                }
+            }
+        } else {
+            # Call global error handler if available
+            if ($script:GlobalErrorHandler) {
+                try {
+                    & $script:GlobalErrorHandler -Exception $heliosEx -DetailedError $detailedError
+                } catch {
+                    if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+                        Write-Log -Level Error -Message "Global error handler failed" -Data @{
+                            Component = $Component
+                            OriginalError = $heliosEx.Message
+                            HandlerError = $_.Exception.Message
+                        }
+                    }
+                }
+            }
+            
+            # Create a proper exception with our data attached
+            $properException = New-Object System.Management.Automation.RuntimeException($heliosEx.Message)
+            $properException.Data.Add("HeliosException", $heliosEx)
+            $properException.Data.Add("Component", $Component)
+            $properException.Data.Add("OperationName", $OperationName)
+            $properException.Data.Add("Timestamp", $heliosEx.Timestamp)
+            
+            # Re-throw the proper exception
+            throw $properException
+        }
+    }
 }
 
-#endregion
-
-#region Data Display Components
-
-function global:New-TuiTable {
-    param([hashtable]$Props = @{})
+# Create a comprehensive diagnostic report
+function global:Get-HeliosDiagnosticReport {
+    param(
+        [switch]$IncludeErrorHistory,
+        [switch]$IncludeLogEntries,
+        [int]$LogEntryCount = 50
+    )
     
-    $component = @{
-        # Metadata
-        Type = "Table"
-        IsFocusable = $true
+    try {
+        # Safely trace function entry if available
+        if (Get-Command Trace-FunctionEntry -ErrorAction SilentlyContinue) {
+            Trace-FunctionEntry -FunctionName "Get-HeliosDiagnosticReport"
+        }
         
-        # Properties (from Props)
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 60
-        Height = $Props.Height ?? 15
-        Visible = $Props.Visible ?? $true
-        ZIndex = $Props.ZIndex ?? 0
-        Columns = $Props.Columns ?? @()
-        Rows = $Props.Rows ?? @()
-        Name = $Props.Name
-        
-        # Internal State
-        SelectedRow = 0
-        ScrollOffset = 0
-        SortColumn = $null
-        SortAscending = $true
-        
-        # Event Handlers (from Props)
-        OnRowSelect = $Props.OnRowSelect
-        
-        # Methods
-        Render = {
-            param($self)
-            if (-not $self.Visible -or $self.Columns.Count -eq 0) { return }
-            
-            $borderColor = if ($self.IsFocused) { Get-ThemeColor "Accent" } else { Get-ThemeColor "Secondary" }
-            Write-BufferBox -X $self.X -Y $self.Y -Width $self.Width -Height $self.Height -BorderColor $borderColor
-            
-            $totalWidth = $self.Width - 4
-            $colWidth = [Math]::Floor($totalWidth / $self.Columns.Count)
-            $headerY = $self.Y + 1
-            $currentX = $self.X + 2
-            
-            # Draw headers
-            foreach ($col in $self.Columns) {
-                $header = $col.Header
-                if ($col.Name -eq $self.SortColumn) { 
-                    $arrow = if ($self.SortAscending) { "▲" } else { "▼" }
-                    $header = "$header $arrow" 
-                }
-                if ($header.Length -gt $colWidth - 1) { 
-                    $header = $header.Substring(0, $colWidth - 4) + "..." 
-                }
-                Write-BufferString -X $currentX -Y $headerY -Text $header -ForegroundColor (Get-ThemeColor "Header")
-                $currentX += $colWidth
+        $report = @{
+            GeneratedAt = Get-Date
+            System = @{
+                PowerShellVersion = $PSVersionTable
+                ProcessId = $PID
+                ThreadId = [System.Threading.Thread]::CurrentThread.ManagedThreadId
+                ExecutionPolicy = (Get-ExecutionPolicy).ToString()
+                CurrentLocation = (Get-Location).Path
+                MemoryUsage = [System.GC]::GetTotalMemory($false)
+                AvailableMemory = [System.GC]::GetTotalMemory($true)
             }
-            
-            # Header separator
-            Write-BufferString -X ($self.X + 1) -Y ($headerY + 1) -Text ("─" * ($self.Width - 2)) -ForegroundColor $borderColor
-            
-            # Draw rows
-            $visibleRows = $self.Height - 5
-            $startIdx = $self.ScrollOffset
-            $endIdx = [Math]::Min($self.Rows.Count - 1, $startIdx + $visibleRows - 1)
-            
-            for ($i = $startIdx; $i -le $endIdx; $i++) {
-                $row = $self.Rows[$i]
-                $rowY = ($headerY + 2) + ($i - $startIdx)
-                $currentX = $self.X + 2
-                $isSelected = ($i -eq $self.SelectedRow -and $self.IsFocused)
-                $bgColor = if ($isSelected) { Get-ThemeColor "Accent" } else { Get-ThemeColor "Background" }
-                $fgColor = if ($isSelected) { Get-ThemeColor "Background" } else { Get-ThemeColor "Primary" }
-                
-                if ($isSelected) { 
-                    Write-BufferString -X ($self.X + 1) -Y $rowY -Text (" " * ($self.Width - 2)) -BackgroundColor $bgColor 
-                }
-                
-                foreach ($col in $self.Columns) {
-                    $value = $row.($col.Name)
-                    if ($null -eq $value) { $value = "" }
-                    $text = $value.ToString()
-                    if ($text.Length -gt $colWidth - 1) { 
-                        $text = $text.Substring(0, $colWidth - 4) + "..." 
+            Modules = @{}
+            GlobalVariables = @{}
+            Services = @{}
+            CallStack = Get-CallTrace -Depth 20
+            ErrorStatistics = @{
+                TotalErrorsTracked = $script:ErrorHistory.Count
+                ErrorsByComponent = @{}
+                ErrorsByType = @{}
+                RecentErrorsCount = ($script:ErrorHistory | Where-Object { 
+                    $_.Timestamp -gt (Get-Date).AddMinutes(-5) 
+                }).Count
+            }
+        }
+        
+        # Capture loaded modules with details
+        foreach ($module in Get-Module) {
+            $report.Modules[$module.Name] = @{
+                Version = $module.Version.ToString()
+                Path = $module.Path
+                ExportedFunctions = $module.ExportedFunctions.Keys
+                ExportedCmdlets = $module.ExportedCmdlets.Keys
+                ModuleType = $module.ModuleType.ToString()
+            }
+        }
+        
+        # Capture relevant global variables safely
+        $relevantGlobals = @('Data', 'Services', 'CurrentScreen', 'Store', 'Theme', 'TuiEngine')
+        foreach ($varName in $relevantGlobals) {
+            try {
+                $var = Get-Variable -Name $varName -Scope Global -ErrorAction SilentlyContinue
+                if ($var) {
+                    $report.GlobalVariables[$varName] = @{
+                        Type = $var.Value.GetType().FullName
+                        HasValue = $null -ne $var.Value
+                        Properties = @()
                     }
-                    Write-BufferString -X $currentX -Y $rowY -Text $text -ForegroundColor $fgColor -BackgroundColor $bgColor
-                    $currentX += $colWidth
+                    
+                    # Safely capture properties for hashtables
+                    if ($var.Value -is [hashtable]) {
+                        $report.GlobalVariables[$varName].Properties = $var.Value.Keys
+                        $report.GlobalVariables[$varName].Count = $var.Value.Count
+                    }
                 }
-            }
-            
-            # Scrollbar
-            if ($self.Rows.Count -gt $visibleRows) {
-                $scrollbarHeight = $visibleRows
-                $scrollPosition = [Math]::Floor(($self.ScrollOffset / ($self.Rows.Count - $visibleRows)) * ($scrollbarHeight - 1))
-                for ($i = 0; $i -lt $scrollbarHeight; $i++) {
-                    $char = if ($i -eq $scrollPosition) { "█" } else { "│" }
-                    $color = if ($i -eq $scrollPosition) { Get-ThemeColor "Accent" } else { Get-ThemeColor "Subtle" }
-                    Write-BufferString -X ($self.X + $self.Width - 2) -Y ($headerY + 2 + $i) -Text $char -ForegroundColor $color
+            } catch {
+                $report.GlobalVariables[$varName] = @{
+                    Error = "Failed to capture variable: $($_.Exception.Message)"
                 }
             }
         }
         
-        HandleInput = {
-            param($self, $Key)
-            if ($self.Rows.Count -eq 0) { return $false }
-            
-            $visibleRows = $self.Height - 5
-            $handled = $true
-            
-            switch ($Key.Key) {
-                ([ConsoleKey]::UpArrow) { 
-                    if ($self.SelectedRow -gt 0) { 
-                        $self.SelectedRow--
-                        if ($self.SelectedRow -lt $self.ScrollOffset) { 
-                            $self.ScrollOffset = $self.SelectedRow 
+        # Capture service states if available
+        try {
+            if ($global:Services) {
+                foreach ($serviceName in $global:Services.Keys) {
+                    try {
+                        $service = $global:Services[$serviceName]
+                        $report.Services[$serviceName] = @{
+                            Type = $service.GetType().FullName
+                            HasValue = $null -ne $service
+                            Methods = @()
                         }
-                        Request-TuiRefresh 
-                    } 
-                }
-                ([ConsoleKey]::DownArrow) { 
-                    if ($self.SelectedRow -lt $self.Rows.Count - 1) { 
-                        $self.SelectedRow++
-                        if ($self.SelectedRow -ge $self.ScrollOffset + $visibleRows) { 
-                            $self.ScrollOffset = $self.SelectedRow - $visibleRows + 1 
-                        }
-                        Request-TuiRefresh 
-                    } 
-                }
-                ([ConsoleKey]::PageUp) { 
-                    $self.SelectedRow = [Math]::Max(0, $self.SelectedRow - $visibleRows)
-                    $self.ScrollOffset = [Math]::Max(0, $self.ScrollOffset - $visibleRows)
-                    Request-TuiRefresh 
-                }
-                ([ConsoleKey]::PageDown) { 
-                    $self.SelectedRow = [Math]::Min($self.Rows.Count - 1, $self.SelectedRow + $visibleRows)
-                    $maxScroll = [Math]::Max(0, $self.Rows.Count - $visibleRows)
-                    $self.ScrollOffset = [Math]::Min($maxScroll, $self.ScrollOffset + $visibleRows)
-                    Request-TuiRefresh 
-                }
-                ([ConsoleKey]::Home) { 
-                    $self.SelectedRow = 0
-                    $self.ScrollOffset = 0
-                    Request-TuiRefresh 
-                }
-                ([ConsoleKey]::End) { 
-                    $self.SelectedRow = $self.Rows.Count - 1
-                    $self.ScrollOffset = [Math]::Max(0, $self.Rows.Count - $visibleRows)
-                    Request-TuiRefresh 
-                }
-                ([ConsoleKey]::Enter) { 
-                    if ($self.OnRowSelect) { 
-                        & $self.OnRowSelect -Row $self.Rows[$self.SelectedRow] -Index $self.SelectedRow 
-                    } 
-                }
-                default {
-                    if ($Key.KeyChar -match '\d') {
-                        $colIndex = [int]$Key.KeyChar.ToString() - 1
-                        if ($colIndex -ge 0 -and $colIndex -lt $self.Columns.Count) {
-                            $colName = $self.Columns[$colIndex].Name
-                            if ($self.SortColumn -eq $colName) { 
-                                $self.SortAscending = -not $self.SortAscending 
-                            } else { 
-                                $self.SortColumn = $colName
-                                $self.SortAscending = $true 
+                        
+                        if ($service -is [hashtable]) {
+                            $report.Services[$serviceName].Methods = $service.Keys | Where-Object { 
+                                $service[$_] -is [scriptblock] 
                             }
-                            $self.Rows = $self.Rows | Sort-Object -Property $colName -Descending:(-not $self.SortAscending)
-                            Request-TuiRefresh
                         }
-                    } else { 
-                        $handled = $false 
+                    } catch {
+                        $report.Services[$serviceName] = @{
+                            Error = "Failed to analyze service: $($_.Exception.Message)"
+                        }
                     }
                 }
             }
-            return $handled
+        } catch {
+            $report.Services = @{
+                Error = "Failed to capture services: $($_.Exception.Message)"
+            }
         }
-    }
-    
-    # Return as hashtable to allow dynamic property assignment
-    return $component
-}
-
-function global:New-TuiChart {
-    param([hashtable]$Props = @{})
-    
-    $component = @{
-        # Metadata
-        Type = "Chart"
-        IsFocusable = $false
         
-        # Properties (from Props)
-        X = $Props.X ?? 0
-        Y = $Props.Y ?? 0
-        Width = $Props.Width ?? 40
-        Height = $Props.Height ?? 10
-        Visible = $Props.Visible ?? $true
-        ZIndex = $Props.ZIndex ?? 0
-        ChartType = $Props.ChartType ?? "Bar"
-        Data = $Props.Data ?? @()
-        ShowValues = $Props.ShowValues ?? $true
-        Name = $Props.Name
-        
-        # Methods
-        Render = {
-            param($self)
-            if (-not $self.Visible -or $self.Data.Count -eq 0) { return }
+        # Calculate error statistics
+        foreach ($error in $script:ErrorHistory) {
+            $component = $error.Component
+            if (-not $report.ErrorStatistics.ErrorsByComponent.ContainsKey($component)) {
+                $report.ErrorStatistics.ErrorsByComponent[$component] = 0
+            }
+            $report.ErrorStatistics.ErrorsByComponent[$component]++
             
-            switch ($self.ChartType) {
-                "Bar" {
-                    $maxValue = ($self.Data | Measure-Object -Property Value -Maximum).Maximum
-                    if ($maxValue -eq 0) { $maxValue = 1 }
-                    $chartHeight = $self.Height - 2
-                    $barWidth = [Math]::Floor(($self.Width - 4) / $self.Data.Count)
-                    
-                    for ($i = 0; $i -lt $self.Data.Count; $i++) {
-                        $item = $self.Data[$i]
-                        $barHeight = [Math]::Floor(($item.Value / $maxValue) * $chartHeight)
-                        $barX = $self.X + 2 + ($i * $barWidth)
-                        
-                        for ($y = 0; $y -lt $barHeight; $y++) { 
-                            $barY = $self.Y + $self.Height - 2 - $y
-                            Write-BufferString -X $barX -Y $barY -Text ("█" * ($barWidth - 1)) -ForegroundColor (Get-ThemeColor "Accent") 
-                        }
-                        
-                        if ($item.Label -and $barWidth -gt 3) { 
-                            $label = $item.Label
-                            if ($label.Length -gt $barWidth - 1) { 
-                                $label = $label.Substring(0, $barWidth - 2) 
-                            }
-                            Write-BufferString -X $barX -Y ($self.Y + $self.Height - 1) -Text $label -ForegroundColor (Get-ThemeColor "Subtle") 
-                        }
-                        
-                        if ($self.ShowValues -and $barHeight -gt 0) { 
-                            $valueText = $item.Value.ToString()
-                            Write-BufferString -X $barX -Y ($self.Y + $self.Height - 3 - $barHeight) -Text $valueText -ForegroundColor (Get-ThemeColor "Primary") 
-                        }
-                    }
-                }
-                "Sparkline" {
-                    $width = $self.Width - 2
-                    $height = $self.Height - 1
-                    $maxValue = ($self.Data | Measure-Object -Maximum).Maximum
-                    if ($maxValue -eq 0) { $maxValue = 1 }
-                    
-                    $sparkChars = @(" ", " ", "▂", "▃", "▄", "▅", "▆", "▇", "█")
-                    $sparkline = ""
-                    
-                    foreach ($value in $self.Data) { 
-                        $normalized = ($value / $maxValue)
-                        $charIndex = [Math]::Floor($normalized * ($sparkChars.Count - 1))
-                        $sparkline += $sparkChars[$charIndex] 
-                    }
-                    
-                    if ($sparkline.Length -gt $width) { 
-                        $sparkline = $sparkline.Substring($sparkline.Length - $width) 
-                    } else { 
-                        $sparkline = $sparkline.PadLeft($width) 
-                    }
-                    
-                    Write-BufferString -X ($self.X + 1) -Y ($self.Y + [Math]::Floor($height / 2)) -Text $sparkline -ForegroundColor (Get-ThemeColor "Accent")
+            $type = $error.Type
+            if (-not $report.ErrorStatistics.ErrorsByType.ContainsKey($type)) {
+                $report.ErrorStatistics.ErrorsByType[$type] = 0
+            }
+            $report.ErrorStatistics.ErrorsByType[$type]++
+        }
+        
+        # Include error history if requested
+        if ($IncludeErrorHistory) {
+            $report.ErrorHistory = $script:ErrorHistory
+        }
+        
+        # Include recent log entries if requested
+        if ($IncludeLogEntries) {
+            try {
+                $report.RecentLogEntries = Get-LogEntries -Count $LogEntryCount
+            } catch {
+                $report.RecentLogEntries = @{
+                    Error = "Failed to get log entries: $($_.Exception.Message)"
                 }
             }
         }
         
-        HandleInput = {
-            param($self, $Key)
-            return $false
+        # Safely trace function exit if available
+        if (Get-Command Trace-FunctionExit -ErrorAction SilentlyContinue) {
+            Trace-FunctionExit -FunctionName "Get-HeliosDiagnosticReport" -ReturnValue @{
+                ReportSize = ($report | ConvertTo-Json -Depth 1).Length
+                IncludedSections = @($report.Keys)
+            }
+        }
+        
+        return $report
+        
+    } catch {
+        Write-Log -Level Error -Message "Failed to generate diagnostic report" -Data @{
+            Error = $_.Exception.Message
+            StackTrace = $_.Exception.StackTrace
+        }
+        
+        return @{
+            Error = "Failed to generate diagnostic report"
+            Exception = $_.Exception.Message
+            GeneratedAt = Get-Date
         }
     }
-    
-    # Return as hashtable to allow dynamic property assignment
-    return $component
 }
 
-#endregion
+function global:Get-ErrorHistory {
+    param(
+        [int]$Count = 20,
+        [string]$Component = $null,
+        [datetime]$Since = $null
+    )
+    
+    try {
+        $errors = $script:ErrorHistory
+        
+        if ($Component) {
+            $errors = $errors | Where-Object { $_.Component -like "*$Component*" }
+        }
+        
+        if ($Since) {
+            $errors = $errors | Where-Object { 
+                [datetime]$_.Timestamp -gt $Since 
+            }
+        }
+        
+        return $errors | Select-Object -Last $Count
+        
+    } catch {
+        if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+            Write-Log -Level Error -Message "Failed to get error history" -Data @{
+                Error = $_.Exception.Message
+            }
+        }
+        return @()
+    }
+}
 
-#region Container Components
+function global:Clear-ErrorHistory {
+    try {
+        $clearedCount = $script:ErrorHistory.Count
+        $script:ErrorHistory = @()
+        if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+            Write-Log -Level Info -Message "Cleared error history" -Data @{
+                ClearedCount = $clearedCount
+            }
+        }
+    } catch {
+        if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+            Write-Log -Level Error -Message "Failed to clear error history" -Data @{
+                Error = $_.Exception.Message
+            }
+        }
+    }
+}
 
-# FIX: REMOVED the legacy New-TuiPanel function entirely.
-# All code should now use the more specific panels from layout/panels.psm1.
+function global:Test-ComponentHealth {
+    param(
+        [string]$ComponentName = "All"
+    )
+    
+    try {
+        # Safely trace function entry if available
+        if (Get-Command Trace-FunctionEntry -ErrorAction SilentlyContinue) {
+            Trace-FunctionEntry -FunctionName "Test-ComponentHealth" -Parameters @{
+                ComponentName = $ComponentName
+            }
+        }
+        
+        $healthReport = @{
+            TestedAt = Get-Date
+            OverallHealth = "Unknown"
+            ComponentTests = @{}
+            Recommendations = @()
+        }
+        
+        # Test global services
+        if ($ComponentName -eq "All" -or $ComponentName -eq "Services") {
+            $healthReport.ComponentTests.Services = @{
+                Status = "Unknown"
+                Details = @{}
+            }
+            
+            try {
+                if ($global:Services) {
+                    $serviceCount = $global:Services.Keys.Count
+                    $healthReport.ComponentTests.Services.Status = "Healthy"
+                    $healthReport.ComponentTests.Services.Details.ServiceCount = $serviceCount
+                    $healthReport.ComponentTests.Services.Details.Services = $global:Services.Keys
+                } else {
+                    $healthReport.ComponentTests.Services.Status = "Failed"
+                    $healthReport.ComponentTests.Services.Details.Error = "Global Services not found"
+                    $healthReport.Recommendations += "Initialize global services"
+                }
+            } catch {
+                $healthReport.ComponentTests.Services.Status = "Error"
+                $healthReport.ComponentTests.Services.Details.Error = $_.Exception.Message
+            }
+        }
+        
+        # Test data structures
+        if ($ComponentName -eq "All" -or $ComponentName -eq "Data") {
+            $healthReport.ComponentTests.Data = @{
+                Status = "Unknown"
+                Details = @{}
+            }
+            
+            try {
+                if ($global:Data) {
+                    $healthReport.ComponentTests.Data.Status = "Healthy"
+                    $healthReport.ComponentTests.Data.Details.HasData = $true
+                    $healthReport.ComponentTests.Data.Details.DataKeys = $global:Data.Keys
+                } else {
+                    $healthReport.ComponentTests.Data.Status = "Warning"
+                    $healthReport.ComponentTests.Data.Details.HasData = $false
+                    $healthReport.Recommendations += "Initialize global data structures"
+                }
+            } catch {
+                $healthReport.ComponentTests.Data.Status = "Error"
+                $healthReport.ComponentTests.Data.Details.Error = $_.Exception.Message
+            }
+        }
+        
+        # Test logging system
+        if ($ComponentName -eq "All" -or $ComponentName -eq "Logger") {
+            $healthReport.ComponentTests.Logger = @{
+                Status = "Unknown"
+                Details = @{}
+            }
+            
+            try {
+                $logPath = Get-LogPath
+                if ($logPath) {
+                    $healthReport.ComponentTests.Logger.Status = "Healthy"
+                    $healthReport.ComponentTests.Logger.Details.LogPath = $logPath
+                    $healthReport.ComponentTests.Logger.Details.LogFileExists = Test-Path $logPath
+                } else {
+                    $healthReport.ComponentTests.Logger.Status = "Warning"
+                    $healthReport.ComponentTests.Logger.Details.Error = "Logger not initialized"
+                    $healthReport.Recommendations += "Initialize logger system"
+                }
+            } catch {
+                $healthReport.ComponentTests.Logger.Status = "Error"
+                $healthReport.ComponentTests.Logger.Details.Error = $_.Exception.Message
+            }
+        }
+        
+        # Determine overall health
+        $componentStatuses = $healthReport.ComponentTests.Values | ForEach-Object { $_.Status }
+        if ($componentStatuses -contains "Error") {
+            $healthReport.OverallHealth = "Critical"
+        } elseif ($componentStatuses -contains "Failed") {
+            $healthReport.OverallHealth = "Failed"
+        } elseif ($componentStatuses -contains "Warning") {
+            $healthReport.OverallHealth = "Warning"
+        } else {
+            $healthReport.OverallHealth = "Healthy"
+        }
+        
+        # Safely trace function exit if available
+        if (Get-Command Trace-FunctionExit -ErrorAction SilentlyContinue) {
+            Trace-FunctionExit -FunctionName "Test-ComponentHealth" -ReturnValue @{
+                OverallHealth = $healthReport.OverallHealth
+                TestedComponents = $healthReport.ComponentTests.Keys
+                RecommendationCount = $healthReport.Recommendations.Count
+            }
+        }
+        
+        return $healthReport
+        
+    } catch {
+        if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+            Write-Log -Level Error -Message "Component health test failed" -Data @{
+                ComponentName = $ComponentName
+                Error = $_.Exception.Message
+            }
+        }
+        
+        return @{
+            TestedAt = Get-Date
+            OverallHealth = "Critical"
+            Error = "Health test failed: $($_.Exception.Message)"
+            ComponentName = $ComponentName
+        }
+    }
+}
 
-#endregion
-
+# Export all functions
 Export-ModuleMember -Function @(
-    # Basic Components
-    'New-TuiLabel',
-    'New-TuiButton',
-    'New-TuiTextBox',
-    'New-TuiCheckBox',
-    'New-TuiDropdown',
-    'New-TuiProgressBar',
-    'New-TuiTextArea',
-    # DateTime Components
-    'New-TuiDatePicker',
-    'New-TuiTimePicker',
-    # Data Display Components
-    'New-TuiTable',
-    'New-TuiChart'
+    'Set-HeliosErrorHandler',
+    'Get-DetailedError',
+    'Identify-HeliosComponent',
+    'Invoke-WithErrorHandling',
+    'Get-HeliosDiagnosticReport',
+    'Get-ErrorHistory',
+    'Clear-ErrorHistory',
+    'Test-ComponentHealth'
 )

@@ -10,9 +10,14 @@ function global:Initialize-EventSystem {
     .SYNOPSIS
     Initializes the event system for the application
     #>
-    $script:EventHandlers = @{}
-    $script:EventHistory = @()
-    Write-Verbose "Event system initialized"
+    Invoke-WithErrorHandling -Component "EventSystem.Initialize" -ScriptBlock {
+        $script:EventHandlers = @{}
+        $script:EventHistory = @()
+        Write-Verbose "Event system initialized"
+    } -Context @{} -ErrorHandler {
+        param($Exception)
+        Write-Log -Level Error -Message "Failed to initialize Event System: $($Exception.Message)" -Data $Exception.Context
+    }
 }
 
 function global:Publish-Event {
@@ -33,37 +38,41 @@ function global:Publish-Event {
         [Parameter()]
         [hashtable]$Data = @{}
     )
-    
-    # Record event in history
-    $eventRecord = @{
-        EventName = $EventName
-        Data = $Data
-        Timestamp = Get-Date
-    }
-    
-    $script:EventHistory += $eventRecord
-    if ($script:EventHistory.Count -gt $script:MaxEventHistory) {
-        $script:EventHistory = $script:EventHistory[-$script:MaxEventHistory..-1]
-    }
-    
-    # Execute handlers
-    if ($script:EventHandlers.ContainsKey($EventName)) {
-        foreach ($handler in $script:EventHandlers[$EventName]) {
-            try {
-                $eventData = @{
-                    EventName = $EventName
-                    Data = $Data
-                    Timestamp = $eventRecord.Timestamp
+    Invoke-WithErrorHandling -Component "EventSystem.PublishEvent" -ScriptBlock {
+        # Record event in history
+        $eventRecord = @{
+            EventName = $EventName
+            Data = $Data
+            Timestamp = Get-Date
+        }
+        
+        $script:EventHistory += $eventRecord
+        if ($script:EventHistory.Count -gt $script:MaxEventHistory) {
+            $script:EventHistory = $script:EventHistory[-$script:MaxEventHistory..-1]
+        }
+        
+        # Execute handlers
+        if ($script:EventHandlers.ContainsKey($EventName)) {
+            foreach ($handler in $script:EventHandlers[$EventName]) {
+                try { # Internal try/catch for handler execution
+                    $eventData = @{
+                        EventName = $EventName
+                        Data = $Data
+                        Timestamp = $eventRecord.Timestamp
+                    }
+                    
+                    & $handler.ScriptBlock -EventData $eventData
+                } catch {
+                    Write-Log -Level Warning -Message "Error in event handler for '$EventName' (Handler ID: $($handler.HandlerId)): $_" -Data @{ EventName = $EventName; HandlerId = $handler.HandlerId; Exception = $_ }
                 }
-                
-                & $handler.ScriptBlock -EventData $eventData
-            } catch {
-                Write-Warning "Error in event handler for '$EventName': $_"
             }
         }
+        
+        Write-Verbose "Published event: $EventName"
+    } -Context @{ EventName = $EventName; EventData = $Data } -ErrorHandler {
+        param($Exception)
+        Write-Log -Level Error -Message "Failed to publish event '$($Exception.Context.EventName)': $($Exception.Message)" -Data $Exception.Context
     }
-    
-    Write-Verbose "Published event: $EventName"
 }
 
 function global:Subscribe-Event {
@@ -87,7 +96,7 @@ function global:Subscribe-Event {
         [Parameter(Mandatory = $true)]
         [string]$EventName,
         
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandrandatory = $true)]
         [scriptblock]$Handler,
         
         [Parameter()]
@@ -96,24 +105,29 @@ function global:Subscribe-Event {
         [Parameter()]
         [string]$Source = $null
     )
-    
-    if (-not $script:EventHandlers.ContainsKey($EventName)) {
-        $script:EventHandlers[$EventName] = @()
+    Invoke-WithErrorHandling -Component "EventSystem.SubscribeEvent" -ScriptBlock {
+        if (-not $script:EventHandlers.ContainsKey($EventName)) {
+            $script:EventHandlers[$EventName] = @()
+        }
+        
+        $handlerInfo = @{
+            HandlerId = $HandlerId
+            ScriptBlock = $Handler
+            SubscribedAt = Get-Date
+            Source = $Source
+        }
+        
+        $script:EventHandlers[$EventName] += $handlerInfo
+        
+        Write-Verbose "Subscribed to event: $EventName (Handler: $HandlerId)"
+        
+        # Only return handler ID, don't print it
+        return $HandlerId
+    } -Context @{ EventName = $EventName; HandlerId = $HandlerId; Source = $Source } -ErrorHandler {
+        param($Exception)
+        Write-Log -Level Error -Message "Failed to subscribe to event '$($Exception.Context.EventName)': $($Exception.Message)" -Data $Exception.Context
+        return $null # Return null on error
     }
-    
-    $handlerInfo = @{
-        HandlerId = $HandlerId
-        ScriptBlock = $Handler
-        SubscribedAt = Get-Date
-        Source = $Source
-    }
-    
-    $script:EventHandlers[$EventName] += $handlerInfo
-    
-    Write-Verbose "Subscribed to event: $EventName (Handler: $HandlerId)"
-    
-    # Only return handler ID, don't print it
-    return $HandlerId
 }
 
 function global:Unsubscribe-Event {
@@ -134,40 +148,44 @@ function global:Unsubscribe-Event {
         [Parameter(Mandatory = $true)]
         [string]$HandlerId
     )
-    
-    if ($EventName) {
-        # Fast path when event name is known
-        if ($script:EventHandlers.ContainsKey($EventName)) {
-            $script:EventHandlers[$EventName] = @($script:EventHandlers[$EventName] | Where-Object { $_.HandlerId -ne $HandlerId })
-            
-            if ($script:EventHandlers[$EventName].Count -eq 0) {
-                $script:EventHandlers.Remove($EventName)
-            }
-            
-            Write-Verbose "Unsubscribed from event: $EventName (Handler: $HandlerId)"
-        }
-    } else {
-        # Search all events for the handler ID
-        $found = $false
-        foreach ($eventKey in @($script:EventHandlers.Keys)) {
-            $handlers = $script:EventHandlers[$eventKey]
-            $newHandlers = @($handlers | Where-Object { $_.HandlerId -ne $HandlerId })
-            
-            if ($newHandlers.Count -lt $handlers.Count) {
-                $found = $true
-                if ($newHandlers.Count -eq 0) {
-                    $script:EventHandlers.Remove($eventKey)
-                } else {
-                    $script:EventHandlers[$eventKey] = $newHandlers
+    Invoke-WithErrorHandling -Component "EventSystem.UnsubscribeEvent" -ScriptBlock {
+        if ($EventName) {
+            # Fast path when event name is known
+            if ($script:EventHandlers.ContainsKey($EventName)) {
+                $script:EventHandlers[$EventName] = @($script:EventHandlers[$EventName] | Where-Object { $_.HandlerId -ne $HandlerId })
+                
+                if ($script:EventHandlers[$EventName].Count -eq 0) {
+                    $script:EventHandlers.Remove($EventName)
                 }
-                Write-Verbose "Unsubscribed from event: $eventKey (Handler: $HandlerId)"
-                break
+                
+                Write-Verbose "Unsubscribed from event: $EventName (Handler: $HandlerId)"
+            }
+        } else {
+            # Search all events for the handler ID
+            $found = $false
+            foreach ($eventKey in @($script:EventHandlers.Keys)) {
+                $handlers = $script:EventHandlers[$eventKey]
+                $newHandlers = @($handlers | Where-Object { $_.HandlerId -ne $HandlerId })
+                
+                if ($newHandlers.Count -lt $handlers.Count) {
+                    $found = $true
+                    if ($newHandlers.Count -eq 0) {
+                        $script:EventHandlers.Remove($eventKey)
+                    } else {
+                        $script:EventHandlers[$eventKey] = $newHandlers
+                    }
+                    Write-Verbose "Unsubscribed from event: $eventKey (Handler: $HandlerId)"
+                    break
+                }
+            }
+            
+            if (-not $found) {
+                Write-Warning "Handler ID not found: $HandlerId"
             }
         }
-        
-        if (-not $found) {
-            Write-Warning "Handler ID not found: $HandlerId"
-        }
+    } -Context @{ EventName = $EventName; HandlerId = $HandlerId } -ErrorHandler {
+        param($Exception)
+        Write-Log -Level Error -Message "Failed to unsubscribe from event '$($Exception.Context.EventName)' with ID '$($Exception.Context.HandlerId)': $($Exception.Message)" -Data $Exception.Context
     }
 }
 
@@ -183,15 +201,20 @@ function global:Get-EventHandlers {
         [Parameter()]
         [string]$EventName
     )
-    
-    if ($EventName) {
-        if ($script:EventHandlers.ContainsKey($EventName)) {
-            return $script:EventHandlers[$EventName]
+    Invoke-WithErrorHandling -Component "EventSystem.GetEventHandlers" -ScriptBlock {
+        if ($EventName) {
+            if ($script:EventHandlers.ContainsKey($EventName)) {
+                return $script:EventHandlers[$EventName]
+            } else {
+                return @()
+            }
         } else {
-            return @()
+            return $script:EventHandlers
         }
-    } else {
-        return $script:EventHandlers
+    } -Context @{ EventName = $EventName } -ErrorHandler {
+        param($Exception)
+        Write-Log -Level Error -Message "Failed to get event handlers for '$($Exception.Context.EventName)': $($Exception.Message)" -Data $Exception.Context
+        return @{} # Return empty on error
     }
 }
 
@@ -207,15 +230,19 @@ function global:Clear-EventHandlers {
         [Parameter()]
         [string]$EventName
     )
-    
-    if ($EventName) {
-        if ($script:EventHandlers.ContainsKey($EventName)) {
-            $script:EventHandlers.Remove($EventName)
-            Write-Verbose "Cleared handlers for event: $EventName"
+    Invoke-WithErrorHandling -Component "EventSystem.ClearEventHandlers" -ScriptBlock {
+        if ($EventName) {
+            if ($script:EventHandlers.ContainsKey($EventName)) {
+                $script:EventHandlers.Remove($EventName)
+                Write-Verbose "Cleared handlers for event: $EventName"
+            }
+        } else {
+            $script:EventHandlers = @{}
+            Write-Verbose "Cleared all event handlers"
         }
-    } else {
-        $script:EventHandlers = @{}
-        Write-Verbose "Cleared all event handlers"
+    } -Context @{ EventName = $EventName } -ErrorHandler {
+        param($Exception)
+        Write-Log -Level Error -Message "Failed to clear event handlers for '$($Exception.Context.EventName)': $($Exception.Message)" -Data $Exception.Context
     }
 }
 
@@ -237,18 +264,23 @@ function global:Get-EventHistory {
         [Parameter()]
         [int]$Last = 0
     )
-    
-    $history = $script:EventHistory
-    
-    if ($EventName) {
-        $history = $history | Where-Object { $_.EventName -eq $EventName }
+    Invoke-WithErrorHandling -Component "EventSystem.GetEventHistory" -ScriptBlock {
+        $history = $script:EventHistory
+        
+        if ($EventName) {
+            $history = $history | Where-Object { $_.EventName -eq $EventName }
+        }
+        
+        if ($Last -gt 0) {
+            $history = $history | Select-Object -Last $Last
+        }
+        
+        return $history
+    } -Context @{ EventName = $EventName; LastCount = $Last } -ErrorHandler {
+        param($Exception)
+        Write-Log -Level Error -Message "Failed to get event history for '$($Exception.Context.EventName)': $($Exception.Message)" -Data $Exception.Context
+        return @() # Return empty array on error
     }
-    
-    if ($Last -gt 0) {
-        $history = $history | Select-Object -Last $Last
-    }
-    
-    return $history
 }
 
 function global:Remove-ComponentEventHandlers {
@@ -263,31 +295,35 @@ function global:Remove-ComponentEventHandlers {
         [Parameter(Mandatory = $true)]
         [string]$ComponentId
     )
-    
-    $removedCount = 0
-    
-    # Iterate through all events and remove handlers with matching component ID
-    foreach ($eventName in @($script:EventHandlers.Keys)) {
-        $handlers = $script:EventHandlers[$eventName]
-        $newHandlers = @()
+    Invoke-WithErrorHandling -Component "EventSystem.RemoveComponentEventHandlers" -ScriptBlock {
+        $removedCount = 0
         
-        foreach ($handler in $handlers) {
-            # Check if handler has Source property matching ComponentId
-            if ($handler.Source -ne $ComponentId) {
-                $newHandlers += $handler
+        # Iterate through all events and remove handlers with matching component ID
+        foreach ($eventName in @($script:EventHandlers.Keys)) {
+            $handlers = $script:EventHandlers[$eventName]
+            $newHandlers = @()
+            
+            foreach ($handler in $handlers) {
+                # Check if handler has Source property matching ComponentId
+                if ($handler.Source -ne $ComponentId) {
+                    $newHandlers += $handler
+                } else {
+                    $removedCount++
+                }
+            }
+            
+            if ($newHandlers.Count -eq 0) {
+                $script:EventHandlers.Remove($eventName)
             } else {
-                $removedCount++
+                $script:EventHandlers[$eventName] = $newHandlers
             }
         }
         
-        if ($newHandlers.Count -eq 0) {
-            $script:EventHandlers.Remove($eventName)
-        } else {
-            $script:EventHandlers[$eventName] = $newHandlers
-        }
+        Write-Verbose "Removed $removedCount event handlers for component: $ComponentId"
+    } -Context @{ ComponentId = $ComponentId } -ErrorHandler {
+        param($Exception)
+        Write-Log -Level Error -Message "Failed to remove event handlers for component '$($Exception.Context.ComponentId)': $($Exception.Message)" -Data $Exception.Context
     }
-    
-    Write-Verbose "Removed $removedCount event handlers for component: $ComponentId"
 }
 
 # Export functions
