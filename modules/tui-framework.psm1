@@ -372,7 +372,32 @@ function global:Set-TuiTheme {
         [string]$ThemeName
     )
     Invoke-WithErrorHandling -Component "ThemeManager.SetTheme" -ScriptBlock {
-        if ($script:Themes.ContainsKey($ThemeName)) {
+        # Initialize themes if null
+        if ($null -eq $script:Themes) {
+            $script:Themes = @{
+                Modern = @{
+                    Name = "Modern"
+                    Colors = @{
+                        Background = [ConsoleColor]::Black
+                        Foreground = [ConsoleColor]::White
+                        Primary = [ConsoleColor]::White
+                        Secondary = [ConsoleColor]::Gray
+                        Accent = [ConsoleColor]::Cyan
+                        Success = [ConsoleColor]::Green
+                        Warning = [ConsoleColor]::Yellow
+                        Error = [ConsoleColor]::Red
+                        Info = [ConsoleColor]::Blue
+                        Header = [ConsoleColor]::Cyan
+                        Border = [ConsoleColor]::DarkGray
+                        Selection = [ConsoleColor]::Yellow
+                        Highlight = [ConsoleColor]::Cyan
+                        Subtle = [ConsoleColor]::DarkGray
+                    }
+                }
+            }
+        }
+        
+        if ($script:Themes -and $script:Themes.ContainsKey($ThemeName)) {
             $script:CurrentTheme = $script:Themes[$ThemeName]
             
             # --- FIX ---

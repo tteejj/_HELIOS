@@ -42,7 +42,7 @@ function Get-DashboardScreen {
                     ShowGridLines = $false  # Set to true to debug layout
                 }
                 $self.Components.rootPanel = $rootPanel
-                [void]($self.Children += $rootPanel) # FIX: Suppress pipeline output
+                $self.Children += $rootPanel
                 
                 Write-Log -Level Debug -Message "Dashboard: Created rootPanel, Children count=$($self.Children.Count)"
                 
@@ -130,10 +130,8 @@ function Get-DashboardScreen {
                 [void](& $tasksPanel.AddChild -self $tasksPanel -Child $todaysTasks)
                 [void](& $rootPanel.AddChild -self $rootPanel -Child $tasksPanel -LayoutProps @{ "Grid.Row" = 1; "Grid.Column" = 0; "Grid.ColumnSpan" = 3 })
                 
-                # ---------------------------------------------------------------------------------
-                # THIS IS THE CRITICAL FIX: Storing references BEFORE creating subscriptions.
-                # ---------------------------------------------------------------------------------
-                $self._quickActions = $quickActions  # FIX: Added missing quickActions storage
+                # Store component references BEFORE creating subscriptions
+                $self._quickActions = $quickActions
                 $self._activeTimers = $activeTimers
                 $self._todaysTasks = $todaysTasks
                 $self._todayLabel = $todayLabel
@@ -174,7 +172,7 @@ function Get-DashboardScreen {
                             if ($screen -and $screen._quickActions) {
                                 if ($newValue -and $newValue.Count -gt 0) {
                                     $screen._quickActions.Data = $newValue 
-                                    [void](& $screen._quickActions.ProcessData -self $screen._quickActions) # FIX: Suppress output
+                                    & $screen._quickActions.ProcessData -self $screen._quickActions
                                     Write-Log -Level Debug -Message "quickActions updated with $($newValue.Count) items"
                                 } else {
                                     Write-Log -Level Debug -Message "quickActions NewValue is null or empty"
@@ -201,7 +199,7 @@ function Get-DashboardScreen {
                             $newValue = if ($data.NewValue -ne $null) { $data.NewValue } else { $data }
                             if ($screen -and $screen._activeTimers -and $newValue) {
                                 $screen._activeTimers.Data = $newValue 
-                                [void](& $screen._activeTimers.ProcessData -self $screen._activeTimers) # FIX: Suppress output
+                                & $screen._activeTimers.ProcessData -self $screen._activeTimers
                             }
                         } -Context @{ Data = $data } -ErrorHandler {
                             param($Exception)
@@ -215,7 +213,7 @@ function Get-DashboardScreen {
                             $newValue = if ($data.NewValue -ne $null) { $data.NewValue } else { $data }
                             if ($screen -and $screen._todaysTasks -and $newValue) {
                                 $screen._todaysTasks.Data = $newValue 
-                                [void](& $screen._todaysTasks.ProcessData -self $screen._todaysTasks) # FIX: Suppress output
+                                & $screen._todaysTasks.ProcessData -self $screen._todaysTasks
                             }
                         } -Context @{ Data = $data } -ErrorHandler {
                             param($Exception)
@@ -360,9 +358,16 @@ function Get-DashboardScreen {
                         if ($passedServices -and $passedServices.Store) {
                             # Check if screen components are ready before refreshing
                             if ($screen -and $screen._quickActions -and $screen._activeTimers) {
-                                $result = & $passedServices.Store.Dispatch -self $passedServices.Store -actionName "DASHBOARD_REFRESH"
-                                if (-not $result.Success) {
-                                    Write-Log -Level Error -Message "Timer DASHBOARD_REFRESH dispatch failed: $($result.Error)"
+                                try {
+                                    $result = & $passedServices.Store.Dispatch -self $passedServices.Store -actionName "DASHBOARD_REFRESH"
+                                    if ($result -and (-not $result.Success)) {
+                                        Write-Log -Level Error -Message "Timer DASHBOARD_REFRESH dispatch failed: $($result.Error)"
+                                    }
+                                } catch {
+                                    Write-Log -Level Error -Message "Timer DASHBOARD_REFRESH dispatch exception: $($_.Exception.Message)" -Data @{
+                                        ExceptionType = $_.Exception.GetType().FullName
+                                        StackTrace = $_.Exception.StackTrace
+                                    }
                                 }
                             } else {
                                 Write-Log -Level Debug -Message "Timer: Screen components not ready yet, skipping refresh"
@@ -372,7 +377,15 @@ function Get-DashboardScreen {
                         }
                     } catch {
                         # We can't throw here, so we log the detailed error.
-                        Write-Log -Level Error -Message "A critical, unhandled error occurred inside the dashboard refresh timer: $_" -Data @{ TimerName = "DashboardRefresh"; Exception = $_ }
+                        try {
+                            Write-Log -Level Error -Message "A critical, unhandled error occurred inside the dashboard refresh timer: $($_.Exception.Message)" -Data @{ 
+                                TimerName = "DashboardRefresh" 
+                                ExceptionType = if ($_.Exception) { $_.Exception.GetType().FullName } else { "Unknown" }
+                                ExceptionMessage = if ($_.Exception) { $_.Exception.Message } else { $_.ToString() }
+                            }
+                        } catch {
+                            # If even logging fails, there's nothing more we can do in this timer context
+                        }
                     }
                 }
                 $self._refreshTimer.Start()

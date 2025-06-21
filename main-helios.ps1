@@ -346,21 +346,21 @@ function Initialize-PMCServices {
                     $global:Data = @{} 
                     Trace-Step -StepName "TASKS_REFRESH: Created global data"
                 }
-                if (-not ($global:Data.tasks -is [System.Collections.IEnumerable])) { 
-                    $global:Data.tasks = @() 
-                    Trace-Step -StepName "TASKS_REFRESH: Initialized tasks array"
+                if (-not $global:Data.Tasks) { 
+                    $global:Data.Tasks = @() 
+                    Trace-Step -StepName "TASKS_REFRESH: Initialized Tasks array"
                 }
                 
-                $rawTasks = $global:Data.tasks
+                $rawTasks = @($global:Data.Tasks)
                 Trace-Step -StepName "TASKS_REFRESH: Processing tasks" -StepData @{
-                    RawTaskCount = $rawTasks.Count
-                    RawTaskType = $rawTasks.GetType().Name
+                    RawTaskCount = if ($rawTasks) { @($rawTasks).Count } else { 0 }
+                    RawTaskType = if ($rawTasks) { $rawTasks.GetType().Name } else { "null" }
                 }
                 
-                $activeTasks = ($rawTasks | Where-Object { -not $_.completed }).Count
+                $activeTasks = @($rawTasks | Where-Object { -not $_.completed }).Count
                 $today = (Get-Date).Date
                 
-                $dashboardTasks = $rawTasks | Where-Object {
+                $dashboardTasks = @($rawTasks | Where-Object {
                     $updatedDate = $null
                     try { 
                         if ($_.updated_at) { 
@@ -380,9 +380,9 @@ function Initialize-PMCServices {
                         Task = $_.title
                         Project = if ($_.project) { $_.project } else { "None" }
                     }
-                }
+                })
 
-                $tasksForTable = $rawTasks | ForEach-Object {
+                $tasksForTable = @($rawTasks | ForEach-Object {
                     $dueDateText = "N/A"
                     if ($_.due_date) { 
                         try { 
@@ -403,11 +403,11 @@ function Initialize-PMCServices {
                         Category = if ($_.project) { $_.project } else { "General" }
                         DueDate = $dueDateText
                     }
-                }
+                })
                 
                 Trace-Step -StepName "TASKS_REFRESH: Updating state" -StepData @{
-                    DashboardTaskCount = $dashboardTasks.Count
-                    TableTaskCount = $tasksForTable.Count
+                    DashboardTaskCount = if ($dashboardTasks) { @($dashboardTasks).Count } else { 0 }
+                    TableTaskCount = if ($tasksForTable) { @($tasksForTable).Count } else { 0 }
                     ActiveTasks = $activeTasks
                 }
                 
@@ -415,7 +415,7 @@ function Initialize-PMCServices {
                 
                 Trace-ServiceCall -ServiceName "Store" -MethodName "TASKS_REFRESH" -Result @{ 
                     Success = $true
-                    ProcessedTasks = $tasksForTable.Count
+                    ProcessedTasks = if ($tasksForTable) { @($tasksForTable).Count } else { 0 }
                     ActiveTasks = $activeTasks
                 }
             } catch {
@@ -436,48 +436,50 @@ function Initialize-PMCServices {
             try {
                 Trace-Step -StepName "TIMERS_REFRESH: Checking global data" -StepData @{
                     GlobalDataExists = ($null -ne $global:Data)
-                    TimersExists = ($null -ne $global:Data.timers)
-                    TimersType = if ($global:Data.timers) { $global:Data.timers.GetType().Name } else { "null" }
+                    ActiveTimersExists = ($null -ne $global:Data.ActiveTimers)
+                    ActiveTimersType = if ($global:Data.ActiveTimers) { $global:Data.ActiveTimers.GetType().Name } else { "null" }
                 }
                 
                 if (-not $global:Data) { 
                     $global:Data = @{} 
                     Trace-Step -StepName "TIMERS_REFRESH: Created global data"
                 }
-                if (-not ($global:Data.timers -is [System.Collections.IEnumerable])) { 
-                    $global:Data.timers = @() 
-                    Trace-Step -StepName "TIMERS_REFRESH: Initialized timers array"
+                if (-not $global:Data.ActiveTimers) { 
+                    $global:Data.ActiveTimers = @{} 
+                    Trace-Step -StepName "TIMERS_REFRESH: Initialized ActiveTimers hashtable"
                 }
                 
-                $rawTimers = $global:Data.timers
+                $rawTimers = @($global:Data.ActiveTimers.Values)
                 Trace-Step -StepName "TIMERS_REFRESH: Processing timers" -StepData @{
-                    RawTimerCount = $rawTimers.Count
-                    RawTimerType = $rawTimers.GetType().Name
+                    RawTimerCount = if ($rawTimers) { @($rawTimers).Count } else { 0 }
+                    RawTimerType = if ($rawTimers) { $rawTimers.GetType().Name } else { "null" }
                 }
                 
-                $runningTimers = ($rawTimers | Where-Object { $_.is_running }).Count
-                $activeTimers = $rawTimers | Where-Object { $_.is_running } | ForEach-Object {
+                $runningTimers = @($rawTimers).Count
+                $activeTimers = @($rawTimers | ForEach-Object {
                     $duration = "00:00:00"
-                    if ($_.start_time) {
+                    if ($_.StartTime) {
                         try {
-                            $start = [DateTime]::Parse($_.start_time)
+                            $start = [DateTime]::Parse($_.StartTime)
                             $duration = "{0:hh\:mm\:ss}" -f ((Get-Date) - $start)
                         } catch { 
                             Trace-Step -StepName "TIMERS_REFRESH: Start time parse error" -StepData @{
-                                TimerId = $_.id
-                                StartTime = $_.start_time
+                                TimerKey = $_.Key
+                                StartTime = $_.StartTime
                                 Error = $_.Exception.Message
                             }
                         }
                     }
                     @{
-                        Project = if ($_.project) { $_.project } else { "No Project" }
+                        Project = if ($_.ProjectKey -and $global:Data.Projects -and $global:Data.Projects[$_.ProjectKey]) { 
+                            $global:Data.Projects[$_.ProjectKey].Name 
+                        } else { "No Project" }
                         Time = $duration
                     }
-                }
+                })
                 
                 Trace-Step -StepName "TIMERS_REFRESH: Updating state" -StepData @{
-                    ActiveTimerCount = $activeTimers.Count
+                    ActiveTimerCount = if ($activeTimers) { @($activeTimers).Count } else { 0 }
                     RunningTimers = $runningTimers
                 }
                 
@@ -485,7 +487,7 @@ function Initialize-PMCServices {
                 
                 Trace-ServiceCall -ServiceName "Store" -MethodName "TIMERS_REFRESH" -Result @{ 
                     Success = $true
-                    ActiveTimers = $activeTimers.Count
+                    ActiveTimers = if ($activeTimers) { @($activeTimers).Count } else { 0 }
                     RunningTimers = $runningTimers
                 }
             } catch {
@@ -518,39 +520,39 @@ function Initialize-PMCServices {
                 
                 Trace-Step -StepName "LOAD_DASHBOARD_DATA: Processing time entries" -StepData @{
                     GlobalDataExists = ($null -ne $global:Data)
-                    TimeEntriesExists = ($null -ne $global:Data.time_entries)
-                    TimeEntriesType = if ($global:Data.time_entries) { $global:Data.time_entries.GetType().Name } else { "null" }
+                    TimeEntriesExists = ($null -ne $global:Data.TimeEntries)
+                    TimeEntriesType = if ($global:Data.TimeEntries) { $global:Data.TimeEntries.GetType().Name } else { "null" }
                 }
                 
                 if (-not $global:Data) { 
                     $global:Data = @{} 
                     Trace-Step -StepName "LOAD_DASHBOARD_DATA: Created global data"
                 }
-                if (-not ($global:Data.time_entries -is [System.Collections.IEnumerable])) { 
-                    $global:Data.time_entries = @() 
-                    Trace-Step -StepName "LOAD_DASHBOARD_DATA: Initialized time entries array"
+                if (-not $global:Data.TimeEntries) { 
+                    $global:Data.TimeEntries = @() 
+                    Trace-Step -StepName "LOAD_DASHBOARD_DATA: Initialized TimeEntries array"
                 }
                 
                 $todayHours = 0; $weekHours = 0
-                if ($global:Data.time_entries -and $global:Data.time_entries.Count -gt 0) {
+                if ($global:Data.TimeEntries -and @($global:Data.TimeEntries).Count -gt 0) {
                     $today = (Get-Date).Date
                     $weekStartDay = [DayOfWeek]::Monday
                     $currentDayOfWeek = $today.DayOfWeek
                     $daysToSubtract = ($currentDayOfWeek - $weekStartDay + 7) % 7
                     $weekStart = $today.AddDays(-$daysToSubtract)
 
-                    foreach ($entry in $global:Data.time_entries) {
-                        if ($entry.start_time) {
+                    foreach ($entry in $global:Data.TimeEntries) {
+                        if ($entry.Date) {
                             try {
-                                $entryDate = [DateTime]::Parse($entry.start_time).Date
-                                if ($entry.duration) {
-                                    if ($entryDate -eq $today) { $todayHours += $entry.duration }
-                                    if ($entryDate -ge $weekStart -and $entryDate -le $today) { $weekHours += $entry.duration }
+                                $entryDate = [DateTime]::Parse($entry.Date).Date
+                                if ($entry.Hours) {
+                                    if ($entryDate -eq $today) { $todayHours += $entry.Hours }
+                                    if ($entryDate -ge $weekStart -and $entryDate -le $today) { $weekHours += $entry.Hours }
                                 }
                             } catch { 
                                 Trace-Step -StepName "LOAD_DASHBOARD_DATA: Time entry parse error" -StepData @{
                                     EntryId = $entry.id
-                                    StartTime = $entry.start_time
+                                    Date = $entry.Date
                                     Error = $_.Exception.Message
                                 }
                             }
@@ -561,7 +563,7 @@ function Initialize-PMCServices {
                 Trace-Step -StepName "LOAD_DASHBOARD_DATA: Updating time stats" -StepData @{
                     TodayHours = $todayHours
                     WeekHours = $weekHours
-                    ProcessedEntries = $global:Data.time_entries.Count
+                    ProcessedEntries = @($global:Data.TimeEntries).Count
                 }
                 
                 & $Context.UpdateState @{ "stats.todayHours" = [Math]::Round($todayHours, 2); "stats.weekHours" = [Math]::Round($weekHours, 2) }
@@ -588,7 +590,7 @@ function Initialize-PMCServices {
             Trace-ServiceCall -ServiceName "Store" -MethodName "TASK_CREATE" -Parameters @{ Payload = $Payload }
             
             if (-not $global:Data) { $global:Data = @{} }
-            if (-not $global:Data.tasks) { $global:Data.tasks = @() }
+            if (-not $global:Data.Tasks) { $global:Data.Tasks = @() }
             if ($Payload.Title) {
                 $newTask = @{
                     id = [Guid]::NewGuid().ToString(); title = $Payload.Title
@@ -596,7 +598,7 @@ function Initialize-PMCServices {
                     completed = $false; priority = "medium"
                     created_at = (Get-Date).ToString("o"); updated_at = (Get-Date).ToString("o")
                 }
-                $global:Data.tasks += $newTask
+                $global:Data.Tasks += $newTask
                 Save-UnifiedData
                 & $Context.Dispatch "TASKS_REFRESH"
                 
@@ -608,8 +610,8 @@ function Initialize-PMCServices {
             param($Context, $Payload)
             Trace-ServiceCall -ServiceName "Store" -MethodName "TASK_TOGGLE_STATUS" -Parameters @{ Payload = $Payload }
             
-            if ($global:Data -and $global:Data.tasks -and $Payload.TaskId) {
-                $taskToUpdate = $global:Data.tasks | Where-Object { $_.id -eq $Payload.TaskId } | Select-Object -First 1
+            if ($global:Data -and $global:Data.Tasks -and $Payload.TaskId) {
+                $taskToUpdate = $global:Data.Tasks | Where-Object { $_.id -eq $Payload.TaskId } | Select-Object -First 1
                 if ($taskToUpdate) {
                     $taskToUpdate.completed = -not $taskToUpdate.completed
                     $taskToUpdate.updated_at = (Get-Date).ToString("o")
@@ -1133,6 +1135,7 @@ try {
     # Initialize basic logging even before modules are loaded
     Write-Host "PMC Terminal v4.2 'Helios' - Enhanced Diagnostics Mode" -ForegroundColor Cyan
     Write-Host "Tracing enabled - All execution steps will be logged" -ForegroundColor Yellow
+    Write-Host "Log files written to: $env:TEMP\PMCTerminal\" -ForegroundColor Green
     Write-Host "Starting initialization sequence..." -ForegroundColor Green
     Write-Host ""
     

@@ -48,11 +48,11 @@ function Get-TaskManagementScreen {
                     ShowBorder = $false; Orientation = "Vertical"; Spacing = 1
                 }
                 $self.Components.rootPanel = $rootPanel
-                [void]($self.Children += $rootPanel) # FIX: Suppress pipeline output
+                $self.Children += $rootPanel
                 
                 # Header & Toolbar
-                [void](& $rootPanel.AddChild -self $rootPanel -Child (New-TuiLabel -Props @{ Text = "Task Management"; Height = 1 }))
-                [void](& $rootPanel.AddChild -self $rootPanel -Child (New-TuiLabel -Props @{ Text = "Filter: [1]All [2]Active [3]Completed | Sort: [P]riority [D]ue Date [C]reated"; Height = 1 }))
+                & $rootPanel.AddChild -self $rootPanel -Child (New-TuiLabel -Props @{ Text = "Task Management"; Height = 1 })
+                & $rootPanel.AddChild -self $rootPanel -Child (New-TuiLabel -Props @{ Text = "Filter: [1]All [2]Active [3]Completed | Sort: [P]riority [D]ue Date [C]reated"; Height = 1 })
                 
                 # Task table panel
                 $tablePanel = New-TuiStackPanel -Props @{
@@ -88,15 +88,15 @@ function Get-TaskManagementScreen {
                     }
                 }
                 
-                [void](& $tablePanel.AddChild -self $tablePanel -Child $taskTable)
-                [void](& $rootPanel.AddChild -self $rootPanel -Child $tablePanel)
+                & $tablePanel.AddChild -self $tablePanel -Child $taskTable
+                & $rootPanel.AddChild -self $rootPanel -Child $tablePanel
                 
                 $self._taskTable = $taskTable
                 
                 # Create form panel (initially hidden)
                 & $self._CreateFormPanel -self $self
                 if ($self.Components.formPanel) {
-                    [void]($self.Children += $self.Components.formPanel) # FIX: Add formPanel to Children array.
+                    $self.Children += $self.Components.formPanel
                 }
                 
                 # Capture references for use in handlers
@@ -144,7 +144,7 @@ function Get-TaskManagementScreen {
                 }
                 
                 # Load initial data
-                [void](& $services.Store.Dispatch -self $services.Store -actionName "TASKS_REFRESH")
+                & $services.Store.Dispatch -self $services.Store -actionName "TASKS_REFRESH"
                 
                 # Register screen with focus manager after all components are created
                 if (Get-Command -Name "Register-ScreenForFocus" -ErrorAction SilentlyContinue) {
@@ -181,13 +181,13 @@ function Get-TaskManagementScreen {
                 # Fields
                 $titleLabel = New-TuiLabel -Props @{ Text = "Title:"; Height = 1 }
                 $titleInput = New-TuiTextBox -Props @{ Name = "formTitle"; IsFocusable = $true; Height = 3; Placeholder = "Enter task title..." }
-                [void](& $formPanel.AddChild -self $formPanel -Child $titleLabel -LayoutProps @{ "Grid.Row" = 0; "Grid.Column" = 0 })
-                [void](& $formPanel.AddChild -self $formPanel -Child $titleInput -LayoutProps @{ "Grid.Row" = 0; "Grid.Column" = 1 })
+                & $formPanel.AddChild -self $formPanel -Child $titleLabel -LayoutProps @{ "Grid.Row" = 0; "Grid.Column" = 0 }
+                & $formPanel.AddChild -self $formPanel -Child $titleInput -LayoutProps @{ "Grid.Row" = 0; "Grid.Column" = 1 }
                 
                 $descLabel = New-TuiLabel -Props @{ Text = "Description:"; Height = 1 }
                 $descInput = New-TuiTextBox -Props @{ Name = "formDescription"; IsFocusable = $true; Height = 3; Placeholder = "Enter description..." }
-                [void](& $formPanel.AddChild -self $formPanel -Child $descLabel -LayoutProps @{ "Grid.Row" = 1; "Grid.Column" = 0 })
-                [void](& $formPanel.AddChild -self $formPanel -Child $descInput -LayoutProps @{ "Grid.Row" = 1; "Grid.Column" = 1 })
+                & $formPanel.AddChild -self $formPanel -Child $descLabel -LayoutProps @{ "Grid.Row" = 1; "Grid.Column" = 0 }
+                & $formPanel.AddChild -self $formPanel -Child $descInput -LayoutProps @{ "Grid.Row" = 1; "Grid.Column" = 1 }
                 
                 # Capture screen reference for button handlers
                 $screen = $self
@@ -196,9 +196,9 @@ function Get-TaskManagementScreen {
                 $buttonPanel = New-TuiStackPanel -Props @{ Orientation = "Horizontal"; HorizontalAlignment = "Center"; Spacing = 2; Height = 3 }
                 $saveButton = New-TuiButton -Props @{ Text = "Save"; Width = 12; Height = 3; IsFocusable = $true; OnClick = { Invoke-WithErrorHandling -Component "TaskForm.SaveButton.OnClick" -ScriptBlock { & $screen._SaveTask -self $screen } -Context @{ FormFields = $screen._formFields } -ErrorHandler { param($Exception) { Show-AlertDialog -Title "Save Error" -Message "Failed to save task: $($Exception.Message)" } } } }
                 $cancelButton = New-TuiButton -Props @{ Text = "Cancel"; Width = 12; Height = 3; IsFocusable = $true; OnClick = { Invoke-WithErrorHandling -Component "TaskForm.CancelButton.OnClick" -ScriptBlock { & $screen._HideForm -self $screen } -Context @{} -ErrorHandler { param($Exception) { Show-AlertDialog -Title "Cancel Error" -Message "Failed to cancel form: $($Exception.Message)" } } } }
-                [void](& $buttonPanel.AddChild -self $buttonPanel -Child $saveButton)
-                [void](& $buttonPanel.AddChild -self $buttonPanel -Child $cancelButton)
-                [void](& $formPanel.AddChild -self $formPanel -Child $buttonPanel -LayoutProps @{ "Grid.Row" = 5; "Grid.Column" = 0; "Grid.ColumnSpan" = 2 })
+                & $buttonPanel.AddChild -self $buttonPanel -Child $saveButton
+                & $buttonPanel.AddChild -self $buttonPanel -Child $cancelButton
+                & $formPanel.AddChild -self $formPanel -Child $buttonPanel -LayoutProps @{ "Grid.Row" = 5; "Grid.Column" = 0; "Grid.ColumnSpan" = 2 }
                 
                 $self.Components.formPanel = $formPanel
                 $self._formFields = @{ Title = $titleInput; Description = $descInput }
@@ -250,7 +250,7 @@ function Get-TaskManagementScreen {
                 $action = if ($self._editingTaskId) { "TASK_UPDATE" } else { "TASK_CREATE" }
                 if ($self._editingTaskId) { $formData.TaskId = $self._editingTaskId }
                 
-                [void](& $self._services.Store.Dispatch -self $self._services.Store -actionName $action -payload $formData)
+                & $self._services.Store.Dispatch -self $self._services.Store -actionName $action -payload $formData
                 & $self._HideForm -self $self
             } -Context @{ ScreenName = $self.Name; EditingTaskId = $self._editingTaskId; FormData = $self._formFields.Title.Text } -ErrorHandler {
                 param($Exception)
@@ -308,12 +308,12 @@ function Get-TaskManagementScreen {
                         return $true
                     }
                     'q' { return "Back" }
-                    '1' { [void](& $services.Store.Dispatch -self $services.Store -actionName "UPDATE_STATE" -payload @{ taskFilter = "all" }); return $true }
-                    '2' { [void](& $services.Store.Dispatch -self $services.Store -actionName "UPDATE_STATE" -payload @{ taskFilter = "active" }); return $true }
-                    '3' { [void](& $services.Store.Dispatch -self $services.Store -actionName "UPDATE_STATE" -payload @{ taskFilter = "completed" }); return $true }
-                    'p' { [void](& $services.Store.Dispatch -self $services.Store -actionName "UPDATE_STATE" -payload @{ taskSort = "priority" }); return $true }
-                    'd' { [void](& $services.Store.Dispatch -self $services.Store -actionName "UPDATE_STATE" -payload @{ taskSort = "dueDate" }); return $true }
-                    'c' { [void](& $services.Store.Dispatch -self $services.Store -actionName "UPDATE_STATE" -payload @{ taskSort = "created" }); return $true }
+                    '1' { & $services.Store.Dispatch -self $services.Store -actionName "UPDATE_STATE" -payload @{ taskFilter = "all" }; return $true }
+                    '2' { & $services.Store.Dispatch -self $services.Store -actionName "UPDATE_STATE" -payload @{ taskFilter = "active" }; return $true }
+                    '3' { & $services.Store.Dispatch -self $services.Store -actionName "UPDATE_STATE" -payload @{ taskFilter = "completed" }; return $true }
+                    'p' { & $services.Store.Dispatch -self $services.Store -actionName "UPDATE_STATE" -payload @{ taskSort = "priority" }; return $true }
+                    'd' { & $services.Store.Dispatch -self $services.Store -actionName "UPDATE_STATE" -payload @{ taskSort = "dueDate" }; return $true }
+                    'c' { & $services.Store.Dispatch -self $services.Store -actionName "UPDATE_STATE" -payload @{ taskSort = "created" }; return $true }
                 }
                 
                 return $false
@@ -343,7 +343,7 @@ function Get-TaskManagementScreen {
             param($self)
             Invoke-WithErrorHandling -Component "$($self.Name).OnResume" -ScriptBlock {
                 $global:TuiState.RenderStats.FrameCount = 0
-                [void](& $self._services.Store.Dispatch -self $self._services.Store -actionName "TASKS_REFRESH")
+                & $self._services.Store.Dispatch -self $self._services.Store -actionName "TASKS_REFRESH"
                 Request-TuiRefresh
             } -Context @{ ScreenName = $self.Name } -ErrorHandler {
                 param($Exception)

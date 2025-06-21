@@ -96,7 +96,7 @@ function global:Subscribe-Event {
         [Parameter(Mandatory = $true)]
         [string]$EventName,
         
-        [Parameter(Mandrandatory = $true)]
+        [Parameter(Mandatory = $true)]
         [scriptblock]$Handler,
         
         [Parameter()]
