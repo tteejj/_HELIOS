@@ -7,13 +7,15 @@ function Initialize-AppStore {
         [bool]$EnableDebugLogging = $false
     )
     
-    # Ensure Create-TuiState exists
-    if (-not (Get-Command -Name "Create-TuiState" -ErrorAction SilentlyContinue)) {
-        throw "Create-TuiState not found. Ensure tui-framework.psm1 is loaded first."
-    }
+    # Initialize state structure properly
+    $stateData = if ($InitialData) { $InitialData.Clone() } else { @{} }
     
     $store = @{
-        _state = (Create-TuiState -InitialState $InitialData)
+        _state = @{
+            _data = $stateData
+            _subscribers = @{}
+            _changeQueue = @()
+        }
         _actions = @{}
         _middleware = @()
         _history = @()  # For time-travel debugging
@@ -139,9 +141,9 @@ function Initialize-AppStore {
                         
                         Write-Log -Level Debug -Message "UpdateState called with keys: $($updates.Keys -join ', ')"
                         
-                        # Always use the _updateState method on the store
+                        # Use direct update method that handles all the complexity
                         try {
-                            & $store._updateState -self $store -updates $updates
+                            & $store._directUpdateState -self $store -updates $updates
                             Write-Log -Level Debug -Message "UpdateState: Successfully updated state"
                         } catch {
                             Write-Log -Level Error -Message "UpdateState failed: $_"

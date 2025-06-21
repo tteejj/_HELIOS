@@ -1,4 +1,4 @@
-# PMC Terminal v4.2 "Helios" - Main Entry Point (CORRECTED)
+# PMC Terminal v4.2 "Helios" - Main Entry Point (FIXED WITH PROPER ERROR HANDLING)
 # This file orchestrates module loading and application startup with the new service architecture
 
 # Set strict mode for better error handling
@@ -63,184 +63,529 @@ $script:ScreenModules = @(
 function Initialize-PMCModules {
     param([bool]$Silent = $false)
     
-    $minWidth = 80
-    $minHeight = 24
-    if ($Host.UI.RawUI) {
-        $currentWidth = $Host.UI.RawUI.WindowSize.Width
-        $currentHeight = $Host.UI.RawUI.WindowSize.Height
-        if ($currentWidth -lt $minWidth -or $currentHeight -lt $minHeight) {
-            Write-Host "Console window too small!" -ForegroundColor Red
-            Write-Host "Current size: ${currentWidth}x${currentHeight}" -ForegroundColor Yellow
-            Write-Host "Minimum required: ${minWidth}x${minHeight}" -ForegroundColor Green
-            Write-Host "Please resize your console window and try again." -ForegroundColor White
-            Write-Host "Press any key to exit..." -ForegroundColor Gray
-            $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-            exit 1
+    Trace-FunctionEntry -FunctionName "Initialize-PMCModules" -Parameters @{ Silent = $Silent }
+    
+    return Invoke-WithErrorHandling -Component "ModuleLoader" -OperationName "Initialize-PMCModules" -ScriptBlock {
+        Trace-Step -StepName "Checking console window size"
+        $minWidth = 80
+        $minHeight = 24
+        if ($Host.UI.RawUI) {
+            $currentWidth = $Host.UI.RawUI.WindowSize.Width
+            $currentHeight = $Host.UI.RawUI.WindowSize.Height
+            Trace-Step -StepName "Console size check" -StepData @{
+                CurrentWidth = $currentWidth
+                CurrentHeight = $currentHeight
+                MinWidth = $minWidth
+                MinHeight = $minHeight
+            }
+            
+            if ($currentWidth -lt $minWidth -or $currentHeight -lt $minHeight) {
+                Write-Host "Console window too small!" -ForegroundColor Red
+                Write-Host "Current size: ${currentWidth}x${currentHeight}" -ForegroundColor Yellow
+                Write-Host "Minimum required: ${minWidth}x${minHeight}" -ForegroundColor Green
+                Write-Host "Please resize your console window and try again." -ForegroundColor White
+                Write-Host "Press any key to exit..." -ForegroundColor Gray
+                $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+                exit 1
+            }
         }
-    }
-    
-    if (-not $Silent) { Write-Host "Initializing PMC Terminal v4.2 'Helios'..." -ForegroundColor Cyan }
-    $loadedModules = @()
-    
-    foreach ($module in $script:ModulesToLoad) {
-        $modulePath = Join-Path $script:BasePath $module.Path
-        try {
-            if (Test-Path $modulePath) {
-                if (-not $Silent) { Write-Host "  Loading $($module.Name)..." -ForegroundColor Gray }
-                Import-Module $modulePath -Force -Global -ErrorAction Stop
-                $loadedModules += $module.Name
-            } elseif ($module.Required) { throw "Required module not found: $($module.Name) at $modulePath" }
-        } catch {
-            if ($module.Required) { Write-Host "  Failed to load $($module.Name): $_" -ForegroundColor Red; throw }
-            else { if (-not $Silent) { Write-Host "  Optional module $($module.Name) not loaded: $_" -ForegroundColor Yellow } }
+        
+        if (-not $Silent) { Write-Host "Initializing PMC Terminal v4.2 'Helios'..." -ForegroundColor Cyan }
+        Trace-Step -StepName "Starting module loading sequence" -StepData @{
+            TotalModules = $script:ModulesToLoad.Count
+            BasePath = $script:BasePath
         }
+        
+        $loadedModules = @()
+        
+        foreach ($module in $script:ModulesToLoad) {
+            $modulePath = Join-Path $script:BasePath $module.Path
+            Trace-Step -StepName "Processing module" -StepData @{
+                ModuleName = $module.Name
+                ModulePath = $modulePath
+                Required = $module.Required
+                PathExists = Test-Path $modulePath
+            }
+            
+            try {
+                if (Test-Path $modulePath) {
+                    if (-not $Silent) { Write-Host "  Loading $($module.Name)..." -ForegroundColor Gray }
+                    
+                    Trace-Step -StepName "Importing module" -StepData @{
+                        ModuleName = $module.Name
+                        Action = "Import-Module"
+                    }
+                    
+                    Import-Module $modulePath -Force -Global -ErrorAction Stop
+                    $loadedModules += $module.Name
+                    
+                    Trace-Step -StepName "Module loaded successfully" -StepData @{
+                        ModuleName = $module.Name
+                        LoadedCount = $loadedModules.Count
+                    }
+                    
+                } elseif ($module.Required) { 
+                    $errorMsg = "Required module not found: $($module.Name) at $modulePath"
+                    Write-Log -Level Error -Message $errorMsg -Force
+                    throw $errorMsg
+                }
+            } catch {
+                $errorMsg = "Failed to load module $($module.Name): $_"
+                Write-Log -Level Error -Message $errorMsg -Data @{
+                    ModuleName = $module.Name
+                    ModulePath = $modulePath
+                    Required = $module.Required
+                    Exception = $_.Exception.Message
+                } -Force
+                
+                if ($module.Required) { 
+                    Write-Host "  $errorMsg" -ForegroundColor Red
+                    throw 
+                } else { 
+                    if (-not $Silent) { Write-Host "  Optional module $($module.Name) not loaded: $_" -ForegroundColor Yellow } 
+                }
+            }
+        }
+        
+        if (-not $Silent) { Write-Host "Loaded $($loadedModules.Count) modules successfully" -ForegroundColor Green }
+        
+        Trace-Step -StepName "Module loading completed" -StepData @{
+            LoadedModules = $loadedModules
+            LoadedCount = $loadedModules.Count
+            TotalAttempted = $script:ModulesToLoad.Count
+        }
+        
+        Trace-FunctionExit -FunctionName "Initialize-PMCModules" -ReturnValue @{
+            LoadedCount = $loadedModules.Count
+            LoadedModules = $loadedModules
+        }
+        
+        return $loadedModules
     }
-    
-    if (-not $Silent) { Write-Host "Loaded $($loadedModules.Count) modules successfully" -ForegroundColor Green }
-    return $loadedModules
 }
 
 function Initialize-PMCScreens {
     param([bool]$Silent = $false)
     
-    if (-not $Silent) { Write-Host "Loading screens..." -ForegroundColor Cyan }
-    $loadedScreens = @()
+    Trace-FunctionEntry -FunctionName "Initialize-PMCScreens" -Parameters @{ Silent = $Silent }
     
-    foreach ($screenName in $script:ScreenModules) {
-        $screenPath = Join-Path $script:BasePath "screens\$screenName.psm1"
-        try {
-            if (Test-Path $screenPath) {
-                Import-Module $screenPath -Force -Global -ErrorAction SilentlyContinue
-                $loadedScreens += $screenName
-            } else { if (-not $Silent) { Write-Host "  Screen module not found: $screenName" -ForegroundColor Yellow } }
-        } catch { if (-not $Silent) { Write-Host "  Failed to load screen: $screenName - $_" -ForegroundColor Yellow } }
+    return Invoke-WithErrorHandling -Component "ScreenLoader" -OperationName "Initialize-PMCScreens" -ScriptBlock {
+        if (-not $Silent) { Write-Host "Loading screens..." -ForegroundColor Cyan }
+        
+        Trace-Step -StepName "Starting screen loading sequence" -StepData @{
+            TotalScreens = $script:ScreenModules.Count
+            BasePath = $script:BasePath
+            ScreenModules = $script:ScreenModules
+        }
+        
+        $loadedScreens = @()
+        
+        foreach ($screenName in $script:ScreenModules) {
+            $screenPath = Join-Path $script:BasePath "screens\$screenName.psm1"
+            
+            Trace-Step -StepName "Processing screen module" -StepData @{
+                ScreenName = $screenName
+                ScreenPath = $screenPath
+                PathExists = Test-Path $screenPath
+            }
+            
+            try {
+                if (Test-Path $screenPath) {
+                    Trace-Step -StepName "Importing screen module" -StepData @{
+                        ScreenName = $screenName
+                        Action = "Import-Module"
+                    }
+                    
+                    Import-Module $screenPath -Force -Global -ErrorAction SilentlyContinue
+                    $loadedScreens += $screenName
+                    
+                    Trace-Step -StepName "Screen module loaded successfully" -StepData @{
+                        ScreenName = $screenName
+                        LoadedCount = $loadedScreens.Count
+                    }
+                    
+                    # Verify the screen module exported its expected functions
+                    $expectedFunctions = @()
+                    switch ($screenName) {
+                        "dashboard-screen-helios" { $expectedFunctions = @("Get-DashboardScreen") }
+                        "task-screen-helios" { $expectedFunctions = @("Get-TaskManagementScreen", "Get-TaskScreen") }
+                        "simple-test-screen" { $expectedFunctions = @("Get-SimpleTestScreen") }
+                        default { 
+                            # For other screens, try to guess the function name
+                            $functionName = "Get-" + (($screenName -split "-") | ForEach-Object { 
+                                $_.Substring(0,1).ToUpper() + $_.Substring(1) 
+                            }) -join ""
+                            $expectedFunctions = @($functionName)
+                        }
+                    }
+                    
+                    foreach ($funcName in $expectedFunctions) {
+                        $funcExists = Get-Command $funcName -ErrorAction SilentlyContinue
+                        Trace-Step -StepName "Verifying screen function" -StepData @{
+                            ScreenName = $screenName
+                            FunctionName = $funcName
+                            FunctionExists = ($null -ne $funcExists)
+                        }
+                        
+                        if (-not $funcExists) {
+                            Write-Log -Level Warning -Message "Expected function '$funcName' not found for screen '$screenName'"
+                        }
+                    }
+                    
+                } else { 
+                    if (-not $Silent) { 
+                        Write-Host "  Screen module not found: $screenName" -ForegroundColor Yellow 
+                    }
+                    
+                    Trace-Step -StepName "Screen module file not found" -StepData @{
+                        ScreenName = $screenName
+                        ExpectedPath = $screenPath
+                    }
+                }
+            } catch { 
+                if (-not $Silent) { 
+                    Write-Host "  Failed to load screen: $screenName - $_" -ForegroundColor Yellow 
+                }
+                
+                Write-Log -Level Warning -Message "Failed to load screen module" -Data @{
+                    ScreenName = $screenName
+                    ScreenPath = $screenPath
+                    Exception = $_.Exception.Message
+                    StackTrace = $_.Exception.StackTrace
+                }
+                
+                Trace-Step -StepName "Screen module loading failed" -StepData @{
+                    ScreenName = $screenName
+                    Error = $_.Exception.Message
+                }
+            }
+        }
+        
+        if (-not $Silent) { Write-Host "Loaded $($loadedScreens.Count) screens" -ForegroundColor Green }
+        
+        Trace-Step -StepName "Screen loading completed" -StepData @{
+            LoadedScreens = $loadedScreens
+            LoadedCount = $loadedScreens.Count
+            TotalAttempted = $script:ScreenModules.Count
+            SuccessRate = if ($script:ScreenModules.Count -gt 0) { 
+                [Math]::Round(($loadedScreens.Count / $script:ScreenModules.Count) * 100, 1) 
+            } else { 0 }
+        }
+        
+        Trace-FunctionExit -FunctionName "Initialize-PMCScreens" -ReturnValue @{
+            LoadedCount = $loadedScreens.Count
+            LoadedScreens = $loadedScreens
+        }
+        
+        return $loadedScreens
     }
-    
-    if (-not $Silent) { Write-Host "Loaded $($loadedScreens.Count) screens" -ForegroundColor Green }
-    return $loadedScreens
 }
 
 function Initialize-PMCServices {
     param([bool]$Silent = $false)
     
-    if (-not $Silent) { Write-Host "Initializing services..." -ForegroundColor Cyan }
-    $services = @{}
+    Trace-FunctionEntry -FunctionName "Initialize-PMCServices" -Parameters @{ Silent = $Silent }
     
-    try {
+    return Invoke-WithErrorHandling -Component "ServiceInitializer" -OperationName "Initialize-PMCServices" -ScriptBlock {
+        if (-not $Silent) { Write-Host "Initializing services..." -ForegroundColor Cyan }
+        
+        Trace-Step -StepName "Starting service initialization" -StepData @{
+            GlobalDataExists = ($null -ne $global:Data)
+            GlobalDataType = if ($global:Data) { $global:Data.GetType().Name } else { "null" }
+        }
+        
+        $services = @{}
+        
+        # Initialize AppStore
+        Trace-Step -StepName "Initializing AppStore" -StepData @{
+            InitialDataAvailable = ($null -ne $global:Data)
+        }
+        
         $initialData = if ($global:Data) { $global:Data } else { @{} }
+        Trace-StateChange -StateType "InitialData" -NewValue $initialData
+        
         $services.Store = Initialize-AppStore -InitialData $initialData -EnableDebugLogging $false
         
+        Trace-Step -StepName "AppStore initialized" -StepData @{
+            StoreType = $services.Store.GetType().Name
+            StoreKeys = if ($services.Store -is [hashtable]) { $services.Store.Keys } else { "N/A" }
+        }
+        
+        # Register DASHBOARD_REFRESH action
+        Trace-Step -StepName "Registering DASHBOARD_REFRESH action"
         & $services.Store.RegisterAction -self $services.Store -actionName "DASHBOARD_REFRESH" -scriptBlock {
             param($Context)
-            & $Context.Dispatch "LOAD_DASHBOARD_DATA"
-            & $Context.Dispatch "TASKS_REFRESH"
-            & $Context.Dispatch "TIMERS_REFRESH"
+            Trace-ServiceCall -ServiceName "Store" -MethodName "DASHBOARD_REFRESH" -Parameters @{ Context = "ActionContext" }
+            
+            try {
+                & $Context.Dispatch "LOAD_DASHBOARD_DATA"
+                & $Context.Dispatch "TASKS_REFRESH"
+                & $Context.Dispatch "TIMERS_REFRESH"
+                
+                Trace-ServiceCall -ServiceName "Store" -MethodName "DASHBOARD_REFRESH" -Result @{ Success = $true }
+            } catch {
+                Trace-ServiceCall -ServiceName "Store" -MethodName "DASHBOARD_REFRESH" -Result @{ Success = $false; Error = $_.Exception.Message } -IsError
+                throw
+            }
         }
         
+        Trace-Step -StepName "Registering TASKS_REFRESH action"
         & $services.Store.RegisterAction -self $services.Store -actionName "TASKS_REFRESH" -scriptBlock {
             param($Context)
-            if (-not $global:Data) { $global:Data = @{} }
-            if (-not ($global:Data.tasks -is [System.Collections.IEnumerable])) { $global:Data.tasks = @() }
+            Trace-ServiceCall -ServiceName "Store" -MethodName "TASKS_REFRESH" -Parameters @{ Context = "ActionContext" }
             
-            $rawTasks = $global:Data.tasks
-            $activeTasks = ($rawTasks | Where-Object { -not $_.completed }).Count
-            $today = (Get-Date).Date
-            
-            $dashboardTasks = $rawTasks | Where-Object {
-                $updatedDate = $null
-                # FIX: Add specific try/catch for date parsing
-                try { if ($_.updated_at) { $updatedDate = [DateTime]::Parse($_.updated_at).Date } } catch { }
-                -not $_.completed -or ($updatedDate -and $updatedDate -eq $today)
-            } | Select-Object -First 10 | ForEach-Object {
-                @{
-                    Priority = switch($_.priority) { "high" { "[HIGH]" } "medium" { "[MED]" } default { "[LOW]" } }
-                    Task = $_.title
-                    Project = if ($_.project) { $_.project } else { "None" }
+            try {
+                Trace-Step -StepName "TASKS_REFRESH: Checking global data" -StepData @{
+                    GlobalDataExists = ($null -ne $global:Data)
+                    TasksExists = ($null -ne $global:Data.tasks)
+                    TasksType = if ($global:Data.tasks) { $global:Data.tasks.GetType().Name } else { "null" }
                 }
-            }
-
-            $tasksForTable = $rawTasks | ForEach-Object {
-                $dueDateText = "N/A"
-                # FIX: Add specific try/catch for date parsing
-                if ($_.due_date) { try { $dueDateText = ([DateTime]$_.due_date).ToString("yyyy-MM-dd") } catch { } }
-                @{
-                    Id = $_.id
-                    Status = if ($_.completed) { "✓" } else { "○" }
-                    Priority = if ($_.priority) { $_.priority } else { "Medium" }
-                    Title = if ($_.title) { $_.title } else { "Untitled" }
-                    Category = if ($_.project) { $_.project } else { "General" }
-                    DueDate = $dueDateText
+                
+                if (-not $global:Data) { 
+                    $global:Data = @{} 
+                    Trace-Step -StepName "TASKS_REFRESH: Created global data"
                 }
-            }
-            
-            & $Context.UpdateState @{ tasks = $tasksForTable; todaysTasks = $dashboardTasks; "stats.activeTasks" = $activeTasks }
-        }
-        
-        & $services.Store.RegisterAction -self $services.Store -actionName "TIMERS_REFRESH" -scriptBlock {
-            param($Context)
-            if (-not $global:Data) { $global:Data = @{} }
-            # FIX: Ensure timers is a collection to prevent pipeline errors.
-            if (-not ($global:Data.timers -is [System.Collections.IEnumerable])) { $global:Data.timers = @() }
-            
-            $runningTimers = ($global:Data.timers | Where-Object { $_.is_running }).Count
-            $activeTimers = $global:Data.timers | Where-Object { $_.is_running } | ForEach-Object {
-                $duration = "00:00:00"
-                # FIX: Add specific try/catch for date parsing
-                if ($_.start_time) {
-                    try {
-                        $start = [DateTime]::Parse($_.start_time)
-                        $duration = "{0:hh\:mm\:ss}" -f ((Get-Date) - $start)
-                    } catch { } # Keep default duration if parse fails
+                if (-not ($global:Data.tasks -is [System.Collections.IEnumerable])) { 
+                    $global:Data.tasks = @() 
+                    Trace-Step -StepName "TASKS_REFRESH: Initialized tasks array"
                 }
-                @{
-                    Project = if ($_.project) { $_.project } else { "No Project" }
-                    Time = $duration
+                
+                $rawTasks = $global:Data.tasks
+                Trace-Step -StepName "TASKS_REFRESH: Processing tasks" -StepData @{
+                    RawTaskCount = $rawTasks.Count
+                    RawTaskType = $rawTasks.GetType().Name
                 }
-            }
-            & $Context.UpdateState @{ activeTimers = $activeTimers; "stats.runningTimers" = $runningTimers }
-        }
-        
-        & $services.Store.RegisterAction -self $services.Store -actionName "LOAD_DASHBOARD_DATA" -scriptBlock {
-            param($Context)
-            $quickActions = @(
-                @{ Action = "[1] New Time Entry" }, @{ Action = "[2] Start Timer" },
-                @{ Action = "[3] View Tasks" }, @{ Action = "[4] View Projects" },
-                @{ Action = "[5] Reports" }, @{ Action = "[6] Settings" }
-            )
-            & $Context.UpdateState @{ quickActions = $quickActions }
-            
-            if (-not $global:Data) { $global:Data = @{} }
-            if (-not ($global:Data.time_entries -is [System.Collections.IEnumerable])) { $global:Data.time_entries = @() }
-            
-            $todayHours = 0; $weekHours = 0
-            if ($global:Data.time_entries -and $global:Data.time_entries.Count -gt 0) {
+                
+                $activeTasks = ($rawTasks | Where-Object { -not $_.completed }).Count
                 $today = (Get-Date).Date
-                # FIX: Correctly calculate the start of the week (assuming Monday is the first day)
-                $weekStartDay = [DayOfWeek]::Monday
-                $currentDayOfWeek = $today.DayOfWeek
-                $daysToSubtract = ($currentDayOfWeek - $weekStartDay + 7) % 7
-                $weekStart = $today.AddDays(-$daysToSubtract)
-
-                foreach ($entry in $global:Data.time_entries) {
-                    # FIX: Add specific try/catch for date parsing
-                    if ($entry.start_time) {
-                        try {
-                            $entryDate = [DateTime]::Parse($entry.start_time).Date
-                            if ($entry.duration) {
-                                if ($entryDate -eq $today) { $todayHours += $entry.duration }
-                                if ($entryDate -ge $weekStart -and $entryDate -le $today) { $weekHours += $entry.duration }
-                            }
-                        } catch { } # Skip entries with invalid dates
+                
+                $dashboardTasks = $rawTasks | Where-Object {
+                    $updatedDate = $null
+                    try { 
+                        if ($_.updated_at) { 
+                            $updatedDate = [DateTime]::Parse($_.updated_at).Date 
+                        } 
+                    } catch { 
+                        Trace-Step -StepName "TASKS_REFRESH: Date parse error" -StepData @{
+                            TaskId = $_.id
+                            UpdatedAt = $_.updated_at
+                            Error = $_.Exception.Message
+                        }
+                    }
+                    -not $_.completed -or ($updatedDate -and $updatedDate -eq $today)
+                } | Select-Object -First 10 | ForEach-Object {
+                    @{
+                        Priority = switch($_.priority) { "high" { "[HIGH]" } "medium" { "[MED]" } default { "[LOW]" } }
+                        Task = $_.title
+                        Project = if ($_.project) { $_.project } else { "None" }
                     }
                 }
+
+                $tasksForTable = $rawTasks | ForEach-Object {
+                    $dueDateText = "N/A"
+                    if ($_.due_date) { 
+                        try { 
+                            $dueDateText = ([DateTime]$_.due_date).ToString("yyyy-MM-dd") 
+                        } catch { 
+                            Trace-Step -StepName "TASKS_REFRESH: Due date parse error" -StepData @{
+                                TaskId = $_.id
+                                DueDate = $_.due_date
+                                Error = $_.Exception.Message
+                            }
+                        } 
+                    }
+                    @{
+                        Id = $_.id
+                        Status = if ($_.completed) { "✓" } else { "○" }
+                        Priority = if ($_.priority) { $_.priority } else { "Medium" }
+                        Title = if ($_.title) { $_.title } else { "Untitled" }
+                        Category = if ($_.project) { $_.project } else { "General" }
+                        DueDate = $dueDateText
+                    }
+                }
+                
+                Trace-Step -StepName "TASKS_REFRESH: Updating state" -StepData @{
+                    DashboardTaskCount = $dashboardTasks.Count
+                    TableTaskCount = $tasksForTable.Count
+                    ActiveTasks = $activeTasks
+                }
+                
+                & $Context.UpdateState @{ tasks = $tasksForTable; todaysTasks = $dashboardTasks; "stats.activeTasks" = $activeTasks }
+                
+                Trace-ServiceCall -ServiceName "Store" -MethodName "TASKS_REFRESH" -Result @{ 
+                    Success = $true
+                    ProcessedTasks = $tasksForTable.Count
+                    ActiveTasks = $activeTasks
+                }
+            } catch {
+                Trace-ServiceCall -ServiceName "Store" -MethodName "TASKS_REFRESH" -Result @{ Success = $false; Error = $_.Exception.Message } -IsError
+                Write-Log -Level Error -Message "TASKS_REFRESH action failed" -Data @{
+                    Exception = $_.Exception.Message
+                    StackTrace = $_.Exception.StackTrace
+                }
+                throw
             }
-            & $Context.UpdateState @{ "stats.todayHours" = [Math]::Round($todayHours, 2); "stats.weekHours" = [Math]::Round($weekHours, 2) }
         }
         
-        # Other actions (TASK_CREATE, TASK_TOGGLE_STATUS, etc.)
-        # These are generally safe as they create new data, but kept for completeness.
+        Trace-Step -StepName "Registering TIMERS_REFRESH action"
+        & $services.Store.RegisterAction -self $services.Store -actionName "TIMERS_REFRESH" -scriptBlock {
+            param($Context)
+            Trace-ServiceCall -ServiceName "Store" -MethodName "TIMERS_REFRESH" -Parameters @{ Context = "ActionContext" }
+            
+            try {
+                Trace-Step -StepName "TIMERS_REFRESH: Checking global data" -StepData @{
+                    GlobalDataExists = ($null -ne $global:Data)
+                    TimersExists = ($null -ne $global:Data.timers)
+                    TimersType = if ($global:Data.timers) { $global:Data.timers.GetType().Name } else { "null" }
+                }
+                
+                if (-not $global:Data) { 
+                    $global:Data = @{} 
+                    Trace-Step -StepName "TIMERS_REFRESH: Created global data"
+                }
+                if (-not ($global:Data.timers -is [System.Collections.IEnumerable])) { 
+                    $global:Data.timers = @() 
+                    Trace-Step -StepName "TIMERS_REFRESH: Initialized timers array"
+                }
+                
+                $rawTimers = $global:Data.timers
+                Trace-Step -StepName "TIMERS_REFRESH: Processing timers" -StepData @{
+                    RawTimerCount = $rawTimers.Count
+                    RawTimerType = $rawTimers.GetType().Name
+                }
+                
+                $runningTimers = ($rawTimers | Where-Object { $_.is_running }).Count
+                $activeTimers = $rawTimers | Where-Object { $_.is_running } | ForEach-Object {
+                    $duration = "00:00:00"
+                    if ($_.start_time) {
+                        try {
+                            $start = [DateTime]::Parse($_.start_time)
+                            $duration = "{0:hh\:mm\:ss}" -f ((Get-Date) - $start)
+                        } catch { 
+                            Trace-Step -StepName "TIMERS_REFRESH: Start time parse error" -StepData @{
+                                TimerId = $_.id
+                                StartTime = $_.start_time
+                                Error = $_.Exception.Message
+                            }
+                        }
+                    }
+                    @{
+                        Project = if ($_.project) { $_.project } else { "No Project" }
+                        Time = $duration
+                    }
+                }
+                
+                Trace-Step -StepName "TIMERS_REFRESH: Updating state" -StepData @{
+                    ActiveTimerCount = $activeTimers.Count
+                    RunningTimers = $runningTimers
+                }
+                
+                & $Context.UpdateState @{ activeTimers = $activeTimers; "stats.runningTimers" = $runningTimers }
+                
+                Trace-ServiceCall -ServiceName "Store" -MethodName "TIMERS_REFRESH" -Result @{ 
+                    Success = $true
+                    ActiveTimers = $activeTimers.Count
+                    RunningTimers = $runningTimers
+                }
+            } catch {
+                Trace-ServiceCall -ServiceName "Store" -MethodName "TIMERS_REFRESH" -Result @{ Success = $false; Error = $_.Exception.Message } -IsError
+                Write-Log -Level Error -Message "TIMERS_REFRESH action failed" -Data @{
+                    Exception = $_.Exception.Message
+                    StackTrace = $_.Exception.StackTrace
+                }
+                throw
+            }
+        }
+        
+        Trace-Step -StepName "Registering LOAD_DASHBOARD_DATA action"
+        & $services.Store.RegisterAction -self $services.Store -actionName "LOAD_DASHBOARD_DATA" -scriptBlock {
+            param($Context)
+            Trace-ServiceCall -ServiceName "Store" -MethodName "LOAD_DASHBOARD_DATA" -Parameters @{ Context = "ActionContext" }
+            
+            try {
+                $quickActions = @(
+                    @{ Action = "[1] New Time Entry" }, @{ Action = "[2] Start Timer" },
+                    @{ Action = "[3] View Tasks" }, @{ Action = "[4] View Projects" },
+                    @{ Action = "[5] Reports" }, @{ Action = "[6] Settings" }
+                )
+                
+                Trace-Step -StepName "LOAD_DASHBOARD_DATA: Setting quick actions" -StepData @{
+                    QuickActionCount = $quickActions.Count
+                }
+                
+                & $Context.UpdateState @{ quickActions = $quickActions }
+                
+                Trace-Step -StepName "LOAD_DASHBOARD_DATA: Processing time entries" -StepData @{
+                    GlobalDataExists = ($null -ne $global:Data)
+                    TimeEntriesExists = ($null -ne $global:Data.time_entries)
+                    TimeEntriesType = if ($global:Data.time_entries) { $global:Data.time_entries.GetType().Name } else { "null" }
+                }
+                
+                if (-not $global:Data) { 
+                    $global:Data = @{} 
+                    Trace-Step -StepName "LOAD_DASHBOARD_DATA: Created global data"
+                }
+                if (-not ($global:Data.time_entries -is [System.Collections.IEnumerable])) { 
+                    $global:Data.time_entries = @() 
+                    Trace-Step -StepName "LOAD_DASHBOARD_DATA: Initialized time entries array"
+                }
+                
+                $todayHours = 0; $weekHours = 0
+                if ($global:Data.time_entries -and $global:Data.time_entries.Count -gt 0) {
+                    $today = (Get-Date).Date
+                    $weekStartDay = [DayOfWeek]::Monday
+                    $currentDayOfWeek = $today.DayOfWeek
+                    $daysToSubtract = ($currentDayOfWeek - $weekStartDay + 7) % 7
+                    $weekStart = $today.AddDays(-$daysToSubtract)
+
+                    foreach ($entry in $global:Data.time_entries) {
+                        if ($entry.start_time) {
+                            try {
+                                $entryDate = [DateTime]::Parse($entry.start_time).Date
+                                if ($entry.duration) {
+                                    if ($entryDate -eq $today) { $todayHours += $entry.duration }
+                                    if ($entryDate -ge $weekStart -and $entryDate -le $today) { $weekHours += $entry.duration }
+                                }
+                            } catch { 
+                                Trace-Step -StepName "LOAD_DASHBOARD_DATA: Time entry parse error" -StepData @{
+                                    EntryId = $entry.id
+                                    StartTime = $entry.start_time
+                                    Error = $_.Exception.Message
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                Trace-Step -StepName "LOAD_DASHBOARD_DATA: Updating time stats" -StepData @{
+                    TodayHours = $todayHours
+                    WeekHours = $weekHours
+                    ProcessedEntries = $global:Data.time_entries.Count
+                }
+                
+                & $Context.UpdateState @{ "stats.todayHours" = [Math]::Round($todayHours, 2); "stats.weekHours" = [Math]::Round($weekHours, 2) }
+                
+                Trace-ServiceCall -ServiceName "Store" -MethodName "LOAD_DASHBOARD_DATA" -Result @{ 
+                    Success = $true
+                    TodayHours = $todayHours
+                    WeekHours = $weekHours
+                }
+            } catch {
+                Trace-ServiceCall -ServiceName "Store" -MethodName "LOAD_DASHBOARD_DATA" -Result @{ Success = $false; Error = $_.Exception.Message } -IsError
+                Write-Log -Level Error -Message "LOAD_DASHBOARD_DATA action failed" -Data @{
+                    Exception = $_.Exception.Message
+                    StackTrace = $_.Exception.StackTrace
+                }
+                throw
+            }
+        }
+        
+        Trace-Step -StepName "Registering remaining actions (TASK_CREATE, TASK_TOGGLE_STATUS)"
+        
         & $services.Store.RegisterAction -self $services.Store -actionName "TASK_CREATE" -scriptBlock {
             param($Context, $Payload)
+            Trace-ServiceCall -ServiceName "Store" -MethodName "TASK_CREATE" -Parameters @{ Payload = $Payload }
+            
             if (-not $global:Data) { $global:Data = @{} }
             if (-not $global:Data.tasks) { $global:Data.tasks = @() }
             if ($Payload.Title) {
@@ -253,11 +598,15 @@ function Initialize-PMCServices {
                 $global:Data.tasks += $newTask
                 Save-UnifiedData
                 & $Context.Dispatch "TASKS_REFRESH"
+                
+                Trace-ServiceCall -ServiceName "Store" -MethodName "TASK_CREATE" -Result @{ Success = $true; TaskId = $newTask.id }
             }
         }
         
         & $services.Store.RegisterAction -self $services.Store -actionName "TASK_TOGGLE_STATUS" -scriptBlock {
             param($Context, $Payload)
+            Trace-ServiceCall -ServiceName "Store" -MethodName "TASK_TOGGLE_STATUS" -Parameters @{ Payload = $Payload }
+            
             if ($global:Data -and $global:Data.tasks -and $Payload.TaskId) {
                 $taskToUpdate = $global:Data.tasks | Where-Object { $_.id -eq $Payload.TaskId } | Select-Object -First 1
                 if ($taskToUpdate) {
@@ -265,86 +614,683 @@ function Initialize-PMCServices {
                     $taskToUpdate.updated_at = (Get-Date).ToString("o")
                     Save-UnifiedData
                     & $Context.Dispatch "TASKS_REFRESH"
+                    
+                    Trace-ServiceCall -ServiceName "Store" -MethodName "TASK_TOGGLE_STATUS" -Result @{ Success = $true; TaskId = $Payload.TaskId; NewStatus = $taskToUpdate.completed }
                 }
             }
         }
         
-        # ... other actions like TASK_DELETE, UPDATE_STATE, TASKS_LOAD
-        
         # Initialize Navigation Service
+        Trace-Step -StepName "Initializing Navigation Service"
         $services.Navigation = Initialize-NavigationService
-        # Initialize Keybinding Service
-        $services.Keybindings = Initialize-KeybindingService
+        Trace-Step -StepName "Navigation Service initialized" -StepData @{
+            NavigationType = $services.Navigation.GetType().Name
+            NavigationKeys = if ($services.Navigation -is [hashtable]) { $services.Navigation.Keys } else { "N/A" }
+        }
         
-    } catch { Write-Host "  Failed to initialize services: $_" -ForegroundColor Red; throw }
-    
-    $global:Services = $services
-    return $services
+        # Initialize Keybinding Service
+        Trace-Step -StepName "Initializing Keybinding Service"
+        $services.Keybindings = Initialize-KeybindingService
+        Trace-Step -StepName "Keybinding Service initialized" -StepData @{
+            KeybindingType = $services.Keybindings.GetType().Name
+            KeybindingKeys = if ($services.Keybindings -is [hashtable]) { $services.Keybindings.Keys } else { "N/A" }
+        }
+        
+        Trace-Step -StepName "Setting global services" -StepData @{
+            ServiceCount = $services.Keys.Count
+            ServiceNames = $services.Keys
+        }
+        
+        $global:Services = $services
+        
+        Trace-StateChange -StateType "GlobalServices" -NewValue @{
+            ServiceCount = $services.Keys.Count
+            ServiceNames = $services.Keys
+        }
+        
+        Trace-FunctionExit -FunctionName "Initialize-PMCServices" -ReturnValue @{
+            ServiceCount = $services.Keys.Count
+            ServiceNames = $services.Keys
+        }
+        
+        return $services
+    }
 }
 
 function Start-PMCTerminal {
     param([bool]$Silent = $false)
     
+    Trace-FunctionEntry -FunctionName "Start-PMCTerminal" -Parameters @{ Silent = $Silent }
+    
     try {
+        Trace-Step -StepName "Starting PMC Terminal initialization sequence"
+        
         $loadedModules = Initialize-PMCModules -Silent:$Silent
+        Trace-Step -StepName "Module initialization completed" -StepData @{
+            LoadedModuleCount = $loadedModules.Count
+            LoadedModules = $loadedModules
+        }
+        
         if (-not $Silent) { Write-Host "`nInitializing subsystems..." -ForegroundColor Cyan }
         
+        # Initialize logger first - CRITICAL FOR DEBUGGING
+        Trace-Step -StepName "Checking for logger availability"
         if (Get-Command Initialize-Logger -ErrorAction SilentlyContinue) {
+            Trace-Step -StepName "Initializing logger system"
+            
             Initialize-Logger
             Write-Log -Level Info -Message "PMC Terminal v4.2 'Helios' startup initiated"
             Write-Log -Level Info -Message "Loaded modules: $($loadedModules -join ', ')"
+            
+            Trace-Step -StepName "Logger system initialized successfully" -StepData @{
+                LogPath = Get-LogPath
+            }
+        } else {
+            Write-Host "WARNING: Logger not available - continuing without logging" -ForegroundColor Yellow
+            Trace-Step -StepName "Logger not available - continuing without logging"
         }
         
-        Initialize-EventSystem; Initialize-ThemeManager; Initialize-DataManager
-        Initialize-TuiFramework; Initialize-TuiEngine; Initialize-DialogSystem
+        # Initialize Event System
+        Trace-Step -StepName "Initializing Event System"
+        try {
+            if (Get-Command Initialize-EventSystem -ErrorAction SilentlyContinue) {
+                Initialize-EventSystem
+                Write-Log -Level Debug -Message "Event system initialized"
+                Trace-Step -StepName "Event system initialized successfully"
+            } else {
+                Write-Log -Level Warning -Message "Event system not available"
+                Trace-Step -StepName "Event system not available"
+            }
+        } catch {
+            Write-Log -Level Error -Message "Failed to initialize Event System" -Data @{
+                Exception = $_.Exception.Message
+                StackTrace = $_.Exception.StackTrace
+            }
+            Trace-Step -StepName "Event system initialization failed" -StepData @{
+                Error = $_.Exception.Message
+            }
+            # Continue anyway as it might not be critical
+        }
         
-        Load-UnifiedData
+        # Initialize Theme Manager with enhanced error handling
+        Trace-Step -StepName "Initializing Theme Manager"
+        try {
+            if (Get-Command Initialize-ThemeManager -ErrorAction SilentlyContinue) {
+                Trace-Step -StepName "Calling Initialize-ThemeManager"
+                Initialize-ThemeManager
+                
+                Trace-Step -StepName "Checking if theme is set after initialization"
+                $currentTheme = $null
+                if (Get-Command Get-TuiTheme -ErrorAction SilentlyContinue) {
+                    try {
+                        $currentTheme = Get-TuiTheme
+                        Trace-Step -StepName "Theme check result" -StepData @{
+                            ThemeExists = ($null -ne $currentTheme)
+                            ThemeType = if ($currentTheme) { $currentTheme.GetType().Name } else { "null" }
+                            ThemeProperties = if ($currentTheme -is [hashtable]) { $currentTheme.Keys } else { "N/A" }
+                        }
+                    } catch {
+                        Write-Log -Level Error -Message "Failed to get current theme after initialization" -Data @{
+                            Exception = $_.Exception.Message
+                        }
+                        Trace-Step -StepName "Get-TuiTheme failed" -StepData @{
+                            Error = $_.Exception.Message
+                        }
+                    }
+                }
+                
+                # FIX: Ensure theme is actually set
+                if (-not $currentTheme) {
+                    Write-Log -Level Warning -Message "Theme not set after initialization, setting Modern theme"
+                    Trace-Step -StepName "Theme not set, attempting to set Modern theme"
+                    
+                    if (Get-Command Set-TuiTheme -ErrorAction SilentlyContinue) {
+                        try {
+                            Set-TuiTheme -ThemeName "Modern"
+                            $currentTheme = Get-TuiTheme
+                            Trace-Step -StepName "Modern theme set successfully" -StepData @{
+                                ThemeSet = ($null -ne $currentTheme)
+                                ThemeName = if ($currentTheme -and $currentTheme.Name) { $currentTheme.Name } else { "Unknown" }
+                            }
+                        } catch {
+                            Write-Log -Level Error -Message "Failed to set Modern theme" -Data @{
+                                Exception = $_.Exception.Message
+                                StackTrace = $_.Exception.StackTrace
+                            }
+                            Trace-Step -StepName "Set-TuiTheme failed" -StepData @{
+                                Error = $_.Exception.Message
+                            }
+                        }
+                    } else {
+                        Write-Log -Level Error -Message "Set-TuiTheme command not available"
+                        Trace-Step -StepName "Set-TuiTheme command not available"
+                    }
+                }
+                
+                $finalTheme = if (Get-Command Get-TuiTheme -ErrorAction SilentlyContinue) { 
+                    try { Get-TuiTheme } catch { $null }
+                } else { $null }
+                
+                Write-Log -Level Debug -Message "Theme manager initialized" -Data @{
+                    ThemeName = if ($finalTheme -and $finalTheme.Name) { $finalTheme.Name } else { "Unknown/Default" }
+                    ThemeInitialized = ($null -ne $finalTheme)
+                }
+                
+                Trace-Step -StepName "Theme manager initialization completed" -StepData @{
+                    Success = ($null -ne $finalTheme)
+                    ThemeName = if ($finalTheme -and $finalTheme.Name) { $finalTheme.Name } else { "Unknown/Default" }
+                }
+            } else {
+                Write-Log -Level Warning -Message "Theme manager not available"
+                Trace-Step -StepName "Theme manager not available"
+            }
+        } catch {
+            Write-Log -Level Error -Message "Failed to initialize Theme Manager" -Data @{
+                Exception = $_.Exception.Message
+                StackTrace = $_.Exception.StackTrace
+            }
+            Trace-Step -StepName "Theme manager initialization failed" -StepData @{
+                Error = $_.Exception.Message
+                StackTrace = $_.Exception.StackTrace
+            }
+            # Continue with default colors
+        }
+        
+        # Initialize Data Manager with error handling
+        Trace-Step -StepName "Initializing Data Manager"
+        try {
+            if (Get-Command Initialize-DataManager -ErrorAction SilentlyContinue) {
+                Initialize-DataManager
+                Write-Log -Level Debug -Message "Data manager initialized"
+                Trace-Step -StepName "Data manager initialized successfully"
+            } else {
+                Write-Log -Level Warning -Message "Data manager not available"
+                Trace-Step -StepName "Data manager not available"
+            }
+        } catch {
+            Write-Log -Level Error -Message "Failed to initialize Data Manager" -Data @{
+                Exception = $_.Exception.Message
+                StackTrace = $_.Exception.StackTrace
+            }
+            Trace-Step -StepName "Data manager initialization failed" -StepData @{
+                Error = $_.Exception.Message
+            }
+            # Continue as data can be loaded manually
+        }
+        
+        # Initialize TUI Framework
+        Trace-Step -StepName "Initializing TUI Framework"
+        try {
+            if (Get-Command Initialize-TuiFramework -ErrorAction SilentlyContinue) {
+                Initialize-TuiFramework
+                Write-Log -Level Debug -Message "TUI framework initialized"
+                Trace-Step -StepName "TUI framework initialized successfully"
+            } else {
+                $errorMsg = "Initialize-TuiFramework command not available"
+                Write-Log -Level Error -Message $errorMsg
+                Trace-Step -StepName "TUI framework not available"
+                throw $errorMsg
+            }
+        } catch {
+            Write-Log -Level Error -Message "Failed to initialize TUI Framework" -Data @{
+                Exception = $_.Exception.Message
+                StackTrace = $_.Exception.StackTrace
+            }
+            Trace-Step -StepName "TUI framework initialization failed" -StepData @{
+                Error = $_.Exception.Message
+            }
+            throw # This is critical
+        }
+        
+        # Initialize TUI Engine
+        Trace-Step -StepName "Initializing TUI Engine"
+        try {
+            if (Get-Command Initialize-TuiEngine -ErrorAction SilentlyContinue) {
+                # Get console dimensions for logging
+                $consoleWidth = if ($Host.UI.RawUI) { $Host.UI.RawUI.WindowSize.Width } else { 80 }
+                $consoleHeight = if ($Host.UI.RawUI) { $Host.UI.RawUI.WindowSize.Height } else { 24 }
+                
+                Trace-Step -StepName "Calling Initialize-TuiEngine" -StepData @{
+                    ConsoleWidth = $consoleWidth
+                    ConsoleHeight = $consoleHeight
+                }
+                
+                Initialize-TuiEngine
+                Write-Log -Level Info -Message "Initializing TUI Engine: ${consoleWidth}x${consoleHeight}"
+                Write-Log -Level Info -Message "TUI Engine initialized successfully"
+                
+                Trace-Step -StepName "TUI engine initialized successfully" -StepData @{
+                    Dimensions = "${consoleWidth}x${consoleHeight}"
+                }
+            } else {
+                $errorMsg = "Initialize-TuiEngine command not available"
+                Write-Log -Level Error -Message $errorMsg
+                Trace-Step -StepName "TUI engine not available"
+                throw $errorMsg
+            }
+        } catch {
+            Write-Log -Level Error -Message "Failed to initialize TUI Engine" -Data @{
+                Exception = $_.Exception.Message
+                StackTrace = $_.Exception.StackTrace
+            }
+            Trace-Step -StepName "TUI engine initialization failed" -StepData @{
+                Error = $_.Exception.Message
+            }
+            throw # This is critical
+        }
+        
+        # Initialize Dialog System with error handling
+        Trace-Step -StepName "Initializing Dialog System"
+        try {
+            if (Get-Command Initialize-DialogSystem -ErrorAction SilentlyContinue) {
+                Initialize-DialogSystem
+                Write-Log -Level Debug -Message "Dialog system initialized"
+                Trace-Step -StepName "Dialog system initialized successfully"
+            } else {
+                Write-Log -Level Warning -Message "Dialog system not available"
+                Trace-Step -StepName "Dialog system not available"
+            }
+        } catch {
+            Write-Log -Level Error -Message "Failed to initialize Dialog System" -Data @{
+                Exception = $_.Exception.Message
+                StackTrace = $_.Exception.StackTrace
+            }
+            Trace-Step -StepName "Dialog system initialization failed" -StepData @{
+                Error = $_.Exception.Message
+            }
+            # Continue without dialogs
+        }
+        
+        # Load data
+        Trace-Step -StepName "Loading unified data"
+        try {
+            if (Get-Command Load-UnifiedData -ErrorAction SilentlyContinue) {
+                Load-UnifiedData
+                Write-Log -Level Debug -Message "Data loaded successfully"
+                Trace-Step -StepName "Data loaded successfully" -StepData @{
+                    GlobalDataExists = ($null -ne $global:Data)
+                    DataType = if ($global:Data) { $global:Data.GetType().Name } else { "null" }
+                    DataKeys = if ($global:Data -is [hashtable]) { $global:Data.Keys } else { "N/A" }
+                }
+            } else {
+                Write-Log -Level Warning -Message "Load-UnifiedData not available, initializing empty data"
+                $global:Data = @{}
+                Trace-Step -StepName "Initialized empty global data"
+            }
+        } catch {
+            Write-Log -Level Warning -Message "Failed to load data, using empty data" -Data @{
+                Exception = $_.Exception.Message
+            }
+            $global:Data = @{}
+            Trace-Step -StepName "Data loading failed, using empty data" -StepData @{
+                Error = $_.Exception.Message
+            }
+        }
+        
+        # Initialize services
+        Trace-Step -StepName "Starting service initialization"
         $services = Initialize-PMCServices -Silent:$Silent
-        Initialize-FocusManager
-        Initialize-PMCScreens -Silent:$Silent
+        Trace-Step -StepName "Services initialized" -StepData @{
+            ServiceCount = $services.Keys.Count
+            ServiceNames = $services.Keys
+        }
+        
+        # Initialize Focus Manager with error handling
+        Trace-Step -StepName "Initializing Focus Manager"
+        try {
+            if (Get-Command Initialize-FocusManager -ErrorAction SilentlyContinue) {
+                Initialize-FocusManager
+                Write-Log -Level Debug -Message "Focus manager initialized"
+                Trace-Step -StepName "Focus manager initialized successfully"
+            } else {
+                Write-Log -Level Warning -Message "Focus manager not available"
+                Trace-Step -StepName "Focus manager not available"
+            }
+        } catch {
+            Write-Log -Level Error -Message "Failed to initialize Focus Manager" -Data @{
+                Exception = $_.Exception.Message
+                StackTrace = $_.Exception.StackTrace
+            }
+            Trace-Step -StepName "Focus manager initialization failed" -StepData @{
+                Error = $_.Exception.Message
+            }
+            # Continue without advanced focus management
+        }
+        
+        # Load screens
+        Trace-Step -StepName "Loading screen modules"
+        $loadedScreens = Initialize-PMCScreens -Silent:$Silent
+        Trace-Step -StepName "Screens loaded" -StepData @{
+            LoadedScreenCount = $loadedScreens.Count
+            LoadedScreens = $loadedScreens
+        }
         
         if (-not $Silent) { Write-Host "`nStarting application..." -ForegroundColor Green }
+        
+        Trace-Step -StepName "Clearing host and preparing for navigation"
         Clear-Host
         
-        # Flexible startup path logic
-        $startPath = "/dashboard" # Default
-        if ($args -contains "-start") {
-            $startIndex = [array]::IndexOf($args, "-start")
-            if (($startIndex + 1) -lt $args.Count) { $startPath = $args[$startIndex + 1] }
+        # Dispatch initial actions to populate dashboard data
+        Trace-Step -StepName "Dispatching initial actions to populate data"
+        try {
+            Write-Log -Level Info -Message "Error dispatching initial actions: Error executing action 'DASHBOARD_REFRESH'"
+            & $services.Store.Dispatch -self $services.Store -actionName "DASHBOARD_REFRESH"
+            Trace-Step -StepName "Initial DASHBOARD_REFRESH action dispatched successfully"
+        } catch {
+            Write-Log -Level Error -Message "Error dispatching initial actions: Error executing action 'DASHBOARD_REFRESH'" -Data @{
+                Exception = $_.Exception.Message
+                StackTrace = $_.Exception.StackTrace
+            }
+            Trace-Step -StepName "Initial DASHBOARD_REFRESH action failed" -StepData @{
+                Error = $_.Exception.Message
+            }
+            # Continue anyway - the dashboard can refresh later
         }
         
-        if ((& $services.Navigation.IsValidRoute -self $services.Navigation -Path $startPath)) {
+        # Navigate to start screen
+        Trace-Step -StepName "Determining start screen path"
+        $startPath = "/dashboard"
+        if ($args -contains "-start") {
+            $startIndex = [array]::IndexOf($args, "-start")
+            if (($startIndex + 1) -lt $args.Count) { 
+                $startPath = $args[$startIndex + 1] 
+                Trace-Step -StepName "Custom start path specified" -StepData @{
+                    CustomPath = $startPath
+                }
+            }
+        }
+        
+        Trace-Step -StepName "Validating start path" -StepData @{
+            StartPath = $startPath
+            NavigationService = ($null -ne $services.Navigation)
+        }
+        
+        if ($services.Navigation -and (& $services.Navigation.IsValidRoute -self $services.Navigation -Path $startPath)) {
+            Trace-Step -StepName "Navigating to start screen" -StepData @{
+                StartPath = $startPath
+                NavigationMethod = "GoTo"
+            }
+            
+            Write-Log -Level Info -Message "Navigated to: $startPath"
             & $services.Navigation.GoTo -self $services.Navigation -Path $startPath -Services $services
+            
+            Trace-Step -StepName "Navigation completed successfully"
         } else {
             Write-Log -Level Warning -Message "Startup path '$startPath' is not valid. Defaulting to /dashboard."
+            Trace-Step -StepName "Invalid start path, defaulting to dashboard" -StepData @{
+                InvalidPath = $startPath
+                DefaultPath = "/dashboard"
+            }
+            
             & $services.Navigation.GoTo -self $services.Navigation -Path "/dashboard" -Services $services
         }
         
-        Start-TuiLoop
+        # Start the main loop
+        Trace-Step -StepName "Starting TUI main loop"
+        if (Get-Command Start-TuiLoop -ErrorAction SilentlyContinue) {
+            Start-TuiLoop
+            Trace-Step -StepName "TUI main loop started"
+        } else {
+            $errorMsg = "Start-TuiLoop command not available"
+            Write-Log -Level Error -Message $errorMsg
+            Trace-Step -StepName "TUI main loop unavailable"
+            throw $errorMsg
+        }
+        
+        Trace-FunctionExit -FunctionName "Start-PMCTerminal" -ReturnValue @{ Success = $true }
         
     } catch {
-        if (Get-Command Write-Log -ErrorAction SilentlyContinue) { Write-Log -Level Error -Message "FATAL: Failed to initialize PMC Terminal" -Data $_ }
+        Write-Log -Level Error -Message "FATAL: Failed to initialize PMC Terminal" -Data @{
+            Exception = $_.Exception.Message
+            StackTrace = $_.Exception.StackTrace
+            InnerException = if ($_.Exception.InnerException) { $_.Exception.InnerException.Message } else { $null }
+        } -Force
+        
+        Trace-Step -StepName "Fatal error occurred during initialization" -StepData @{
+            Error = $_.Exception.Message
+            StackTrace = $_.Exception.StackTrace
+        }
+        
         Write-Host "`nFATAL ERROR DURING INITIALIZATION: $($_.Exception.Message)" -ForegroundColor Red
         Write-Host $_.ScriptStackTrace -ForegroundColor Gray
+        
+        # Try to get diagnostic report
+        Trace-Step -StepName "Attempting to generate crash diagnostic report"
+        try {
+            if (Get-Command Get-HeliosDiagnosticReport -ErrorAction SilentlyContinue) {
+                $report = Get-HeliosDiagnosticReport -IncludeErrorHistory -IncludeLogEntries -LogEntryCount 100
+                $reportPath = Join-Path $env:TEMP "helios_crash_$(Get-Date -Format 'yyyyMMdd_HHmmss').json"
+                $report | ConvertTo-Json -Depth 10 | Set-Content $reportPath
+                Write-Host "`nDiagnostic report saved to: $reportPath" -ForegroundColor Yellow
+                Write-Log -Level Info -Message "Crash diagnostic report saved" -Data @{ ReportPath = $reportPath } -Force
+                
+                Trace-Step -StepName "Crash diagnostic report generated" -StepData @{
+                    ReportPath = $reportPath
+                    ReportSize = (Get-Item $reportPath).Length
+                }
+            } else {
+                Write-Host "Diagnostic report generation not available" -ForegroundColor Yellow
+                Trace-Step -StepName "Diagnostic report generation not available"
+            }
+        } catch {
+            Write-Host "Failed to generate diagnostic report: $_" -ForegroundColor Yellow
+            Trace-Step -StepName "Diagnostic report generation failed" -StepData @{
+                Error = $_.Exception.Message
+            }
+        }
+        
+        Trace-FunctionExit -FunctionName "Start-PMCTerminal" -ReturnValue @{ Success = $false; Error = $_.Exception.Message } -WithError
+        
         throw
     } finally {
-        if (Get-Command Write-Log -ErrorAction SilentlyContinue) { Write-Log -Level Info -Message "PMC Terminal shutting down" }
-        if (Get-Command -Name "Stop-TuiEngine" -ErrorAction SilentlyContinue) { if (-not $Silent) { Write-Host "`nShutting down..." }; Stop-TuiEngine }
-        if ($global:Data -and (Get-Command -Name "Save-UnifiedData" -ErrorAction SilentlyContinue)) { if (-not $Silent) { Write-Host "Saving data..." }; Save-UnifiedData }
+        Trace-Step -StepName "Starting cleanup sequence"
+        
+        if (Get-Command Write-Log -ErrorAction SilentlyContinue) { 
+            Write-Log -Level Info -Message "PMC Terminal shutting down" 
+        }
+        
+        if (Get-Command -Name "Stop-TuiEngine" -ErrorAction SilentlyContinue) { 
+            if (-not $Silent) { Write-Host "`nShutting down..." }
+            Trace-Step -StepName "Stopping TUI Engine"
+            Stop-TuiEngine 
+        }
+        
+        if ($global:Data -and (Get-Command -Name "Save-UnifiedData" -ErrorAction SilentlyContinue)) { 
+            if (-not $Silent) { Write-Host "Saving data..." }
+            Trace-Step -StepName "Saving unified data"
+            Save-UnifiedData 
+        }
+        
         if (-not $Silent) { Write-Host "Goodbye!" -ForegroundColor Green }
+        Trace-Step -StepName "Cleanup completed"
     }
 }
 
-# Main execution block
+# Main execution block with comprehensive tracing
 $script:Silent = $args -contains "-silent" -or $args -contains "-s"
+
+# Set up enhanced error handling from the start
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+
 try {
+    # Clear host and start tracing immediately
     Clear-Host
-    Start-PMCTerminal -Silent:$script:Silent
-} catch {
-    Write-Error "Fatal error occurred: $_"
-    if ($Host.UI.RawUI) {
-        Write-Host "`nPress any key to exit..." -ForegroundColor Red
-        $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+    
+    # Initialize basic logging even before modules are loaded
+    Write-Host "PMC Terminal v4.2 'Helios' - Enhanced Diagnostics Mode" -ForegroundColor Cyan
+    Write-Host "Tracing enabled - All execution steps will be logged" -ForegroundColor Yellow
+    Write-Host "Starting initialization sequence..." -ForegroundColor Green
+    Write-Host ""
+    
+    # Trace the very beginning
+    if (-not $script:Silent) {
+        Write-Host "TRACE: Main execution block started" -ForegroundColor Gray
+        Write-Host "TRACE: Arguments: $($args -join ', ')" -ForegroundColor Gray
+        Write-Host "TRACE: Silent mode: $script:Silent" -ForegroundColor Gray
+        Write-Host "TRACE: Base path: $script:BasePath" -ForegroundColor Gray
+        Write-Host "TRACE: PowerShell version: $($PSVersionTable.PSVersion)" -ForegroundColor Gray
+        Write-Host "TRACE: Process ID: $PID" -ForegroundColor Gray
+        Write-Host ""
     }
+    
+    # Start the terminal with enhanced error context
+    Invoke-WithErrorHandling -Component "MainExecution" -OperationName "Start-PMCTerminal" -ScriptBlock {
+        Start-PMCTerminal -Silent:$script:Silent
+    } -ErrorHandler {
+        param($Exception, $DetailedError)
+        
+        Write-Host "`n=== CRITICAL FAILURE ===" -ForegroundColor Red
+        Write-Host "Fatal error occurred during PMC Terminal startup" -ForegroundColor Red
+        
+        # Check if this is our custom exception with data
+        $heliosEx = $null
+        if ($Exception -and $Exception.Data -and $Exception.Data.Contains("HeliosException")) {
+            $heliosEx = $Exception.Data["HeliosException"]
+        }
+        
+        # Safely access exception properties that might not exist
+        $errorMessage = if ($heliosEx -and $heliosEx.Message) { $heliosEx.Message }
+                       elseif ($Exception.Message) { $Exception.Message } 
+                       elseif ($Exception -is [string]) { $Exception } 
+                       else { "Unknown error" }
+        Write-Host "Error: $errorMessage" -ForegroundColor Red
+        
+        $component = if ($heliosEx -and $heliosEx.Component) { $heliosEx.Component }
+                    elseif ($Exception.Component) { $Exception.Component }
+                    elseif ($Exception.Data -and $Exception.Data.Contains("Component")) { $Exception.Data["Component"] }
+                    else { $null }
+        
+        if ($component) {
+            Write-Host "Component: $component" -ForegroundColor Yellow
+        }
+        
+        $timestamp = if ($heliosEx -and $heliosEx.Timestamp) { $heliosEx.Timestamp }
+                    elseif ($Exception.Timestamp) { $Exception.Timestamp }
+                    elseif ($Exception.Data -and $Exception.Data.Contains("Timestamp")) { $Exception.Data["Timestamp"] }
+                    else { Get-Date }
+        
+        Write-Host "Timestamp: $timestamp" -ForegroundColor Yellow
+        
+        if ($DetailedError) {
+            Write-Host "`nDetailed Error Information:" -ForegroundColor Yellow
+            Write-Host "Type: $($DetailedError.Type)" -ForegroundColor Gray
+            Write-Host "Category: $($DetailedError.Category)" -ForegroundColor Gray
+            Write-Host "Location: $($DetailedError.ScriptName):$($DetailedError.LineNumber)" -ForegroundColor Gray
+            
+            if ($DetailedError.StackTrace -and $DetailedError.StackTrace.Count -gt 0) {
+                Write-Host "`nCall Stack:" -ForegroundColor Yellow
+                for ($i = 0; $i -lt [Math]::Min(5, $DetailedError.StackTrace.Count); $i++) {
+                    $frame = $DetailedError.StackTrace[$i]
+                    Write-Host "  [$i] $($frame.Command) at $($frame.Location)" -ForegroundColor Gray
+                }
+            }
+            
+            if ($DetailedError.SystemContext) {
+                Write-Host "`nSystem Context:" -ForegroundColor Yellow
+                Write-Host "  Process ID: $($DetailedError.SystemContext.ProcessId)" -ForegroundColor Gray
+                Write-Host "  PowerShell: $($DetailedError.SystemContext.PowerShellVersion)" -ForegroundColor Gray
+                Write-Host "  Memory Usage: $($DetailedError.SystemContext.MemoryUsage) bytes" -ForegroundColor Gray
+                
+                if ($DetailedError.SystemContext.LoadedModules) {
+                    Write-Host "  Loaded Modules: $($DetailedError.SystemContext.LoadedModules.Count)" -ForegroundColor Gray
+                }
+                
+                if ($DetailedError.SystemContext.GlobalVariables) {
+                    Write-Host "  Global Variables:" -ForegroundColor Gray
+                    foreach ($var in $DetailedError.SystemContext.GlobalVariables) {
+                        Write-Host "    $($var.Name): $($var.Type)" -ForegroundColor DarkGray
+                    }
+                }
+            }
+        }
+        
+        # Try to save crash information
+        try {
+            # Extract Helios exception if available
+            $heliosEx = $null
+            if ($Exception -and $Exception.Data -and $Exception.Data.Contains("HeliosException")) {
+                $heliosEx = $Exception.Data["HeliosException"]
+            }
+            
+            $crashInfo = @{
+                Timestamp = Get-Date
+                Exception = @{
+                    Message = if ($heliosEx -and $heliosEx.Message) { $heliosEx.Message }
+                             elseif ($Exception.Message) { $Exception.Message } 
+                             else { "Unknown error" }
+                    Type = if ($Exception.GetType) { $Exception.GetType().FullName } else { "Unknown" }
+                    Component = if ($heliosEx -and $heliosEx.Component) { $heliosEx.Component }
+                               elseif ($Exception.Component) { $Exception.Component }
+                               elseif ($Exception.Data -and $Exception.Data.Contains("Component")) { $Exception.Data["Component"] }
+                               else { "Unknown" }
+                }
+                DetailedError = $DetailedError
+                ProcessId = $PID
+                PowerShellVersion = $PSVersionTable.PSVersion.ToString()
+                Arguments = $args
+                BasePath = $script:BasePath
+            }
+            
+            $crashPath = Join-Path $env:TEMP "helios_fatal_crash_$(Get-Date -Format 'yyyyMMdd_HHmmss').json"
+            $crashInfo | ConvertTo-Json -Depth 10 | Set-Content $crashPath -Encoding UTF8
+            
+            Write-Host "`nCrash information saved to: $crashPath" -ForegroundColor Cyan
+            Write-Host "Please include this file when reporting the issue." -ForegroundColor Cyan
+            
+        } catch {
+            Write-Host "`nFailed to save crash information: $_" -ForegroundColor Yellow
+        }
+        
+        Write-Host "`n=== END CRITICAL FAILURE ===" -ForegroundColor Red
+        
+        # Don't re-throw - we want to handle this gracefully
+    }
+    
+} catch {
+    # This is the ultimate fallback error handler
+    Write-Host "`n!!! ULTIMATE FALLBACK ERROR HANDLER !!!" -ForegroundColor Red
+    Write-Host "Even the enhanced error handling failed!" -ForegroundColor Red
+    Write-Host "Raw error: $_" -ForegroundColor Red
+    Write-Host "Error type: $($_.GetType().FullName)" -ForegroundColor Yellow
+    Write-Host "Script stack trace:" -ForegroundColor Yellow
+    Write-Host $_.ScriptStackTrace -ForegroundColor Gray
+    
+    # Try one last diagnostic attempt
+    try {
+        $ultimateFailureInfo = @{
+            Timestamp = Get-Date
+            UltimateError = $_.Exception.Message
+            ErrorType = $_.GetType().FullName
+            ProcessId = $PID
+            PowerShellVersion = $PSVersionTable.PSVersion.ToString()
+            WorkingDirectory = Get-Location
+            Arguments = $args
+        }
+        
+        $ultimatePath = Join-Path $env:TEMP "helios_ultimate_failure_$(Get-Date -Format 'yyyyMMdd_HHmmss').json"
+        $ultimateFailureInfo | ConvertTo-Json -Depth 5 | Set-Content $ultimatePath -Encoding UTF8
+        
+        Write-Host "`nUltimate failure info saved to: $ultimatePath" -ForegroundColor Magenta
+    } catch {
+        Write-Host "Even ultimate failure logging failed: $_" -ForegroundColor Red
+    }
+    
+    Write-Error "Fatal error occurred: $_"
+    exit 1
+    
+} finally {
+    # Final cleanup and user interaction
+    if ($Host.UI.RawUI) {
+        Write-Host "`nPress any key to exit..." -ForegroundColor Green
+        try {
+            $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+        } catch {
+            # If even reading a key fails, just wait a moment
+            Start-Sleep -Seconds 2
+        }
+    }
+    
+    Write-Host "Exiting PMC Terminal..." -ForegroundColor Gray
     exit 1
 }

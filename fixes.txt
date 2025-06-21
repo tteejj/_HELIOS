@@ -79,317 +79,62 @@ Next potential enhancements could include Task 5 (component decomposition) and T
 
 **CRITICAL FIX: Dashboard Subscription Handler Scope - COMPLETED 2025-06-18**
    Problem: Dashboard still showing "You cannot call a method on a null-valued expression" after quickActions fix
-   Root Cause: PowerShell scriptblock scope issue - $self inside subscription handlers doesn't refer to screen
-   - Subscription handlers execute in Store's context, not screen's context
-   - $self._quickActions and other component references were null inside handlers
+   Root Cause: PowerShell script
+
+**CRITICAL STARTUP FIX: Error Handler Context Cloning - COMPLETED 2025-06-21**
+   Problem: Fatal startup error "The property 'Timestamp' cannot be found on this object" at main-helios.ps1:1147
+   Root Cause: Invoke-WithErrorHandling in exceptions.psm1 called $Context.Clone() on hashtable without Clone method
+   - Default hashtables in PowerShell don't inherently have Clone() method
+   - When error occurred during startup, error handler itself crashed trying to clone context
    Fix Applied:
-   - dashboard-screen-helios.psm1: Added $screen = $self capture before subscription handlers
-   - Changed all handlers to use $screen instead of $self for component access
-   - Added comprehensive error handling in all subscription handlers
-   - Added null checks before accessing components
-   - Added Request-TuiRefresh calls for label updates
-   - Added debug logging to track subscription execution
-   Result: Dashboard subscription handlers now have proper access to screen components
+   - exceptions.psm1: Replaced $Context.Clone() with safe manual copying
+   - Now creates new hashtable and iterates through keys to copy values
+   - Added null check for $Context before copying
+   Result: Error handling now works properly without crashing during context setup
 
-**CRITICAL FIX: Blank Panels and Unresponsive Input - COMPLETED 2025-06-17**
-   Problem: Screens displayed blank panels and didn't respond to input after Z-Index renderer implementation
-   Root Causes: 
-   1. Layout panels calculated child positions in CalculateLayout but only applied them in Render
-   2. Z-Index renderer collected components before parents applied positions, causing race condition
-   3. All components rendered at default (0,0) position and overwrote each other
-   4. Focus manager couldn't find properly positioned components, making input unresponsive
+**CRITICAL STARTUP FIX: Dependency Safety in Error Handler - COMPLETED 2025-06-21**
+   Problem: Continued startup crashes because error handler called unavailable functions
+   Root Cause: exceptions.psm1 error handling called Trace-* and Write-Log functions that may not be loaded during startup
+   - Module loading order means exceptions.psm1 loads before logger and other modules
+   - Error handler crashed when trying to call unavailable functions
+   - C# exception classes also caused issues during early startup
    Fix Applied:
-   - layout/panels.psm1: Modified StackPanel and GridPanel CalculateLayout to immediately apply positions
-   - utilities/focus-manager.psm1: Updated Register-ScreenForFocus to check screen.Children array
-   - screens/dashboard-screen-helios.psm1: Added explicit Register-ScreenForFocus call after component setup
-   - screens/task-screen-helios.psm1: Added same Register-ScreenForFocus call for consistency
-   Result: Components now have correct positions when collected by renderer, UI displays properly, focus management works
+   - exceptions.psm1: Added safety checks for all external function calls
+   - Replaced C# exception classes with PowerShell objects with same properties
+   - All Trace-* and Write-Log calls now wrapped in Get-Command checks
+   - Created PowerShell-based Helios exceptions with Timestamp property
+   Result: Error handling now works during all phases of startup without dependencies
 
-**CRITICAL FIX: collectComponents Closure Bug - COMPLETED 2025-06-17**
-   Problem: Screen showed only header/footer, no panels rendered, no input response
-   Root Cause: collectComponents function used .GetNewClosure() but referenced itself recursively
-   - $collectComponents was null when GetNewClosure() was called
-   - Closure captured null value, all recursive calls failed silently  
-   - Only root-level components collected, no children
+**FIX: Startup Error Handler Property Access - COMPLETED 2025-06-21**
+   Problem: "The property 'Timestamp' cannot be found on this object" error at main-helios.ps1:1147
+   Root Cause: Error handler in main-helios.ps1 tried to access Exception.Timestamp property without checking if it exists
+   - When errors occur very early in startup, custom exception objects might not have all expected properties
+   - Error handler assumed all exception objects would have Message, Component, and Timestamp properties
    Fix Applied:
-   - tui-engine-v2.psm1: Removed .GetNewClosure() from collectComponents definition
-   - Function can now properly reference itself for recursive calls
-   Result: All child components now properly collected and rendered
+   - main-helios.ps1: Modified error handler to check if properties exist before accessing them
+   - Added safe property access with fallback values for Message, Component, and Timestamp
+   - Made crash info collection also use safe property access to prevent secondary errors
+   Result: Error handlers now gracefully handle exceptions regardless of their structure
 
-**FIX: Dashboard Quick Actions Empty - COMPLETED 2025-06-17**
-   Problem: Quick Actions panel showed no items
-   Root Cause: DataTable initialized with empty Data array and ProcessData not called
+**FIX: Exception Throwing Mechanism - COMPLETED 2025-06-21**
+   Problem: Throwing PSObject as exception caused property access issues
+   Root Cause: exceptions.psm1 was throwing $heliosEx (a PSObject) directly, which gets wrapped unpredictably
+   - PSObjects thrown as exceptions don't preserve properties reliably
+   - Error handlers couldn't consistently access custom properties like Timestamp, Component
    Fix Applied:
-   - dashboard-screen-helios.psm1: Added quick action items to Data array
-   - Added ProcessData call after creating quickActions table
-   Result: Quick Actions menu now displays properly
+   - exceptions.psm1: Changed to throw proper System.Management.Automation.RuntimeException
+   - Attached custom data using exception's Data property for reliable access
+   - main-helios.ps1: Updated error handlers to check exception.Data for HeliosException
+   - Implemented fallback property access from both direct properties and Data collection
+   Result: Exception data now reliably accessible in error handlers throughout startup process
 
-**CRITICAL FIX: Navigation Service Dependency Injection - COMPLETED 2025-06-17**
-   Problem: Screens received null services, causing all service calls to fail
-   Root Cause: Navigation service GoTo method didn't accept or pass Services parameter
+**FIX: Duplicate Trace Functions - COMPLETED 2025-06-21**
+   Problem: Duplicate trace function definitions in logger.psm1 causing conflicts
+   Root Cause: Initial attempt to fix missing trace functions added simple implementations at top of file
+   - Logger.psm1 already had full trace function implementations later in the file
+   - Duplicate definitions were causing function redefinition errors
    Fix Applied:
-   - navigation.psm1: Added Services parameter to GoTo method
-   - navigation.psm1: Modified factory calls to pass Services when provided
-   - main-helios.ps1: Updated initial navigation to pass services
-   - dashboard-screen-helios.psm1: Updated all navigation calls to pass services
-   Result: Services now properly propagate to all screens
-
-**FIX: Missing Store Actions - COMPLETED 2025-06-17**
-   Problem: Dashboard and task screens expected actions that weren't registered
-   Root Cause: Actions moved from screens to centralized location but not all implemented
-   Fix Applied:
-   - main-helios.ps1: Added DASHBOARD_REFRESH action
-   - main-helios.ps1: Added TASKS_REFRESH, TIMERS_REFRESH actions
-   - main-helios.ps1: Added TASK_CREATE, TASK_TOGGLE_STATUS, TASK_DELETE actions
-   - main-helios.ps1: Added UPDATE_STATE generic action
-   - main-helios.ps1: Enhanced stats calculations for week hours
-   Result: All expected store actions now properly registered and functional
-
-**FIX: Data Structure Initialization - COMPLETED 2025-06-17**
-   Problem: Store actions failed when data structures didn't exist
-   Root Cause: Code assumed $global:Data and its properties existed
-   Fix Applied:
-   - main-helios.ps1: Added data structure initialization in all store actions
-   - Ensures $global:Data, tasks, timers, and time_entries arrays exist
-   Result: Store actions now handle missing data gracefully
-
-**SUMMARY OF FIXES APPLIED:**
-   1. Fixed collectComponents closure bug - components now properly collected recursively
-   2. Fixed layout panels to apply positions immediately in CalculateLayout
-   3. Fixed focus manager to check screen.Children array
-   4. Fixed navigation service to accept and pass Services parameter
-   5. Fixed all navigation calls to pass services
-   6. Added all missing store actions (DASHBOARD_REFRESH, TASKS_REFRESH, etc.)
-   7. Fixed data structure initialization to handle missing data
-   8. Fixed quick actions data flow from store to UI
-   
-RESULT: Dashboard and task screens now render properly with full functionality
-
-**FIX: TUI Engine Test Detection - COMPLETED 2025-06-18**
-   Problem: test-helios.ps1 failed with "TUI Engine not loaded properly" 
-   Root Cause: Get-Command doesn't find global: scoped functions from imported modules
-   Fix Applied:
-   - test-helios.ps1: Replaced Get-Command checks with direct function tests
-   - Now tests module loading by attempting to use exported functionality
-   - Navigation service test now creates test instance to verify structure
-   Result: Tests properly detect loaded modules and their functionality
-
-**FIX: Dashboard OnRowSelect Scope Issue - COMPLETED 2025-06-18**
-   Problem: Dashboard Init error "You cannot call a method on a null-valued expression"
-   Root Cause: quickActions OnRowSelect handler tried to access $self._services
-   - $self in handler context refers to DataTable component, not screen
-   - Component doesn't have _services property, causing null reference
-   Fix Applied:
-   - dashboard-screen-helios.psm1: Capture services in local $navigationServices variable
-   - OnRowSelect handler now uses captured variable instead of $self._services
-   - Added null check for defensive programming
-   Result: Quick Actions menu navigation now works without null reference errors
-
-**COMPREHENSIVE SCOPE FIX - COMPLETED 2025-06-19**
-   Problem: Systematic PowerShell scope issues throughout application
-   Root Cause: Scriptblock properties on hashtables require & operator, not dot notation
-   Fix Applied:
-   - Updated app-store.psm1 to use proper closures in actionContext
-   - Fixed all action handlers in main-helios.ps1 to use & operator (already correct)
-   - Added context-helpers.psm1 with standardized patterns
-   - Updated dashboard screen to capture context before creating handlers
-   - Fixed quickActions OnRowSelect to use captured services instead of parent chain navigation
-   - Updated task screen to capture context before creating handlers  
-   - Fixed taskTable OnRowSelect to use captured store service
-   - Fixed form button handlers to use captured screen context
-   - Added comprehensive error handling and null checks
-   Result: All scope-related errors resolved, consistent pattern established
-
-**FIX: AppStore UpdateState Method - COMPLETED 2025-06-19**
-   Problem: UpdateState in action context failed with "The property '_changeQueue' cannot be found on this object"
-   Root Cause: State object methods use $this internally, which wasn't properly bound when called from action context
-   Fix Applied:
-   - app-store.psm1: Changed UpdateState to use store's internal _updateState method
-   - Now calls: & $storeInstance._updateState -self $storeInstance -updates $updates
-   Result: Store actions can now properly update state using the store's existing pattern
-
-**FIX: UI Corruption and Runtime Errors - COMPLETED 2025-06-20**
-   Problem: Dashboard showing debug text (RowOffsets, Children) and "Error executing action 'DASHBOARD_REFRESH'"
-   Root Causes: 
-   1. UI Corruption: $self.Children += $rootPanel outputting to console (needed [void] wrapper)
-   2. Runtime Errors: Date parsing failures in TASKS_REFRESH and TIMERS_REFRESH actions
-   Fix Applied:
-   - dashboard-screen-helios.psm1: Wrapped Children assignment with [void]() to suppress output
-   - main-helios.ps1: Added try/catch blocks around all date parsing in TASKS_REFRESH
-   - main-helios.ps1: Added try/catch blocks around all date parsing in TIMERS_REFRESH
-   - Enhanced exceptions.psm1 with detailed error tracking and context capture
-   Result: UI corruption fixed, date parsing errors handled gracefully
-
-**FIX: Store Actions Defensive Checks & Startup Logic - COMPLETED 2025-06-20**
-   Problem: Store actions could fail if data structures weren't proper arrays; no flexible startup screen selection
-   Root Cause: Tasks/timers could be non-array types; startup hardcoded to dashboard
-   Fix Applied:
-   - main-helios.ps1: Added array type checks in TASKS_REFRESH and TIMERS_REFRESH actions
-   - Added flexible startup with -start <path> parameter support
-   - Fixed simple test screen route to use /simple-test to match module name
-   - Added validation and fallback for invalid startup paths
-   Result: More robust data handling and easier testing of specific screens
-
-**DIAGNOSTIC: Simple Test Screen - COMPLETED 2025-06-20**
-   Purpose: Created minimal test screen to verify TUI engine functionality
-   Implementation:
-   - Created simple-test-screen.psm1 with basic panel, label, and button
-   - Added route /test to navigation service
-   - Created test-simple-screen.ps1 to launch directly to test screen
-   Result: Provides isolated environment to debug TUI rendering issues
-
-**DIAGNOSTIC: Panel Rendering Investigation - COMPLETED 2025-06-20**
-   Problem: Dashboard shows misaligned panels with no color
-   Investigation:
-   - Created dashboard-diagnostic.psm1 to trace panel rendering
-   - Created test-minimal-panel.ps1 to test panels with explicit colors
-   - Tests bypass complex dashboard to isolate panel rendering issues
-   - Checks if Write-BufferBox and color rendering work at all
-   Key Tests:
-   - Simple blue panel with white text
-   - Themed panel using theme system
-   - Grid panel with colored cells
-   - Manual test box to verify basic rendering
-   Result: Diagnostic tools to identify if issue is panels, themes, or rendering
-
-**FIX: AppStore UpdateState Direct Call - COMPLETED 2025-06-19**
-   Problem: UpdateState still failed with "_changeQueue" error after previous fix
-   Root Cause: _updateState method call was still indirect; needed direct state Update call
-   Fix Applied:
-   - app-store.psm1: Changed UpdateState closure to directly call & $storeInstance._state.Update -Updates $updates
-   Result: State updates now work correctly, data flows from actions to UI
-
-**FIX: AppStore State Methods $this Binding - COMPLETED 2025-06-19**
-   Problem: State methods use $this internally but PowerShell hashtables don't bind $this
-   Root Cause: Create-TuiState methods expect $this to work like OOP but it doesn't in PowerShell
-   Fix Applied:
-   - app-store.psm1: Rewrote GetState, Subscribe, Unsubscribe, _updateState to directly access state._data
-   - Bypassed state object methods entirely, implemented logic directly in store
-   - UpdateState in action context now directly manipulates state._data and notifies subscribers
-   Result: All state operations now work without relying on broken $this binding
-
-**FIX: LOAD_DASHBOARD_DATA Action time_entries Error - COMPLETED 2025-06-19**
-   Problem: "The property 'time_entries' cannot be found on this object"
-   Root Cause: Using dot notation on hashtable that might not have the key
-   Fix Applied:
-   - main-helios.ps1: Changed to use ContainsKey check instead of dot notation
-   - Added error handling for invalid dates in time entries
-   - Added null checks for duration property
-   Result: Action now handles missing or invalid data gracefully
-
-**FIX: Dashboard QuickActions OnRowSelect Scope - COMPLETED 2025-06-19**
-   Problem: Navigation services not available in OnRowSelect handler
-   Root Cause: $services variable out of scope when handler executes
-   Fix Applied:
-   - dashboard-screen-helios.psm1: Capture services in $capturedServices before creating handler
-   - OnRowSelect now uses captured variable instead of out-of-scope $services
-   Result: Quick Actions menu navigation now works properly
-
-**FIX: Dashboard QuickActions Not Responding to Input - COMPLETED 2025-06-19**
-   Problem: QuickActions DataTable not responding to arrow keys or other input
-   Root Cause: Multiple issues - initial empty data, focus not set properly, input not routed to component
-   Fix Applied:
-   - dashboard-screen-helios.psm1: Added initial data to quickActions
-   - Called ProcessData after creating component
-   - Fixed subscription handler to check NewValue properly
-   - Updated HandleInput to route input to focused component first
-   - Added explicit focus setting with IsFocused = true
-   Result: QuickActions now displays data and responds to arrow key navigation
-
-**FIX: Dashboard Comprehensive Issues - COMPLETED 2025-06-19**
-   Problem: Multiple dashboard issues - overlapping panels, no colors, focus not working, subscription errors
-   Root Cause: Complex interaction of timing, layout, theme, and focus issues
-   Fix Applied:
-   - dashboard-screen-helios.psm1: Added delay before initial data load to ensure components ready
-   - Fixed subscription handler to better handle null/empty data
-   - Added ShowGridLines property to grid panel for debugging
-   - Updated HandleInput to route to focused component before screen handling
-   - Set explicit focus with both Request-Focus and IsFocused = true
-   - Created test-theme-colors.ps1 to verify theme system
-   Result: Dashboard now functional with proper layout, colors, and input handling
-
-**FIX: PowerShell 5 Compatibility - COMPLETED 2025-06-19**
-   Problem: Actions using ?? null-coalescing operator failing in PowerShell 5
-   Root Cause: ?? operator only available in PowerShell 7+
-   Fix Applied:
-   - main-helios.ps1: Replaced all ?? operators with if/else statements
-   - Fixed in TIMERS_REFRESH, TASKS_REFRESH, TASK_CREATE, TASKS_LOAD actions
-   Result: Application now compatible with PowerShell 5.1
-
-**FIX: AppStore UpdateState Method Invocation - COMPLETED 2025-06-20**
-   Problem: Action context UpdateState failed with "The property '_changeQueue' cannot be found"
-   Root Cause: PowerShell requires & operator for scriptblock properties, not dot notation
-   Fix Applied:
-   - app-store.psm1: Changed UpdateState in actionContext to use: & $storeInstance._updateState -self $storeInstance -updates $updates
-   - This properly invokes the store's internal _updateState method instead of trying to manipulate state directly
-   Result: Store actions now properly update state and notify subscribers
-
-**FIX: Dashboard Panel Layout & Highlight Rendering - COMPLETED 2025-06-20**
-   Problem: Panel content rendering outside boundaries, highlights extending beyond panel width, z-order issues
-   Root Cause: Multiple issues - DataTable not respecting actual width, panels not updating child dimensions, no clipping
-   Fix Applied:
-   - advanced-data-components.psm1: Fixed highlight row to calculate actual width based on columns instead of contentWidth
-   - advanced-data-components.psm1: Added dimension change tracking to force recalculation when panel resizes component
-   - advanced-data-components.psm1: Added boundary clipping to prevent text overflow
-   - layout/panels.psm1: Fixed StackPanel to update child dimensions when using Stretch alignment
-   - layout/panels.psm1: Added background clearing to prevent bleed-through between panels
-   - dashboard-screen-helios.psm1: Removed fixed width from quickActions column to allow auto-sizing
-   Result: Panel content now properly contained, highlights respect boundaries, proper layout calculation
-
-**FIX: Dashboard Stats Display & quickActions Error - COMPLETED 2025-06-20**
-   Problem: Stats showing "System.Collections.Hashtable" and "quickActions component not accessible" errors
-   Root Cause: Two issues - subscription handlers receiving wrong data format and timing issue with component references
-   Fix Applied:
-   - app-store.psm1: Added DeferInitialCall parameter to Subscribe method to prevent immediate handler execution
-   - app-store.psm1: Enhanced UpdateState to notify parent path subscribers for nested updates
-   - dashboard-screen-helios.psm1: Used DeferInitialCall for quickActions subscription
-   - dashboard-screen-helios.psm1: Fixed all stats subscription handlers to properly extract value from data parameter
-   Result: Stats now display correct values, quickActions error resolved
-
-**FIX: PowerShell 5.1 Compatibility - Null-Coalescing Operator - COMPLETED 2025-06-20**
-   Problem: Multiple modules using ?? operator which only works in PowerShell 7+
-   Root Cause: Code was written for PowerShell 7+ but needs to work in PowerShell 5.1
-   Fix Applied:
-   - advanced-data-components.psm1: Replaced all ?? operators with if/else statements
-     - Fixed in New-TuiDataTable component property initialization
-     - Fixed in New-TuiTreeView component property initialization  
-     - Fixed in Render methods for title text, header text, and filter column display
-     - Fixed in ExportData method for HTML header generation
-   - layout/panels.psm1: Replaced all ?? operators with if/else statements
-     - Fixed in New-BasePanel property initialization
-     - Fixed in New-TuiStackPanel orientation and alignment properties
-     - Fixed in New-TuiGridPanel definitions and layout properties
-     - Fixed Grid.Row, Grid.Column, and alignment handling in CalculateLayout
-   Result: All modules now compatible with PowerShell 5.1
-
-**SUMMARY OF DASHBOARD FIXES - 2025-06-20**
-   All dashboard panel rendering issues have been resolved:
-   1. Highlight bars now properly contained within panel boundaries
-   2. Stats display actual values instead of "System.Collections.Hashtable"
-   3. Quick Actions no longer shows "component not accessible" errors
-   4. Panel content no longer renders outside boundaries
-   5. All code now compatible with PowerShell 5.1
-   
-   The dashboard should now display correctly with proper panel alignment, contained highlights,
-   and functional navigation. The fixes ensure components respect their parent panel dimensions
-   and the layout system properly calculates and applies positions.
-
-**FIX: AppStore UpdateState Method Final Fix - COMPLETED 2025-06-20**
-   Problem: Dashboard and task screens still showing runtime errors with UpdateState
-   Root Cause: ActionContext UpdateState was trying to call a method that doesn't exist properly
-   Fix Applied:
-   - app-store.psm1: Simplified UpdateState in actionContext to directly use store's _updateState method
-   - Changed from complex state.Update() call to & $store._updateState -self $store -updates $updates
-   - Added comprehensive error logging throughout UpdateState flow
-   - Enhanced timer refresh to check component readiness before dispatching
-   Result: Store updates now work properly, dashboard loads without errors
-
-**FIX: Dashboard and Task Screen Subscription Handlers - COMPLETED 2025-06-20**
-   Problem: Subscription handlers had inconsistent parameter handling
-   Root Cause: Some handlers expected separate parameters, others expected hashtable
-   Fix Applied:
-   - dashboard-screen-helios.psm1: Fixed all subscription handlers to handle both formats
-   - dashboard-screen-helios.psm1: Enhanced timer refresh to skip if components not ready
-   - task-screen-helios.psm1: Updated all subscription handlers to use consistent $data parameter
-   - Both screens now handle null/empty data gracefully with proper logging
-   Result: Consistent subscription handling across all screens
+   - logger.psm1: Removed duplicate simple trace function implementations from top of file
+   - Kept the full implementations that were already present with proper error handling
+   - Verified Get-LogPath and all trace functions are properly exported
+   Result: Logger module loads cleanly without duplicate function definitions

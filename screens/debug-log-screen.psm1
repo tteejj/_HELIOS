@@ -4,6 +4,9 @@
 function global:Get-DebugLogScreen {
     $screen = @{
         Name = "DebugLogScreen"
+        Children = @()  # FIX: Required for Z-index renderer
+        Visible = $true
+        ZIndex = 0
         
         State = @{
             logEntries = @()

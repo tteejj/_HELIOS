@@ -1,4 +1,3 @@
-
 # Dialog System Module - FIXED VERSION
 # Uses engine's word wrap helper and respects the framework
 
@@ -12,22 +11,31 @@ $script:DialogState = @{
 function global:Show-TuiDialog {
     <# .SYNOPSIS Internal function to display a dialog component. #>
     param([hashtable]$DialogComponent)
-    
-    if ($script:DialogState.CurrentDialog) {
-        $script:DialogState.DialogStack.Push($script:DialogState.CurrentDialog)
+    Invoke-WithErrorHandling -Component "DialogSystem.ShowDialog" -ScriptBlock {
+        if ($script:DialogState.CurrentDialog) {
+            $script:DialogState.DialogStack.Push($script:DialogState.CurrentDialog)
+        }
+        $script:DialogState.CurrentDialog = $DialogComponent
+        Request-TuiRefresh
+    } -Context @{ DialogType = $DialogComponent.Type; DialogTitle = $DialogComponent.Title } -ErrorHandler {
+        param($Exception)
+        Write-Log -Level Error -Message "Failed to show dialog '$($Exception.Context.DialogTitle)': $($Exception.Message)" -Data $Exception.Context
     }
-    $script:DialogState.CurrentDialog = $DialogComponent
-    Request-TuiRefresh
 }
 
 function global:Close-TuiDialog {
     <# .SYNOPSIS Closes the current dialog and restores the previous one, if any. #>
-    if ($script:DialogState.DialogStack.Count -gt 0) {
-        $script:DialogState.CurrentDialog = $script:DialogState.DialogStack.Pop()
-    } else {
-        $script:DialogState.CurrentDialog = $null
+    Invoke-WithErrorHandling -Component "DialogSystem.CloseDialog" -ScriptBlock {
+        if ($script:DialogState.DialogStack.Count -gt 0) {
+            $script:DialogState.CurrentDialog = $script:DialogState.DialogStack.Pop()
+        } else {
+            $script:DialogState.CurrentDialog = $null
+        }
+        Request-TuiRefresh
+    } -Context @{} -ErrorHandler {
+        param($Exception)
+        Write-Log -Level Error -Message "Failed to close dialog: $($Exception.Message)" -Data $Exception.Context
     }
-    Request-TuiRefresh
 }
 
 function global:Show-ConfirmDialog {
@@ -38,21 +46,37 @@ function global:Show-ConfirmDialog {
         [scriptblock]$OnConfirm,
         [scriptblock]$OnCancel = {}
     )
-    
-    $dialog = New-TuiDialog -Props @{
-        Title         = $Title
-        Message       = $Message
-        Buttons       = @("Yes", "No")
-        Width         = [Math]::Min(80, [Math]::Max(50, $Message.Length + 10))
-        Height        = 10
-        OnButtonClick = {
-            param($Button, $Index)
-            Close-TuiDialog
-            if ($Index -eq 0) { & $OnConfirm } else { & $OnCancel }
+    Invoke-WithErrorHandling -Component "DialogSystem.ShowConfirmDialog" -ScriptBlock {
+        $dialog = New-TuiDialog -Props @{
+            Title         = $Title
+            Message       = $Message
+            Buttons       = @("Yes", "No")
+            Width         = [Math]::Min(80, [Math]::Max(50, $Message.Length + 10))
+            Height        = 10
+            OnButtonClick = {
+                param($Button, $Index)
+                Invoke-WithErrorHandling -Component "ConfirmDialog.OnButtonClick" -ScriptBlock {
+                    Close-TuiDialog
+                    if ($Index -eq 0) { & $OnConfirm } else { & $OnCancel }
+                } -Context @{ Button = $Button; Index = $Index; DialogTitle = $Title } -ErrorHandler {
+                    param($Exception)
+                    Write-Log -Level Error -Message "Confirm Dialog button click error: $($Exception.Message)" -Data $Exception.Context
+                }
+            }
+            OnCancel      = { 
+                Invoke-WithErrorHandling -Component "ConfirmDialog.OnCancel" -ScriptBlock {
+                    Close-TuiDialog; & $OnCancel 
+                } -Context @{ DialogTitle = $Title } -ErrorHandler {
+                    param($Exception)
+                    Write-Log -Level Error -Message "Confirm Dialog cancel error: $($Exception.Message)" -Data $Exception.Context
+                }
+            }
         }
-        OnCancel      = { Close-TuiDialog; & $OnCancel }
+        Show-TuiDialog -DialogComponent $dialog
+    } -Context @{ Title = $Title; Message = $Message } -ErrorHandler {
+        param($Exception)
+        Write-Log -Level Error -Message "Failed to show confirm dialog '$($Exception.Context.Title)': $($Exception.Message)" -Data $Exception.Context
     }
-    Show-TuiDialog -DialogComponent $dialog
 }
 
 function global:Show-AlertDialog {
@@ -61,17 +85,35 @@ function global:Show-AlertDialog {
         [string]$Title = "Alert",
         [string]$Message
     )
-    
-    $dialog = New-TuiDialog -Props @{
-        Title         = $Title
-        Message       = $Message
-        Buttons       = @("OK")
-        Width         = [Math]::Min(80, [Math]::Max(40, $Message.Length + 10))
-        Height        = 10
-        OnButtonClick = { Close-TuiDialog }
-        OnCancel      = { Close-TuiDialog }
+    Invoke-WithErrorHandling -Component "DialogSystem.ShowAlertDialog" -ScriptBlock {
+        $dialog = New-TuiDialog -Props @{
+            Title         = $Title
+            Message       = $Message
+            Buttons       = @("OK")
+            Width         = [Math]::Min(80, [Math]::Max(40, $Message.Length + 10))
+            Height        = 10
+            OnButtonClick = { 
+                Invoke-WithErrorHandling -Component "AlertDialog.OnButtonClick" -ScriptBlock {
+                    Close-TuiDialog 
+                } -Context @{ DialogTitle = $Title } -ErrorHandler {
+                    param($Exception)
+                    Write-Log -Level Error -Message "Alert Dialog button click error: $($Exception.Message)" -Data $Exception.Context
+                }
+            }
+            OnCancel      = { 
+                Invoke-WithErrorHandling -Component "AlertDialog.OnCancel" -ScriptBlock {
+                    Close-TuiDialog 
+                } -Context @{ DialogTitle = $Title } -ErrorHandler {
+                    param($Exception)
+                    Write-Log -Level Error -Message "Alert Dialog cancel error: $($Exception.Message)" -Data $Exception.Context
+                }
+            }
+        }
+        Show-TuiDialog -DialogComponent $dialog
+    } -Context @{ Title = $Title; Message = $Message } -ErrorHandler {
+        param($Exception)
+        Write-Log -Level Error -Message "Failed to show alert dialog '$($Exception.Context.Title)': $($Exception.Message)" -Data $Exception.Context
     }
-    Show-TuiDialog -DialogComponent $dialog
 }
 
 function global:Show-InputDialog {
@@ -83,142 +125,175 @@ function global:Show-InputDialog {
         [scriptblock]$OnSubmit,
         [scriptblock]$OnCancel = {}
     )
-
-    # Create a screen that contains the input components
-    $inputScreen = @{
-        Name = "InputDialog"
-        State = @{
-            InputValue = $DefaultValue
-            FocusedIndex = 0  # Start with textbox focused
-        }
-        _focusableNames = @("InputTextBox", "OKButton", "CancelButton")
-        _focusedIndex = 0
-        
-        Render = {
-            param($self)
-            
-            # Calculate dialog dimensions
-            $dialogWidth = [Math]::Min(70, [Math]::Max(50, $Prompt.Length + 10))
-            $dialogHeight = 10
-            $dialogX = [Math]::Floor(($global:TuiState.BufferWidth - $dialogWidth) / 2)
-            $dialogY = [Math]::Floor(($global:TuiState.BufferHeight - $dialogHeight) / 2)
-            
-            # Draw dialog box
-            Write-BufferBox -X $dialogX -Y $dialogY -Width $dialogWidth -Height $dialogHeight `
-                -Title " $Title " -BorderColor (Get-ThemeColor "Accent")
-            
-            # Draw prompt
-            $promptX = $dialogX + 2
-            $promptY = $dialogY + 2
-            Write-BufferString -X $promptX -Y $promptY -Text $Prompt
-            
-            # Draw text input
-            $inputY = $promptY + 2
-            $inputWidth = $dialogWidth - 4
-            $isFocused = ($self._focusedIndex -eq 0)
-            $borderColor = if ($isFocused) { Get-ThemeColor "Warning" } else { Get-ThemeColor "Primary" }
-            
-            Write-BufferBox -X $promptX -Y $inputY -Width $inputWidth -Height 3 `
-                -BorderColor $borderColor
-            
-            # Draw input value
-            $displayText = $self.State.InputValue
-            if ($displayText.Length > ($inputWidth - 3)) {
-                $displayText = $displayText.Substring($displayText.Length - ($inputWidth - 3))
+    Invoke-WithErrorHandling -Component "DialogSystem.ShowInputDialog" -ScriptBlock {
+        # Create a screen that contains the input components
+        $inputScreen = @{
+            Name = "InputDialog"
+            State = @{
+                InputValue = $DefaultValue
+                FocusedIndex = 0  # Start with textbox focused
             }
-            Write-BufferString -X ($promptX + 1) -Y ($inputY + 1) -Text $displayText
+            _focusableNames = @("InputTextBox", "OKButton", "CancelButton")
+            _focusedIndex = 0
             
-            # Draw cursor if textbox is focused
-            if ($isFocused) {
-                $cursorPos = [Math]::Min($self.State.InputValue.Length, $inputWidth - 3)
-                Write-BufferString -X ($promptX + 1 + $cursorPos) -Y ($inputY + 1) `
-                    -Text "_" -ForegroundColor (Get-ThemeColor "Warning")
-            }
-            
-            # Draw buttons
-            $buttonY = $dialogY + $dialogHeight - 2
-            $buttonSpacing = 15
-            $buttonsWidth = $buttonSpacing * 2
-            $buttonX = $dialogX + [Math]::Floor(($dialogWidth - $buttonsWidth) / 2)
-            
-            # OK button
-            $okFocused = ($self._focusedIndex -eq 1)
-            $okText = if ($okFocused) { "[ OK ]" } else { "  OK  " }
-            $okColor = if ($okFocused) { Get-ThemeColor "Warning" } else { Get-ThemeColor "Primary" }
-            Write-BufferString -X $buttonX -Y $buttonY -Text $okText -ForegroundColor $okColor
-            
-            # Cancel button
-            $cancelFocused = ($self._focusedIndex -eq 2)
-            $cancelText = if ($cancelFocused) { "[ Cancel ]" } else { "  Cancel  " }
-            $cancelColor = if ($cancelFocused) { Get-ThemeColor "Warning" } else { Get-ThemeColor "Primary" }
-            Write-BufferString -X ($buttonX + $buttonSpacing) -Y $buttonY -Text $cancelText -ForegroundColor $cancelColor
-        }
-        
-        HandleInput = {
-            param($self, $Key)
-            
-            # Handle Tab navigation
-            if ($Key.Key -eq [ConsoleKey]::Tab) {
-                $direction = if ($Key.Modifiers -band [ConsoleModifiers]::Shift) { -1 } else { 1 }
-                $self._focusedIndex = ($self._focusedIndex + $direction + 3) % 3
-                Request-TuiRefresh
-                return $true
+            Render = {
+                param($self)
+                Invoke-WithErrorHandling -Component "$($self.Name).Render" -ScriptBlock {
+                    # Calculate dialog dimensions
+                    $dialogWidth = [Math]::Min(70, [Math]::Max(50, $Prompt.Length + 10))
+                    $dialogHeight = 10
+                    $dialogX = [Math]::Floor(($global:TuiState.BufferWidth - $dialogWidth) / 2)
+                    $dialogY = [Math]::Floor(($global:TuiState.BufferHeight - $dialogHeight) / 2)
+                    
+                    # Draw dialog box
+                    Write-BufferBox -X $dialogX -Y $dialogY -Width $dialogWidth -Height $dialogHeight `
+                        -Title " $Title " -BorderColor (Get-ThemeColor "Accent")
+                    
+                    # Draw prompt
+                    $promptX = $dialogX + 2
+                    $promptY = $dialogY + 2
+                    Write-BufferString -X $promptX -Y $promptY -Text $Prompt
+                    
+                    # Draw text input
+                    $inputY = $promptY + 2
+                    $inputWidth = $dialogWidth - 4
+                    $isFocused = ($self._focusedIndex -eq 0)
+                    $borderColor = if ($isFocused) { Get-ThemeColor "Warning" } else { Get-ThemeColor "Primary" }
+                    
+                    Write-BufferBox -X $promptX -Y $inputY -Width $inputWidth -Height 3 `
+                        -BorderColor $borderColor
+                    
+                    # Draw input value
+                    $displayText = $self.State.InputValue
+                    if ($displayText.Length > ($inputWidth - 3)) {
+                        $displayText = $displayText.Substring(0, $inputWidth - 3) # Ensure it fits
+                    }
+                    Write-BufferString -X ($promptX + 1) -Y ($inputY + 1) -Text $displayText
+                    
+                    # Draw cursor if textbox is focused
+                    if ($isFocused) {
+                        $cursorPos = [Math]::Min($self.State.InputValue.Length, $inputWidth - 3)
+                        Write-BufferString -X ($promptX + 1 + $cursorPos) -Y ($inputY + 1) `
+                            -Text "_" -ForegroundColor (Get-ThemeColor "Warning")
+                    }
+                    
+                    # Draw buttons
+                    $buttonY = $dialogY + $dialogHeight - 2
+                    $buttonSpacing = 15
+                    $buttonsWidth = $buttonSpacing * 2
+                    $buttonX = $dialogX + [Math]::Floor(($dialogWidth - $buttonsWidth) / 2)
+                    
+                    # OK button
+                    $okFocused = ($self._focusedIndex -eq 1)
+                    $okText = if ($okFocused) { "[ OK ]" } else { "  OK  " }
+                    $okColor = if ($okFocused) { Get-ThemeColor "Warning" } else { Get-ThemeColor "Primary" }
+                    Write-BufferString -X $buttonX -Y $buttonY -Text $okText -ForegroundColor $okColor
+                    
+                    # Cancel button
+                    $cancelFocused = ($self._focusedIndex -eq 2)
+                    $cancelText = if ($cancelFocused) { "[ Cancel ]" } else { "  Cancel  " }
+                    $cancelColor = if ($cancelFocused) { Get-ThemeColor "Warning" } else { Get-ThemeColor "Primary" }
+                    Write-BufferString -X ($buttonX + $buttonSpacing) -Y $buttonY -Text $cancelText -ForegroundColor $cancelColor
+                } -Context @{ DialogName = $self.Name; Prompt = $Prompt; CurrentValue = $self.State.InputValue } -ErrorHandler {
+                    param($Exception)
+                    Write-Log -Level Error -Message "Input Dialog Render error for '$($Exception.Context.DialogName)': $($Exception.Message)" -Data $Exception.Context
+                }
             }
             
-            # Handle Escape
-            if ($Key.Key -eq [ConsoleKey]::Escape) {
-                Close-TuiDialog
-                & $OnCancel
-                return $true
-            }
-            
-            # Handle based on focused element
-            switch ($self._focusedIndex) {
-                0 {  # TextBox
-                    switch ($Key.Key) {
-                        ([ConsoleKey]::Enter) {
-                            Close-TuiDialog
-                            & $OnSubmit -Value $self.State.InputValue
-                            return $true
+            HandleInput = {
+                param($self, $Key)
+                Invoke-WithErrorHandling -Component "$($self.Name).HandleInput" -ScriptBlock {
+                    # Handle Tab navigation
+                    if ($Key.Key -eq [ConsoleKey]::Tab) {
+                        $direction = if ($Key.Modifiers -band [ConsoleModifiers]::Shift) { -1 } else { 1 }
+                        $self._focusedIndex = ($self._focusedIndex + $direction + 3) % 3
+                        Request-TuiRefresh
+                        return $true
+                    }
+                    
+                    # Handle Escape
+                    if ($Key.Key -eq [ConsoleKey]::Escape) {
+                        Close-TuiDialog
+                        Invoke-WithErrorHandling -Component "InputDialog.OnCancel" -ScriptBlock {
+                            & $OnCancel
+                        } -Context @{ DialogTitle = $Title } -ErrorHandler {
+                            param($Exception)
+                            Write-Log -Level Error -Message "Input Dialog OnCancel error: $($Exception.Message)" -Data $Exception.Context
                         }
-                        ([ConsoleKey]::Backspace) {
-                            if ($self.State.InputValue.Length -gt 0) {
-                                $self.State.InputValue = $self.State.InputValue.Substring(0, $self.State.InputValue.Length - 1)
-                                Request-TuiRefresh
+                        return $true
+                    }
+                    
+                    # Handle based on focused element
+                    switch ($self._focusedIndex) {
+                        0 {  # TextBox
+                            switch ($Key.Key) {
+                                ([ConsoleKey]::Enter) {
+                                    Close-TuiDialog
+                                    Invoke-WithErrorHandling -Component "InputDialog.OnSubmit" -ScriptBlock {
+                                        & $OnSubmit -Value $self.State.InputValue
+                                    } -Context @{ DialogTitle = $Title; InputValue = $self.State.InputValue } -ErrorHandler {
+                                        param($Exception)
+                                        Write-Log -Level Error -Message "Input Dialog OnSubmit error: $($Exception.Message)" -Data $Exception.Context
+                                    }
+                                    return $true
+                                }
+                                ([ConsoleKey]::Backspace) {
+                                    if ($self.State.InputValue.Length -gt 0) {
+                                        $self.State.InputValue = $self.State.InputValue.Substring(0, $self.State.InputValue.Length - 1)
+                                        Request-TuiRefresh
+                                    }
+                                    return $true
+                                }
+                                default {
+                                    if ($Key.KeyChar -and -not [char]::IsControl($Key.KeyChar)) {
+                                        $self.State.InputValue += $Key.KeyChar
+                                        Request-TuiRefresh
+                                        return $true
+                                    }
+                                }
                             }
-                            return $true
                         }
-                        default {
-                            if ($Key.KeyChar -and -not [char]::IsControl($Key.KeyChar)) {
-                                $self.State.InputValue += $Key.KeyChar
-                                Request-TuiRefresh
+                        1 {  # OK Button
+                            if ($Key.Key -eq [ConsoleKey]::Enter -or $Key.Key -eq [ConsoleKey]::Spacebar) {
+                                Close-TuiDialog
+                                Invoke-WithErrorHandling -Component "InputDialog.OnSubmit" -ScriptBlock {
+                                    & $OnSubmit -Value $self.State.InputValue
+                                } -Context @{ DialogTitle = $Title; InputValue = $self.State.InputValue } -ErrorHandler {
+                                    param($Exception)
+                                    Write-Log -Level Error -Message "Input Dialog OnSubmit error: $($Exception.Message)" -Data $Exception.Context
+                                }
+                                return $true
+                            }
+                        }
+                        2 {  # Cancel Button
+                            if ($Key.Key -eq [ConsoleKey]::Enter -or $Key.Key -eq [ConsoleKey]::Spacebar) {
+                                Close-TuiDialog
+                                Invoke-WithErrorHandling -Component "InputDialog.OnCancel" -ScriptBlock {
+                                    & $OnCancel
+                                } -Context @{ DialogTitle = $Title } -ErrorHandler {
+                                    param($Exception)
+                                    Write-Log -Level Error -Message "Input Dialog OnCancel error: $($Exception.Message)" -Data $Exception.Context
+                                }
                                 return $true
                             }
                         }
                     }
-                }
-                1 {  # OK Button
-                    if ($Key.Key -eq [ConsoleKey]::Enter -or $Key.Key -eq [ConsoleKey]::Spacebar) {
-                        Close-TuiDialog
-                        & $OnSubmit -Value $self.State.InputValue
-                        return $true
-                    }
-                }
-                2 {  # Cancel Button
-                    if ($Key.Key -eq [ConsoleKey]::Enter -or $Key.Key -eq [ConsoleKey]::Spacebar) {
-                        Close-TuiDialog
-                        & $OnCancel
-                        return $true
-                    }
+                    
+                    return $false
+                } -Context @{ DialogName = $self.Name; Key = $Key; FocusedIndex = $self._focusedIndex } -ErrorHandler {
+                    param($Exception)
+                    Write-Log -Level Error -Message "Input Dialog HandleInput error for '$($Exception.Context.DialogName)': $($Exception.Message)" -Data $Exception.Context
+                    return $false
                 }
             }
-            
-            return $false
         }
+        
+        $script:DialogState.CurrentDialog = $inputScreen
+        Request-TuiRefresh
+    } -Context @{ Title = $Title; Prompt = $Prompt; DefaultValue = $DefaultValue } -ErrorHandler {
+        param($Exception)
+        Write-Log -Level Error -Message "Failed to show input dialog '$($Exception.Context.Title)': $($Exception.Message)" -Data $Exception.Context
     }
-    
-    $script:DialogState.CurrentDialog = $inputScreen
-    Request-TuiRefresh
 }
 
 #endregion
@@ -227,53 +302,87 @@ function global:Show-InputDialog {
 
 function global:Initialize-DialogSystem {
     <# .SYNOPSIS Subscribes to high-level application events to show dialogs. #>
-    
-    Subscribe-Event -EventName "Confirm.Request" -Handler {
-        param($EventData)
-        $dialogParams = $EventData.Data
-        Show-ConfirmDialog @dialogParams
+    Invoke-WithErrorHandling -Component "DialogSystem.Initialize" -ScriptBlock {
+        Subscribe-Event -EventName "Confirm.Request" -Handler {
+            param($EventData)
+            Invoke-WithErrorHandling -Component "DialogSystem.ConfirmEventHandler" -ScriptBlock {
+                $dialogParams = $EventData.Data
+                Show-ConfirmDialog @dialogParams
+            } -Context @{ EventData = $EventData } -ErrorHandler {
+                param($Exception)
+                Write-Log -Level Error -Message "Confirm.Request event handler error: $($Exception.Message)" -Data $Exception.Context
+            }
+        }
+        
+        Subscribe-Event -EventName "Alert.Show" -Handler {
+            param($EventData)
+            Invoke-WithErrorHandling -Component "DialogSystem.AlertEventHandler" -ScriptBlock {
+                $dialogParams = $EventData.Data
+                Show-AlertDialog @dialogParams
+            } -Context @{ EventData = $EventData } -ErrorHandler {
+                param($Exception)
+                Write-Log -Level Error -Message "Alert.Show event handler error: $($Exception.Message)" -Data $Exception.Context
+            }
+        }
+        
+        Subscribe-Event -EventName "Input.Request" -Handler {
+            param($EventData)
+            Invoke-WithErrorHandling -Component "DialogSystem.InputEventHandler" -ScriptBlock {
+                $dialogParams = $EventData.Data
+                Show-InputDialog @dialogParams
+            } -Context @{ EventData = $EventData } -ErrorHandler {
+                param($Exception)
+                Write-Log -Level Error -Message "Input.Request event handler error: $($Exception.Message)" -Data $Exception.Context
+            }
+        }
+        
+        Write-Verbose "Dialog System initialized and event handlers registered."
+    } -Context @{} -ErrorHandler {
+        param($Exception)
+        Write-Log -Level Error -Message "Failed to initialize Dialog System: $($Exception.Message)" -Data $Exception.Context
     }
-    
-    Subscribe-Event -EventName "Alert.Show" -Handler {
-        param($EventData)
-        $dialogParams = $EventData.Data
-        Show-AlertDialog @dialogParams
-    }
-    
-    Subscribe-Event -EventName "Input.Request" -Handler {
-        param($EventData)
-        $dialogParams = $EventData.Data
-        Show-InputDialog @dialogParams
-    }
-    
-    Write-Verbose "Dialog System initialized and event handlers registered."
 }
 
 function global:Render-Dialogs {
     <# .SYNOPSIS Engine Hook: Renders the current dialog over the screen. #>
-    if ($script:DialogState.CurrentDialog) {
-        # If it's a component with its own render method
-        if ($script:DialogState.CurrentDialog.Render) {
-            & $script:DialogState.CurrentDialog.Render -self $script:DialogState.CurrentDialog
+    Invoke-WithErrorHandling -Component "DialogSystem.RenderDialogs" -ScriptBlock {
+        if ($script:DialogState.CurrentDialog) {
+            # If it's a component with its own render method
+            if ($script:DialogState.CurrentDialog.Render) {
+                & $script:DialogState.CurrentDialog.Render -self $script:DialogState.CurrentDialog
+            }
         }
+    } -Context @{ CurrentDialog = $script:DialogState.CurrentDialog.Name } -ErrorHandler {
+        param($Exception)
+        Write-Log -Level Error -Message "Error rendering dialog '$($Exception.Context.CurrentDialog)': $($Exception.Message)" -Data $Exception.Context
     }
 }
 
 function global:Handle-DialogInput {
     <# .SYNOPSIS Engine Hook: Intercepts input if a dialog is active. #>
     param($Key)
-    
-    if ($script:DialogState.CurrentDialog) {
-        if ($script:DialogState.CurrentDialog.HandleInput) {
-            return & $script:DialogState.CurrentDialog.HandleInput -self $script:DialogState.CurrentDialog -Key $Key
+    Invoke-WithErrorHandling -Component "DialogSystem.HandleDialogInput" -ScriptBlock {
+        if ($script:DialogState.CurrentDialog) {
+            if ($script:DialogState.CurrentDialog.HandleInput) {
+                return & $script:DialogState.CurrentDialog.HandleInput -self $script:DialogState.CurrentDialog -Key $Key
+            }
         }
+        return $false
+    } -Context @{ CurrentDialog = $script:DialogState.CurrentDialog.Name; Key = $Key } -ErrorHandler {
+        param($Exception)
+        Write-Log -Level Error -Message "Error handling dialog input for '$($Exception.Context.CurrentDialog)': $($Exception.Message)" -Data $Exception.Context
+        return $false
     }
-    return $false
 }
 
 function global:Update-DialogSystem {
     <# .SYNOPSIS Engine Hook: Updates dialog system state. #>
-    # Placeholder for any periodic updates needed
+    Invoke-WithErrorHandling -Component "DialogSystem.UpdateDialogSystem" -ScriptBlock {
+        # Placeholder for any periodic updates needed
+    } -Context @{} -ErrorHandler {
+        param($Exception)
+        Write-Log -Level Error -Message "Error updating dialog system: $($Exception.Message)" -Data $Exception.Context
+    }
 }
 
 function global:New-TuiDialog {
@@ -295,78 +404,102 @@ function global:New-TuiDialog {
         
         Render = {
             param($self)
-            
-            # Center the dialog
-            $self.X = [Math]::Floor(($global:TuiState.BufferWidth - $self.Width) / 2)
-            $self.Y = [Math]::Floor(($global:TuiState.BufferHeight - $self.Height) / 2)
-            
-            # Draw dialog box
-            Write-BufferBox -X $self.X -Y $self.Y -Width $self.Width -Height $self.Height `
-                -Title $self.Title -BorderColor (Get-ThemeColor "Accent")
-            
-            # Use engine's word wrap helper
-            $messageY = $self.Y + 2
-            $messageX = $self.X + 2
-            $maxWidth = $self.Width - 4
-            
-            $wrappedLines = Get-WordWrappedLines -Text $self.Message -MaxWidth $maxWidth
-            
-            foreach ($line in $wrappedLines) {
-                if ($messageY -ge ($self.Y + $self.Height - 3)) { break }  # Don't overwrite buttons
-                Write-BufferString -X $messageX -Y $messageY -Text $line -ForegroundColor (Get-ThemeColor "Primary")
-                $messageY++
-            }
-            
-            # Buttons
-            $buttonY = $self.Y + $self.Height - 3
-            $totalButtonWidth = ($self.Buttons.Count * 12) + (($self.Buttons.Count - 1) * 2)
-            $buttonX = $self.X + [Math]::Floor(($self.Width - $totalButtonWidth) / 2)
-            
-            for ($i = 0; $i -lt $self.Buttons.Count; $i++) {
-                $isSelected = ($i -eq $self.SelectedButton)
-                $buttonText = if ($isSelected) { "[ $($self.Buttons[$i]) ]" } else { "  $($self.Buttons[$i])  " }
-                $color = if ($isSelected) { Get-ThemeColor "Warning" } else { Get-ThemeColor "Primary" }
+            Invoke-WithErrorHandling -Component "$($self.Type).Render" -ScriptBlock {
+                # Center the dialog
+                $self.X = [Math]::Floor(($global:TuiState.BufferWidth - $self.Width) / 2)
+                $self.Y = [Math]::Floor(($global:TuiState.BufferHeight - $self.Height) / 2)
                 
-                Write-BufferString -X $buttonX -Y $buttonY -Text $buttonText -ForegroundColor $color
-                $buttonX += 14
+                # Draw dialog box
+                Write-BufferBox -X $self.X -Y $self.Y -Width $self.Width -Height $self.Height `
+                    -Title $self.Title -BorderColor (Get-ThemeColor "Accent")
+                
+                # Use engine's word wrap helper
+                $messageY = $self.Y + 2
+                $messageX = $self.X + 2
+                $maxWidth = $self.Width - 4
+                
+                $wrappedLines = Get-WordWrappedLines -Text $self.Message -MaxWidth $maxWidth
+                
+                foreach ($line in $wrappedLines) {
+                    if ($messageY -ge ($self.Y + $self.Height - 3)) { break }  # Don't overwrite buttons
+                    Write-BufferString -X $messageX -Y $messageY -Text $line -ForegroundColor (Get-ThemeColor "Primary")
+                    $messageY++
+                }
+                
+                # Buttons
+                $buttonY = $self.Y + $self.Height - 3
+                $totalButtonWidth = ($self.Buttons.Count * 12) + (($self.Buttons.Count - 1) * 2)
+                $buttonX = $self.X + [Math]::Floor(($self.Width - $totalButtonWidth) / 2)
+                
+                for ($i = 0; $i -lt $self.Buttons.Count; $i++) {
+                    $isSelected = ($i -eq $self.SelectedButton)
+                    $buttonText = if ($isSelected) { "[ $($self.Buttons[$i]) ]" } else { "  $($self.Buttons[$i])  " }
+                    $color = if ($isSelected) { Get-ThemeColor "Warning" } else { Get-ThemeColor "Primary" }
+                    
+                    Write-BufferString -X $buttonX -Y $buttonY -Text $buttonText -ForegroundColor $color
+                    $buttonX += 14
+                }
+            } -Context @{ DialogTitle = $self.Title; DialogMessage = $self.Message } -ErrorHandler {
+                param($Exception)
+                Write-Log -Level Error -Message "Dialog Render error for '$($Exception.Context.DialogTitle)': $($Exception.Message)" -Data $Exception.Context
             }
         }
         
         HandleInput = {
             param($self, $Key)
-            
-            switch ($Key.Key) {
-                ([ConsoleKey]::LeftArrow) {
-                    $self.SelectedButton = [Math]::Max(0, $self.SelectedButton - 1)
-                    Request-TuiRefresh
-                    return $true
-                }
-                ([ConsoleKey]::RightArrow) {
-                    $self.SelectedButton = [Math]::Min($self.Buttons.Count - 1, $self.SelectedButton + 1)
-                    Request-TuiRefresh
-                    return $true
-                }
-                ([ConsoleKey]::Tab) {
-                    $self.SelectedButton = ($self.SelectedButton + 1) % $self.Buttons.Count
-                    Request-TuiRefresh
-                    return $true
+            Invoke-WithErrorHandling -Component "$($self.Type).HandleInput" -ScriptBlock {
+                switch ($Key.Key) {
+                    ([ConsoleKey]::LeftArrow) {
+                        $self.SelectedButton = [Math]::Max(0, $self.SelectedButton - 1)
+                        Request-TuiRefresh
+                        return $true
+                    }
+                    ([ConsoleKey]::RightArrow) {
+                        $self.SelectedButton = [Math]::Min($self.Buttons.Count - 1, $self.SelectedButton + 1)
+                        Request-TuiRefresh
+                        return $true
+                    }
+                    ([ConsoleKey]::Tab) {
+                        $self.SelectedButton = ($self.SelectedButton + 1) % $self.Buttons.Count
+                        Request-TuiRefresh
+                        return $true
+                    }
+                    
+                    ([ConsoleKey]::Enter) {
+                        Invoke-WithErrorHandling -Component "$($self.Type).OnButtonClick" -ScriptBlock {
+                            & $self.OnButtonClick -Button $self.Buttons[$self.SelectedButton] -Index $self.SelectedButton
+                        } -Context @{ DialogTitle = $self.Title; Button = $self.Buttons[$self.SelectedButton]; Index = $self.SelectedButton } -ErrorHandler {
+                            param($Exception)
+                            Write-Log -Level Error -Message "Dialog OnButtonClick error: $($Exception.Message)" -Data $Exception.Context
+                        }
+                        return $true
+                    }
+                    ([ConsoleKey]::Spacebar) {
+                        Invoke-WithErrorHandling -Component "$($self.Type).OnButtonClick" -ScriptBlock {
+                            & $self.OnButtonClick -Button $self.Buttons[$self.SelectedButton] -Index $self.SelectedButton
+                        } -Context @{ DialogTitle = $self.Title; Button = $self.Buttons[$self.SelectedButton]; Index = $self.SelectedButton } -ErrorHandler {
+                            param($Exception)
+                            Write-Log -Level Error -Message "Dialog OnButtonClick error: $($Exception.Message)" -Data $Exception.Context
+                        }
+                        return $true
+                    }
+                    ([ConsoleKey]::Escape) {
+                        Invoke-WithErrorHandling -Component "$($self.Type).OnCancel" -ScriptBlock {
+                            & $self.OnCancel
+                        } -Context @{ DialogTitle = $self.Title } -ErrorHandler {
+                            param($Exception)
+                            Write-Log -Level Error -Message "Dialog OnCancel error: $($Exception.Message)" -Data $Exception.Context
+                        }
+                        return $true
+                    }
                 }
                 
-                ([ConsoleKey]::Enter) {
-                    & $self.OnButtonClick -Button $self.Buttons[$self.SelectedButton] -Index $self.SelectedButton
-                    return $true
-                }
-                ([ConsoleKey]::Spacebar) {
-                    & $self.OnButtonClick -Button $self.Buttons[$self.SelectedButton] -Index $self.SelectedButton
-                    return $true
-                }
-                ([ConsoleKey]::Escape) {
-                    & $self.OnCancel
-                    return $true
-                }
+                return $false
+            } -Context @{ DialogTitle = $self.Title; Key = $Key; SelectedButton = $self.SelectedButton } -ErrorHandler {
+                param($Exception)
+                Write-Log -Level Error -Message "Dialog HandleInput error for '$($Exception.Context.DialogTitle)': $($Exception.Message)" -Data $Exception.Context
+                return $false
             }
-            
-            return $false
         }
     }
     
@@ -381,88 +514,107 @@ function global:Show-ProgressDialog {
         [int]$PercentComplete = 0,
         [switch]$ShowCancel
     )
-    
-    $dialog = @{
-        Type = "ProgressDialog"
-        Title = $Title
-        Message = $Message
-        PercentComplete = $PercentComplete
-        Width = 60
-        Height = 8
-        ShowCancel = $ShowCancel
-        IsCancelled = $false
-        
-        Render = {
-            param($self)
+    Invoke-WithErrorHandling -Component "DialogSystem.ShowProgressDialog" -ScriptBlock {
+        $dialog = @{
+            Type = "ProgressDialog"
+            Title = $Title
+            Message = $Message
+            PercentComplete = $PercentComplete
+            Width = 60
+            Height = 8
+            ShowCancel = $ShowCancel
+            IsCancelled = $false
             
-            # Center the dialog
-            $x = [Math]::Floor(($global:TuiState.BufferWidth - $self.Width) / 2)
-            $y = [Math]::Floor(($global:TuiState.BufferHeight - $self.Height) / 2)
-            
-            # Draw dialog box
-            Write-BufferBox -X $x -Y $y -Width $self.Width -Height $self.Height `
-                -Title " $($self.Title) " -BorderColor (Get-ThemeColor "Accent")
-            
-            # Draw message
-            Write-BufferString -X ($x + 2) -Y ($y + 2) -Text $self.Message
-            
-            # Draw progress bar
-            $barY = $y + 4
-            $barWidth = $self.Width - 4
-            $filledWidth = [Math]::Floor($barWidth * ($self.PercentComplete / 100))
-            
-            # Progress bar background
-            Write-BufferString -X ($x + 2) -Y $barY `
-                -Text ("─" * $barWidth) -ForegroundColor (Get-ThemeColor "Border")
-            
-            # Progress bar fill
-            if ($filledWidth -gt 0) {
-                Write-BufferString -X ($x + 2) -Y $barY `
-                    -Text ("█" * $filledWidth) -ForegroundColor (Get-ThemeColor "Success")
-            }
-            
-            # Percentage text
-            $percentText = "$($self.PercentComplete)%"
-            $percentX = $x + [Math]::Floor(($self.Width - $percentText.Length) / 2)
-            Write-BufferString -X $percentX -Y $barY -Text $percentText
-            
-            # Cancel button if requested
-            if ($self.ShowCancel) {
-                $buttonY = $y + $self.Height - 2
-                $buttonText = if ($self.IsCancelled) { "[ Cancelling... ]" } else { "[ Cancel ]" }
-                $buttonX = $x + [Math]::Floor(($self.Width - $buttonText.Length) / 2)
-                Write-BufferString -X $buttonX -Y $buttonY -Text $buttonText `
-                    -ForegroundColor (Get-ThemeColor "Warning")
-            }
-        }
-        
-        HandleInput = {
-            param($self, $Key)
-            
-            if ($self.ShowCancel -and -not $self.IsCancelled) {
-                if ($Key.Key -eq [ConsoleKey]::Escape -or 
-                    $Key.Key -eq [ConsoleKey]::Enter -or 
-                    $Key.Key -eq [ConsoleKey]::Spacebar) {
-                    $self.IsCancelled = $true
-                    Request-TuiRefresh
-                    return $true
+            Render = {
+                param($self)
+                Invoke-WithErrorHandling -Component "$($self.Type).Render" -ScriptBlock {
+                    # Center the dialog
+                    $x = [Math]::Floor(($global:TuiState.BufferWidth - $self.Width) / 2)
+                    $y = [Math]::Floor(($global:TuiState.BufferHeight - $self.Height) / 2)
+                    
+                    # Draw dialog box
+                    Write-BufferBox -X $x -Y $y -Width $self.Width -Height $self.Height `
+                        -Title " $($self.Title) " -BorderColor (Get-ThemeColor "Accent")
+                    
+                    # Draw message
+                    Write-BufferString -X ($x + 2) -Y ($y + 2) -Text $self.Message
+                    
+                    # Draw progress bar
+                    $barY = $y + 4
+                    $barWidth = $self.Width - 4
+                    $filledWidth = [Math]::Floor($barWidth * ($self.PercentComplete / 100))
+                    
+                    # Progress bar background
+                    Write-BufferString -X ($x + 2) -Y $barY `
+                        -Text ("─" * $barWidth) -ForegroundColor (Get-ThemeColor "Border")
+                    
+                    # Progress bar fill
+                    if ($filledWidth -gt 0) {
+                        Write-BufferString -X ($x + 2) -Y $barY `
+                            -Text ("█" * $filledWidth) -ForegroundColor (Get-ThemeColor "Success")
+                    }
+                    
+                    # Percentage text
+                    $percentText = "$($self.PercentComplete)%"
+                    $percentX = $x + [Math]::Floor(($self.Width - $percentText.Length) / 2)
+                    Write-BufferString -X $percentX -Y $barY -Text $percentText
+                    
+                    # Cancel button if requested
+                    if ($self.ShowCancel) {
+                        $buttonY = $y + $self.Height - 2
+                        $buttonText = if ($self.IsCancelled) { "[ Cancelling... ]" } else { "[ Cancel ]" }
+                        $buttonX = $x + [Math]::Floor(($self.Width - $buttonText.Length) / 2)
+                        Write-BufferString -X $buttonX -Y $buttonY -Text $buttonText `
+                            -ForegroundColor (Get-ThemeColor "Warning")
+                    }
+                } -Context @{ DialogTitle = $self.Title; Percent = $self.PercentComplete } -ErrorHandler {
+                    param($Exception)
+                    Write-Log -Level Error -Message "Progress Dialog Render error for '$($Exception.Context.DialogTitle)': $($Exception.Message)" -Data $Exception.Context
                 }
             }
             
-            return $false
+            HandleInput = {
+                param($self, $Key)
+                Invoke-WithErrorHandling -Component "$($self.Type).HandleInput" -ScriptBlock {
+                    if ($self.ShowCancel -and -not $self.IsCancelled) {
+                        if ($Key.Key -eq [ConsoleKey]::Escape -or 
+                            $Key.Key -eq [ConsoleKey]::Enter -or 
+                            $Key.Key -eq [ConsoleKey]::Spacebar) {
+                            $self.IsCancelled = $true
+                            Request-TuiRefresh
+                            return $true
+                        }
+                    }
+                    
+                    return $false
+                } -Context @{ DialogTitle = $self.Title; Key = $Key } -ErrorHandler {
+                    param($Exception)
+                    Write-Log -Level Error -Message "Progress Dialog HandleInput error for '$($Exception.Context.DialogTitle)': $($Exception.Message)" -Data $Exception.Context
+                    return $false
+                }
+            }
+            
+            UpdateProgress = {
+                param($self, [int]$PercentComplete, [string]$Message = $null)
+                Invoke-WithErrorHandling -Component "$($self.Type).UpdateProgress" -ScriptBlock {
+                    $self.PercentComplete = [Math]::Min(100, [Math]::Max(0, $PercentComplete))
+                    if ($Message) { $self.Message = $Message }
+                    Request-TuiRefresh
+                } -Context @{ DialogTitle = $self.Title; NewPercent = $PercentComplete; NewMessage = $Message } -ErrorHandler {
+                    param($Exception)
+                    Write-Log -Level Error -Message "Progress Dialog UpdateProgress error for '$($Exception.Context.DialogTitle)': $($Exception.Message)" -Data $Exception.Context
+                }
+            }
         }
         
-        UpdateProgress = {
-            param($self, [int]$PercentComplete, [string]$Message = $null)
-            $self.PercentComplete = [Math]::Min(100, [Math]::Max(0, $PercentComplete))
-            if ($Message) { $self.Message = $Message }
-            Request-TuiRefresh
-        }
+        $script:DialogState.CurrentDialog = $dialog
+        Request-TuiRefresh
+        return $dialog
+    } -Context @{ Title = $Title; Message = $Message; Percent = $PercentComplete } -ErrorHandler {
+        param($Exception)
+        Write-Log -Level Error -Message "Failed to show progress dialog '$($Exception.Context.Title)': $($Exception.Message)" -Data $Exception.Context
+        return $null # Return null on error
     }
-    
-    $script:DialogState.CurrentDialog = $dialog
-    Request-TuiRefresh
-    return $dialog
 }
 
 function global:Show-ListDialog {
@@ -475,142 +627,170 @@ function global:Show-ListDialog {
         [scriptblock]$OnCancel = {},
         [switch]$AllowMultiple
     )
-    
-    $dialog = @{
-        Type = "ListDialog"
-        Title = $Title
-        Prompt = $Prompt
-        Items = $Items
-        SelectedIndex = 0
-        SelectedItems = @()
-        Width = 60
-        Height = [Math]::Min(20, $Items.Count + 8)
-        AllowMultiple = $AllowMultiple
-        
-        Render = {
-            param($self)
+    Invoke-WithErrorHandling -Component "DialogSystem.ShowListDialog" -ScriptBlock {
+        $dialog = @{
+            Type = "ListDialog"
+            Title = $Title
+            Prompt = $Prompt
+            Items = $Items
+            SelectedIndex = 0
+            SelectedItems = @()
+            Width = 60
+            Height = [Math]::Min(20, $Items.Count + 8)
+            AllowMultiple = $AllowMultiple
             
-            $x = [Math]::Floor(($global:TuiState.BufferWidth - $self.Width) / 2)
-            $y = [Math]::Floor(($global:TuiState.BufferHeight - $self.Height) / 2)
-            
-            # Draw dialog box
-            Write-BufferBox -X $x -Y $y -Width $self.Width -Height $self.Height `
-                -Title " $($self.Title) " -BorderColor (Get-ThemeColor "Accent")
-            
-            # Draw prompt
-            Write-BufferString -X ($x + 2) -Y ($y + 2) -Text $self.Prompt
-            
-            # Calculate list area
-            $listY = $y + 4
-            $listHeight = $self.Height - 7
-            $listWidth = $self.Width - 4
-            
-            # Draw scrollable list
-            $startIndex = [Math]::Max(0, $self.SelectedIndex - [Math]::Floor($listHeight / 2))
-            $endIndex = [Math]::Min($self.Items.Count - 1, $startIndex + $listHeight - 1)
-            
-            for ($i = $startIndex; $i -le $endIndex; $i++) {
-                $itemY = $listY + ($i - $startIndex)
-                $item = $self.Items[$i]
-                $isSelected = ($i -eq $self.SelectedIndex)
-                $isChecked = $self.SelectedItems -contains $i
-                
-                # Selection indicator
-                $prefix = ""
-                if ($self.AllowMultiple) {
-                    $prefix = if ($isChecked) { "[X] " } else { "[ ] " }
-                }
-                
-                $itemText = "$prefix$item"
-                if ($itemText.Length -gt $listWidth - 2) {
-                    $itemText = $itemText.Substring(0, $listWidth - 5) + "..."
-                }
-                
-                $bgColor = if ($isSelected) { Get-ThemeColor "Selection" } else { $null }
-                $fgColor = if ($isSelected) { Get-ThemeColor "Background" } else { Get-ThemeColor "Primary" }
-                
-                Write-BufferString -X ($x + 2) -Y $itemY -Text $itemText `
-                    -ForegroundColor $fgColor -BackgroundColor $bgColor
-            }
-            
-            # Draw scrollbar if needed
-            if ($self.Items.Count -gt $listHeight) {
-                $scrollbarX = $x + $self.Width - 2
-                $scrollbarHeight = $listHeight
-                $thumbSize = [Math]::Max(1, [Math]::Floor($scrollbarHeight * $listHeight / $self.Items.Count))
-                $thumbPos = [Math]::Floor($scrollbarHeight * $self.SelectedIndex / $self.Items.Count)
-                
-                for ($i = 0; $i -lt $scrollbarHeight; $i++) {
-                    $char = if ($i -ge $thumbPos -and $i -lt ($thumbPos + $thumbSize)) { "█" } else { "│" }
-                    Write-BufferString -X $scrollbarX -Y ($listY + $i) -Text $char `
-                        -ForegroundColor (Get-ThemeColor "Border")
-                }
-            }
-            
-            # Draw buttons
-            $buttonY = $y + $self.Height - 2
-            if ($self.AllowMultiple) {
-                $okText = "[ OK ]"
-                $cancelText = "[ Cancel ]"
-                $buttonSpacing = 15
-                $totalWidth = 30
-                $startX = $x + [Math]::Floor(($self.Width - $totalWidth) / 2)
-                
-                Write-BufferString -X $startX -Y $buttonY -Text $okText `
-                    -ForegroundColor (Get-ThemeColor "Success")
-                Write-BufferString -X ($startX + $buttonSpacing) -Y $buttonY -Text $cancelText `
-                    -ForegroundColor (Get-ThemeColor "Primary")
-            }
-        }
-        
-        HandleInput = {
-            param($self, $Key)
-            
-            switch ($Key.Key) {
-                ([ConsoleKey]::UpArrow) {
-                    $self.SelectedIndex = [Math]::Max(0, $self.SelectedIndex - 1)
-                    Request-TuiRefresh
-                    return $true
-                }
-                ([ConsoleKey]::DownArrow) {
-                    $self.SelectedIndex = [Math]::Min($self.Items.Count - 1, $self.SelectedIndex + 1)
-                    Request-TuiRefresh
-                    return $true
-                }
-                ([ConsoleKey]::Spacebar) {
-                    if ($self.AllowMultiple) {
-                        if ($self.SelectedItems -contains $self.SelectedIndex) {
-                            $self.SelectedItems = $self.SelectedItems | Where-Object { $_ -ne $self.SelectedIndex }
-                        } else {
-                            $self.SelectedItems += $self.SelectedIndex
+            Render = {
+                param($self)
+                Invoke-WithErrorHandling -Component "$($self.Type).Render" -ScriptBlock {
+                    $x = [Math]::Floor(($global:TuiState.BufferWidth - $self.Width) / 2)
+                    $y = [Math]::Floor(($global:TuiState.BufferHeight - $self.Height) / 2)
+                    
+                    # Draw dialog box
+                    Write-BufferBox -X $x -Y $y -Width $self.Width -Height $self.Height `
+                        -Title " $($self.Title) " -BorderColor (Get-ThemeColor "Accent")
+                    
+                    # Draw prompt
+                    Write-BufferString -X ($x + 2) -Y ($y + 2) -Text $self.Prompt
+                    
+                    # Calculate list area
+                    $listY = $y + 4
+                    $listHeight = $self.Height - 7
+                    $listWidth = $self.Width - 4
+                    
+                    # Draw scrollable list
+                    $startIndex = [Math]::Max(0, $self.SelectedIndex - [Math]::Floor($listHeight / 2))
+                    $endIndex = [Math]::Min($self.Items.Count - 1, $startIndex + $listHeight - 1)
+                    
+                    for ($i = $startIndex; $i -le $endIndex; $i++) {
+                        $itemY = $listY + ($i - $startIndex)
+                        $item = $self.Items[$i]
+                        $isSelected = ($i -eq $self.SelectedIndex)
+                        $isChecked = $self.SelectedItems -contains $i
+                        
+                        # Selection indicator
+                        $prefix = ""
+                        if ($self.AllowMultiple) {
+                            $prefix = if ($isChecked) { "[X] " } else { "[ ] " }
                         }
-                        Request-TuiRefresh
-                        return $true
+                        
+                        $itemText = "$prefix$item"
+                        if ($itemText.Length -gt $listWidth - 2) {
+                            $itemText = $itemText.Substring(0, $listWidth - 5) + "..."
+                        }
+                        
+                        $bgColor = if ($isSelected) { Get-ThemeColor "Selection" } else { $null }
+                        $fgColor = if ($isSelected) { Get-ThemeColor "Background" } else { Get-ThemeColor "Primary" }
+                        
+                        Write-BufferString -X ($x + 2) -Y $itemY -Text $itemText `
+                            -ForegroundColor $fgColor -BackgroundColor $bgColor
                     }
-                }
-                ([ConsoleKey]::Enter) {
-                    Close-TuiDialog
+                    
+                    # Draw scrollbar if needed
+                    if ($self.Items.Count -gt $listHeight) {
+                        $scrollbarX = $x + $self.Width - 2
+                        $scrollbarHeight = $listHeight
+                        $thumbSize = [Math]::Max(1, [Math]::Floor($scrollbarHeight * $listHeight / $self.Items.Count))
+                        $thumbPos = [Math]::Floor($scrollbarHeight * $self.SelectedIndex / $self.Items.Count)
+                        
+                        for ($i = 0; $i -lt $scrollbarHeight; $i++) {
+                            $char = if ($i -ge $thumbPos -and $i -lt ($thumbPos + $thumbSize)) { "█" } else { "│" }
+                            Write-BufferString -X $scrollbarX -Y ($listY + $i) -Text $char `
+                                -ForegroundColor (Get-ThemeColor "Border")
+                        }
+                    }
+                    
+                    # Draw buttons
+                    $buttonY = $y + $self.Height - 2
                     if ($self.AllowMultiple) {
-                        $selectedValues = $self.SelectedItems | ForEach-Object { $self.Items[$_] }
-                        & $OnSelect -Selected $selectedValues
-                    } else {
-                        & $OnSelect -Selected $self.Items[$self.SelectedIndex]
+                        $okText = "[ OK ]"
+                        $cancelText = "[ Cancel ]"
+                        $buttonSpacing = 15
+                        $totalWidth = 30
+                        $startX = $x + [Math]::Floor(($self.Width - $totalWidth) / 2)
+                        
+                        Write-BufferString -X $startX -Y $buttonY -Text $okText `
+                            -ForegroundColor (Get-ThemeColor "Success")
+                        Write-BufferString -X ($startX + $buttonSpacing) -Y $buttonY -Text $cancelText `
+                            -ForegroundColor (Get-ThemeColor "Primary")
                     }
-                    return $true
-                }
-                ([ConsoleKey]::Escape) {
-                    Close-TuiDialog
-                    & $OnCancel
-                    return $true
+                } -Context @{ DialogTitle = $self.Title; Prompt = $self.Prompt; SelectedIndex = $self.SelectedIndex } -ErrorHandler {
+                    param($Exception)
+                    Write-Log -Level Error -Message "List Dialog Render error for '$($Exception.Context.DialogTitle)': $($Exception.Message)" -Data $Exception.Context
                 }
             }
             
-            return $false
+            HandleInput = {
+                param($self, $Key)
+                Invoke-WithErrorHandling -Component "$($self.Type).HandleInput" -ScriptBlock {
+                    switch ($Key.Key) {
+                        ([ConsoleKey]::UpArrow) {
+                            $self.SelectedIndex = [Math]::Max(0, $self.SelectedIndex - 1)
+                            Request-TuiRefresh
+                            return $true
+                        }
+                        ([ConsoleKey]::DownArrow) {
+                            $self.SelectedIndex = [Math]::Min($self.Items.Count - 1, $self.SelectedIndex + 1)
+                            Request-TuiRefresh
+                            return $true
+                        }
+                        ([ConsoleKey]::Spacebar) {
+                            if ($self.AllowMultiple) {
+                                if ($self.SelectedItems -contains $self.SelectedIndex) {
+                                    $self.SelectedItems = $self.SelectedItems | Where-Object { $_ -ne $self.SelectedIndex }
+                                } else {
+                                    $self.SelectedItems += $self.SelectedIndex
+                                }
+                                Request-TuiRefresh
+                                return $true
+                            }
+                        }
+                        ([ConsoleKey]::Enter) {
+                            Close-TuiDialog
+                            if ($self.AllowMultiple) {
+                                $selectedValues = $self.SelectedItems | ForEach-Object { $self.Items[$_] }
+                                Invoke-WithErrorHandling -Component "ListDialog.OnSelect" -ScriptBlock {
+                                    & $OnSelect -Selected $selectedValues
+                                } -Context @{ DialogTitle = $self.Title; SelectedValues = $selectedValues } -ErrorHandler {
+                                    param($Exception)
+                                    Write-Log -Level Error -Message "List Dialog OnSelect error: $($Exception.Message)" -Data $Exception.Context
+                                }
+                            } else {
+                                Invoke-WithErrorHandling -Component "ListDialog.OnSelect" -ScriptBlock {
+                                    & $OnSelect -Selected $self.Items[$self.SelectedIndex]
+                                } -Context @{ DialogTitle = $self.Title; SelectedValue = $self.Items[$self.SelectedIndex] } -ErrorHandler {
+                                    param($Exception)
+                                    Write-Log -Level Error -Message "List Dialog OnSelect error: $($Exception.Message)" -Data $Exception.Context
+                                }
+                            }
+                            return $true
+                        }
+                        ([ConsoleKey]::Escape) {
+                            Close-TuiDialog
+                            Invoke-WithErrorHandling -Component "ListDialog.OnCancel" -ScriptBlock {
+                                & $OnCancel
+                            } -Context @{ DialogTitle = $self.Title } -ErrorHandler {
+                                param($Exception)
+                                Write-Log -Level Error -Message "List Dialog OnCancel error: $($Exception.Message)" -Data $Exception.Context
+                            }
+                            return $true
+                        }
+                    }
+                    
+                    return $false
+                } -Context @{ DialogTitle = $self.Title; Key = $Key; SelectedIndex = $self.SelectedIndex } -ErrorHandler {
+                    param($Exception)
+                    Write-Log -Level Error -Message "List Dialog HandleInput error for '$($Exception.Context.DialogTitle)': $($Exception.Message)" -Data $Exception.Context
+                    return $false
+                }
+            }
         }
+        
+        $script:DialogState.CurrentDialog = $dialog
+        Request-TuiRefresh
+    } -Context @{ Title = $Title; Prompt = $Prompt; ItemsCount = $Items.Count } -ErrorHandler {
+        param($Exception)
+        Write-Log -Level Error -Message "Failed to show list dialog '$($Exception.Context.Title)': $($Exception.Message)" -Data $Exception.Context
     }
-    
-    $script:DialogState.CurrentDialog = $dialog
-    Request-TuiRefresh
 }
 
 #endregion

@@ -104,54 +104,68 @@ function global:Invoke-TuiAsync {
         
         # Use Register-ObjectEvent to handle the timer tick
         $timerEvent = Register-ObjectEvent -InputObject $timer -EventName Elapsed -Action {
-            $job = $Event.MessageData.Job
-            $onComplete = $Event.MessageData.OnComplete
-            $onError = $Event.MessageData.OnError
-            $timer = $Event.MessageData.Timer
-            
-            if ($job.State -eq 'Completed') {
-                try {
-                    $result = Receive-Job -Job $job -ErrorAction Stop
-                    Remove-Job -Job $job -Force
-                    
-                    # Remove from tracking
-                    $script:TuiAsyncJobs = @($script:TuiAsyncJobs | Where-Object { $_ -ne $job })
-                    
-                    # Stop and dispose timer
-                    $timer.Stop()
-                    $timer.Dispose()
-                    Unregister-Event -SourceIdentifier $Event.SourceIdentifier
-                    
-                    # Call completion handler on UI thread
-                    if ($onComplete) {
-                        & $onComplete -Data $result
-                        Request-TuiRefresh
+            try { # Internal try/catch for async operation
+                $job = $Event.MessageData.Job
+                $onComplete = $Event.MessageData.OnComplete
+                $onError = $Event.MessageData.OnError
+                $timer = $Event.MessageData.Timer
+                
+                if ($job.State -eq 'Completed') {
+                    try {
+                        $result = Receive-Job -Job $job -ErrorAction Stop
+                        Remove-Job -Job $job -Force
+                        
+                        # Remove from tracking
+                        $script:TuiAsyncJobs = @($script:TuiAsyncJobs | Where-Object { $_ -ne $job })
+                        
+                        # Stop and dispose timer
+                        $timer.Stop()
+                        $timer.Dispose()
+                        Unregister-Event -SourceIdentifier $Event.SourceIdentifier
+                        
+                        # Call completion handler on UI thread
+                        if ($onComplete) {
+                            Invoke-WithErrorHandling -Component "TuiAsync.OnComplete" -ScriptBlock {
+                                & $onComplete -Data $result
+                                Request-TuiRefresh
+                            } -Context @{ JobId = $job.Id; Result = $result } -ErrorHandler {
+                                param($Exception)
+                                Write-Log -Level Error -Message "TuiAsync OnComplete handler error: $($Exception.Message)" -Data $Exception.Context
+                            }
+                        }
+                    } catch {
+                        Write-Log -Level Error -Message "Job receive error in TuiAsync: $_" -Data @{ JobId = $job.Id; Exception = $_ }
                     }
-                } catch {
-                    Write-Warning "Job receive error: $_"
                 }
-            }
-            elseif ($job.State -eq 'Failed') {
-                try {
-                    $error = $job.ChildJobs[0].JobStateInfo.Reason
-                    Remove-Job -Job $job -Force
-                    
-                    # Remove from tracking
-                    $script:TuiAsyncJobs = @($script:TuiAsyncJobs | Where-Object { $_ -ne $job })
-                    
-                    # Stop and dispose timer
-                    $timer.Stop()
-                    $timer.Dispose()
-                    Unregister-Event -SourceIdentifier $Event.SourceIdentifier
-                    
-                    # Call error handler
-                    if ($onError) {
-                        & $onError -Error $error
-                        Request-TuiRefresh
+                elseif ($job.State -eq 'Failed') {
+                    try {
+                        $error = $job.ChildJobs[0].JobStateInfo.Reason
+                        Remove-Job -Job $job -Force
+                        
+                        # Remove from tracking
+                        $script:TuiAsyncJobs = @($script:TuiAsyncJobs | Where-Object { $_ -ne $job })
+                        
+                        # Stop and dispose timer
+                        $timer.Stop()
+                        $timer.Dispose()
+                        Unregister-Event -SourceIdentifier $Event.SourceIdentifier
+                        
+                        # Call error handler
+                        if ($onError) {
+                            Invoke-WithErrorHandling -Component "TuiAsync.OnError" -ScriptBlock {
+                                & $onError -Error $error
+                                Request-TuiRefresh
+                            } -Context @{ JobId = $job.Id; Error = $error } -ErrorHandler {
+                                param($Exception)
+                                Write-Log -Level Error -Message "TuiAsync OnError handler error: $($Exception.Message)" -Data $Exception.Context
+                            }
+                        }
+                    } catch {
+                        Write-Log -Level Error -Message "Job error handling failed in TuiAsync: $_" -Data @{ JobId = $job.Id; Exception = $_ }
                     }
-                } catch {
-                    Write-Warning "Job error handling failed: $_"
                 }
+            } catch { # Catch for the Register-ObjectEvent Action block itself
+                Write-Log -Level Error -Message "Unhandled error in TuiAsync timer event: $_" -Data @{ JobId = $job.Id; Exception = $_ }
             }
         } -MessageData @{
             Job = $job
@@ -171,7 +185,7 @@ function global:Invoke-TuiAsync {
         }
         
     } catch {
-        Write-Warning "Failed to start async operation: $_"
+        Write-Log -Level Error -Message "Failed to start async operation: $_" -Data @{ ScriptBlock = $ScriptBlock; ArgumentList = $ArgumentList; Exception = $_ }
         if ($OnError) {
             & $OnError -Error $_
         }
@@ -218,367 +232,388 @@ function global:Create-TuiState {
     The initial state values
     
     .PARAMETER DeepWatch
-    Enable deep property change detection (impacts performance)
-    #>
-    param(
-        [Parameter()]
-        [hashtable]$InitialState = @{},
-        
-        [Parameter()]
-        [bool]$DeepWatch = $false
-    )
-    
-    $stateManager = @{
-        _data = $InitialState.Clone()
-        _subscribers = @{}
-        _deepWatch = $DeepWatch
-        _changeQueue = @()
-        _processing = $false
-        
-        GetValue = {
-            param([string]$Path)
-            if (-not $Path) { return $this._data }
+    Enable deep property change detection (```powershell
+# Theme Manager Module
+# Provides theming and color management for the TUI
+
+$script:CurrentTheme = $null
+$script:Themes = @{
+    Modern = @{
+        Name = "Modern"
+        Colors = @{
+            # Base colors
+            Background = [ConsoleColor]::Black
+            Foreground = [ConsoleColor]::White
             
-            $parts = $Path -split '\.'
-            $current = $this._data
+            # UI elements
+            Primary = [ConsoleColor]::White
+            Secondary = [ConsoleColor]::Gray
+            Accent = [ConsoleColor]::Cyan
+            Success = [ConsoleColor]::Green
+            Warning = [ConsoleColor]::Yellow
+            Error = [ConsoleColor]::Red
+            Info = [ConsoleColor]::Blue
             
-            foreach ($part in $parts) {
-                if ($null -eq $current) { return $null }
-                $current = $current[$part]
-            }
+            # Special elements
+            Header = [ConsoleColor]::Cyan
+            Border = [ConsoleColor]::DarkGray
+            Selection = [ConsoleColor]::Yellow
+            Highlight = [ConsoleColor]::Cyan
+            Subtle = [ConsoleColor]::DarkGray
             
-            return $current
-        }
-        
-        SetValue = {
-            param([string]$Path, $Value)
-            
-            $parts = $Path -split '\.'
-            $current = $this._data
-            
-            # Navigate to parent
-            for ($i = 0; $i -lt $parts.Count - 1; $i++) {
-                $part = $parts[$i]
-                if (-not $current.ContainsKey($part)) {
-                    $current[$part] = @{}
-                }
-                $current = $current[$part]
-            }
-            
-            # Get old value for comparison
-            $lastPart = $parts[-1]
-            $oldValue = $current[$lastPart]
-            
-            # Set new value
-            $current[$lastPart] = $Value
-            
-            # Notify if changed
-            if (-not (Compare-TuiValue $oldValue $Value)) {
-                & $this.NotifySubscribers -Path $Path -OldValue $oldValue -NewValue $Value
-                
-                # Also notify parent paths
-                $parentPath = ""
-                for ($i = 0; $i -lt $parts.Count; $i++) {
-                    if ($i -gt 0) { $parentPath += "." }
-                    $parentPath += $parts[$i]
-                    & $this.NotifySubscribers -Path $parentPath -OldValue $null -NewValue (& $this.GetValue $parentPath)
-                }
-            }
-        }
-        
-        Update = {
-            param([hashtable]$Updates)
-            
-            # Queue changes to batch notifications
-            $this._changeQueue = @()
-            
-            foreach ($key in $Updates.Keys) {
-                $oldValue = $this._data[$key]
-                $this._data[$key] = $Updates[$key]
-                
-                if (-not (Compare-TuiValue $oldValue $Updates[$key])) {
-                    $this._changeQueue += @{
-                        Path = $key
-                        OldValue = $oldValue
-                        NewValue = $Updates[$key]
-                    }
-                }
-            }
-            
-            # Process all notifications
-            if ($this._changeQueue.Count -gt 0 -and -not $this._processing) {
-                $this._processing = $true
-                try {
-                    foreach ($change in $this._changeQueue) {
-                        & $this.NotifySubscribers @change
-                    }
-                } finally {
-                    $this._processing = $false
-                    $this._changeQueue = @()
-                }
-            }
-        }
-        
-        Subscribe = {
-            param(
-                [string]$Path,
-                [scriptblock]$Handler,
-                [string]$SubscriptionId = [Guid]::NewGuid().ToString()
-            )
-            
-            if (-not $this._subscribers.ContainsKey($Path)) {
-                $this._subscribers[$Path] = @()
-            }
-            
-            $this._subscribers[$Path] += @{
-                Id = $SubscriptionId
-                Handler = $Handler
-            }
-            
-            # Call handler with current value
-            $currentValue = & $this.GetValue $Path
-            try {
-                & $Handler -NewValue $currentValue -OldValue $null -Path $Path
-            } catch {
-                Write-Warning "State subscriber error: $_"
-            }
-            
-            return $SubscriptionId
-        }
-        
-        Unsubscribe = {
-            param([string]$SubscriptionId)
-            
-            foreach ($path in @($this._subscribers.Keys)) {
-                $this._subscribers[$path] = @($this._subscribers[$path] | Where-Object { $_.Id -ne $SubscriptionId })
-                if ($this._subscribers[$path].Count -eq 0) {
-                    $this._subscribers.Remove($path)
-                }
-            }
-        }
-        
-        NotifySubscribers = {
-            param([string]$Path, $OldValue, $NewValue)
-            
-            # Exact path subscribers
-            if ($this._subscribers.ContainsKey($Path)) {
-                foreach ($sub in $this._subscribers[$Path]) {
-                    try {
-                        & $sub.Handler -NewValue $NewValue -OldValue $OldValue -Path $Path
-                    } catch {
-                        Write-Warning "State notification error: $_"
-                    }
-                }
-            }
-            
-            # Wildcard subscribers (e.g., "user.*")
-            foreach ($subPath in $this._subscribers.Keys) {
-                if ($subPath.EndsWith('*')) {
-                    $basePath = $subPath.TrimEnd('*').TrimEnd('.')
-                    if ($Path.StartsWith($basePath)) {
-                        foreach ($sub in $this._subscribers[$subPath]) {
-                            try {
-                                & $sub.Handler -NewValue $NewValue -OldValue $OldValue -Path $Path
-                            } catch {
-                                Write-Warning "State wildcard notification error: $_"
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
-        Reset = {
-            param([hashtable]$NewState = @{})
-            $oldData = $this._data
-            $this._data = $NewState.Clone()
-            
-            # Notify all subscribers of reset
-            foreach ($path in $this._subscribers.Keys) {
-                $oldValue = Get-NestedProperty -Object $oldData -Path $path
-                $newValue = & $this.GetValue $path
-                
-                if (-not (Compare-TuiValue $oldValue $newValue)) {
-                    & $this.NotifySubscribers -Path $path -OldValue $oldValue -NewValue $newValue
-                }
-            }
+            # Syntax highlighting
+            Keyword = [ConsoleColor]::Blue
+            String = [ConsoleColor]::Green
+            Number = [ConsoleColor]::Magenta
+            Comment = [ConsoleColor]::DarkGray
         }
     }
     
-    return $stateManager
+    Dark = @{
+        Name = "Dark"
+        Colors = @{
+            Background = [ConsoleColor]::Black
+            Foreground = [ConsoleColor]::Gray
+            Primary = [ConsoleColor]::Gray
+            Secondary = [ConsoleColor]::DarkGray
+            Accent = [ConsoleColor]::DarkCyan
+            Success = [ConsoleColor]::DarkGreen
+            Warning = [ConsoleColor]::DarkYellow
+            Error = [ConsoleColor]::DarkRed
+            Info = [ConsoleColor]::DarkBlue
+            Header = [ConsoleColor]::DarkCyan
+            Border = [ConsoleColor]::DarkGray
+            Selection = [ConsoleColor]::Yellow
+            Highlight = [ConsoleColor]::Cyan
+            Subtle = [ConsoleColor]::DarkGray
+            Keyword = [ConsoleColor]::DarkBlue
+            String = [ConsoleColor]::DarkGreen
+            Number = [ConsoleColor]::DarkMagenta
+            Comment = [ConsoleColor]::DarkGray
+        }
+    }
+    
+    Light = @{
+        Name = "Light"
+        Colors = @{
+            Background = [ConsoleColor]::White
+            Foreground = [ConsoleColor]::Black
+            Primary = [ConsoleColor]::Black
+            Secondary = [ConsoleColor]::DarkGray
+            Accent = [ConsoleColor]::Blue
+            Success = [ConsoleColor]::Green
+            Warning = [ConsoleColor]::DarkYellow
+            Error = [ConsoleColor]::Red
+            Info = [ConsoleColor]::Blue
+            Header = [ConsoleColor]::Blue
+            Border = [ConsoleColor]::Gray
+            Selection = [ConsoleColor]::Cyan
+            Highlight = [ConsoleColor]::Yellow
+            Subtle = [ConsoleColor]::Gray
+            Keyword = [ConsoleColor]::Blue
+            String = [ConsoleColor]::Green
+            Number = [ConsoleColor]::Magenta
+            Comment = [ConsoleColor]::Gray
+        }
+    }
+    
+    Retro = @{
+        Name = "Retro"
+        Colors = @{
+            Background = [ConsoleColor]::Black
+            Foreground = [ConsoleColor]::Green
+            Primary = [ConsoleColor]::Green
+            Secondary = [ConsoleColor]::DarkGreen
+            Accent = [ConsoleColor]::Yellow
+            Success = [ConsoleColor]::Green
+            Warning = [ConsoleColor]::Yellow
+            Error = [ConsoleColor]::Red
+            Info = [ConsoleColor]::Cyan
+            Header = [ConsoleColor]::Yellow
+            Border = [ConsoleColor]::DarkGreen
+            Selection = [ConsoleColor]::Yellow
+            Highlight = [ConsoleColor]::White
+            Subtle = [ConsoleColor]::DarkGreen
+            Keyword = [ConsoleColor]::Yellow
+            String = [ConsoleColor]::Cyan
+            Number = [ConsoleColor]::White
+            Comment = [ConsoleColor]::DarkGreen
+        }
+    }
 }
 
-function Compare-TuiValue {
+function global:Initialize-ThemeManager {
     <#
     .SYNOPSIS
-    Compares two values for equality, handling nulls and complex types
+    Initializes the theme manager
     #>
-    param($Value1, $Value2)
-    
-    if ($null -eq $Value1 -and $null -eq $Value2) { return $true }
-    if ($null -eq $Value1 -or $null -eq $Value2) { return $false }
-    
-    if ($Value1 -is [hashtable] -and $Value2 -is [hashtable]) {
-        if ($Value1.Count -ne $Value2.Count) { return $false }
-        foreach ($key in $Value1.Keys) {
-            if (-not $Value2.ContainsKey($key)) { return $false }
-            if (-not (Compare-TuiValue $Value1[$key] $Value2[$key])) { return $false }
-        }
-        return $true
+    Invoke-WithErrorHandling -Component "ThemeManager.Initialize" -ScriptBlock {
+        # Set default theme
+        Set-TuiTheme -ThemeName "Modern"
+        
+        Write-Verbose "Theme manager initialized"
+    } -Context @{} -ErrorHandler {
+        param($Exception)
+        Write-Log -Level Error -Message "Failed to initialize Theme Manager: $($Exception.Message)" -Data $Exception.Context
     }
-    
-    if ($Value1 -is [array] -and $Value2 -is [array]) {
-        if ($Value1.Count -ne $Value2.Count) { return $false }
-        for ($i = 0; $i -lt $Value1.Count; $i++) {
-            if (-not (Compare-TuiValue $Value1[$i] $Value2[$i])) { return $false }
-        }
-        return $true
-    }
-    
-    return $Value1 -eq $Value2
 }
 
-function Get-NestedProperty {
-    param($Object, $Path)
-    
-    $parts = $Path -split '\.'
-    $current = $Object
-    
-    foreach ($part in $parts) {
-        if ($null -eq $current) { return $null }
-        $current = $current[$part]
-    }
-    
-    return $current
-}
-
-function global:Remove-TuiComponent {
+function global:Set-TuiTheme {
     <#
     .SYNOPSIS
-    Properly removes a component and cleans up references to prevent memory leaks
+    Sets the current theme
     
-    .PARAMETER Component
-    The component to remove
+    .PARAMETER ThemeName
+    The name of the theme to set
     #>
     param(
         [Parameter(Mandatory = $true)]
-        [hashtable]$Component
+        [ValidateSet("Modern", "Dark", "Light", "Retro")]
+        [string]$ThemeName
     )
-    
-    try {
-        # Remove event handlers if the component has an ID or Name
-        $componentId = if ($Component.Id) { $Component.Id } elseif ($Component.Name) { $Component.Name } else { $null }
-        
-        if ($componentId -and (Get-Command -Name "Remove-ComponentEventHandlers" -ErrorAction SilentlyContinue)) {
-            Remove-ComponentEventHandlers -ComponentId $componentId
-        }
-        
-        # Clear focus if this component is focused
-        if ($global:TuiState -and $global:TuiState.FocusedComponent -eq $Component) {
-            if (Get-Command -Name "Clear-ComponentFocus" -ErrorAction SilentlyContinue) {
-                Clear-ComponentFocus
-            } else {
-                $global:TuiState.FocusedComponent = $null
+    Invoke-WithErrorHandling -Component "ThemeManager.SetTheme" -ScriptBlock {
+        if ($script:Themes.ContainsKey($ThemeName)) {
+            $script:CurrentTheme = $script:Themes[$ThemeName]
+            
+            # --- FIX ---
+            # Defensively check if RawUI exists. In some environments (like the VS Code
+            # Integrated Console), it can be $null and cause a crash.
+            if ($Host.UI.RawUI) {
+                # Apply console colors
+                $Host.UI.RawUI.BackgroundColor = $script:CurrentTheme.Colors.Background
+                $Host.UI.RawUI.ForegroundColor = $script:CurrentTheme.Colors.Foreground
             }
-        }
-        
-        # Break circular references
-        if ($Component.Parent) {
-            # Remove from parent's children collection
-            if ($Component.Parent._children -and $Component.Name) {
-                $Component.Parent._children.Remove($Component.Name)
-            }
-            if ($Component.Parent.Children) {
-                $Component.Parent.Children = @($Component.Parent.Children | Where-Object { $_ -ne $Component })
-            }
-            $Component.Parent = $null
-        }
-        
-        if ($Component.ParentScreen) {
-            # Remove from parent screen's children
-            if ($Component.ParentScreen._children -and $Component.Name) {
-                $Component.ParentScreen._children.Remove($Component.Name)
-            }
-            # Remove from focusable names
-            if ($Component.ParentScreen._focusableNames) {
-                $Component.ParentScreen._focusableNames = @($Component.ParentScreen._focusableNames | Where-Object { $_ -ne $Component.Name })
-            }
-            $Component.ParentScreen = $null
-        }
-        
-        # Clear children references
-        if ($Component.Children) {
-            foreach ($child in $Component.Children) {
-                if ($child -is [hashtable]) {
-                    $child.Parent = $null
-                    $child.ParentScreen = $null
+            
+            Write-Verbose "Theme set to: $ThemeName"
+            
+            # Publish theme change event
+            # Check if Publish-Event exists before calling it
+            if (Get-Command -Name Publish-Event -ErrorAction SilentlyContinue) {
+                Publish-Event -EventName "Theme.Changed" -Data @{ 
+                    ThemeName = $ThemeName
+                    Theme = $script:CurrentTheme 
                 }
             }
-            $Component.Children = @()
+        } else {
+            Write-Warning "Theme not found: $ThemeName"
         }
-        
-        if ($Component._children) {
-            foreach ($childName in @($Component._children.Keys)) {
-                $child = $Component._children[$childName]
-                if ($child -is [hashtable]) {
-                    $child.Parent = $null
-                    $child.ParentScreen = $null
-                }
-            }
-            $Component._children.Clear()
-        }
-        
-        # Call component's dispose method if it exists
-        if ($Component.Dispose) {
-            try {
-                & $Component.Dispose -self $Component
-            } catch {
-                Write-Warning "Component dispose error: $_"
-            }
-        }
-        
-        # Clear any async operations or timers
-        if ($Component._timers) {
-            foreach ($timer in $Component._timers) {
-                if ($timer -and $timer.Enabled) {
-                    $timer.Stop()
-                    $timer.Dispose()
-                }
-            }
-            $Component._timers = @()
-        }
-        
-        # Clear state subscriptions
-        if ($Component._stateSubscriptions) {
-            foreach ($sub in $Component._stateSubscriptions) {
-                if ($sub -and (Get-Command -Name "Unsubscribe-Event" -ErrorAction SilentlyContinue)) {
-                    try {
-                        Unsubscribe-Event -HandlerId $sub
-                    } catch { }
-                }
-            }
-            $Component._stateSubscriptions = @()
-        }
-        
-        # Remove from global component registry if registered
-        if ($global:TuiState -and $global:TuiState.Components) {
-            $global:TuiState.Components = @($global:TuiState.Components | Where-Object { $_ -ne $Component })
-        }
-        
-        Write-Verbose "Component removed: $componentId"
-        
-    } catch {
-        Write-Warning "Error removing component: $_"
+    } -Context @{ ThemeName = $ThemeName } -ErrorHandler {
+        param($Exception)
+        Write-Log -Level Error -Message "Failed to set TUI Theme to '$($Exception.Context.ThemeName)': $($Exception.Message)" -Data $Exception.Context
     }
 }
 
-# Export all functions
+function global:Get-ThemeColor {
+    <#
+    .SYNOPSIS
+    Gets a color from the current theme
+    
+    .PARAMETER ColorName
+    The name of the color to get
+    
+    .PARAMETER Default
+    Default color if not found
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ColorName,
+        
+        [Parameter()]
+        [ConsoleColor]$Default = [ConsoleColor]::Gray
+    )
+    Invoke-WithErrorHandling -Component "ThemeManager.GetColor" -ScriptBlock {
+        if ($script:CurrentTheme -and $script:CurrentTheme.Colors.ContainsKey($ColorName)) {
+            return $script:CurrentTheme.Colors[$ColorName]
+        } else {
+            return $Default
+        }
+    } -Context @{ ColorName = $ColorName; DefaultColor = $Default } -ErrorHandler {
+        param($Exception)
+        Write-Log -Level Error -Message "Failed to get theme color '$($Exception.Context.ColorName)': $($Exception.Message)" -Data $Exception.Context
+        return $Default # Return default on error
+    }
+}
+
+function global:Get-TuiTheme {
+    <#
+    .SYNOPSIS
+    Gets the current theme
+    #>
+    Invoke-WithErrorHandling -Component "ThemeManager.GetTheme" -ScriptBlock {
+        return $script:CurrentTheme
+    } -Context @{} -ErrorHandler {
+        param($Exception)
+        Write-Log -Level Error -Message "Failed to get current TUI Theme: $($Exception.Message)" -Data $Exception.Context
+        return $null # Return null on error
+    }
+}
+
+function global:Get-AvailableThemes {
+    <#
+    .SYNOPSIS
+    Gets all available themes
+    #>
+    Invoke-WithErrorHandling -Component "ThemeManager.GetAvailableThemes" -ScriptBlock {
+        return $script:Themes.Keys | Sort-Object
+    } -Context @{} -ErrorHandler {
+        param($Exception)
+        Write-Log -Level Error -Message "Failed to get available themes: $($Exception.Message)" -Data $Exception.Context
+        return @() # Return empty array on error
+    }
+}
+
+function global:New-TuiTheme {
+    <#
+    .SYNOPSIS
+    Creates a new theme
+    
+    .PARAMETER Name
+    The name of the new theme
+    
+    .PARAMETER BaseTheme
+    The name of the theme to base this on
+    
+    .PARAMETER Colors
+    Hashtable of color overrides
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Name,
+        
+        [Parameter()]
+        [string]$BaseTheme = "Modern",
+        
+        [Parameter()]
+        [hashtable]$Colors = @{}
+    )
+    Invoke-WithErrorHandling -Component "ThemeManager.NewTheme" -ScriptBlock {
+        # Clone base theme
+        $newTheme = @{
+            Name = $Name
+            Colors = @{}
+        }
+        
+        if ($script:Themes.ContainsKey($BaseTheme)) {
+            foreach ($colorKey in $script:Themes[$BaseTheme].Colors.Keys) {
+                $newTheme.Colors[$colorKey] = $script:Themes[$BaseTheme].Colors[$colorKey]
+            }
+        }
+        
+        # Apply overrides
+        foreach ($colorKey in $Colors.Keys) {
+            $newTheme.Colors[$colorKey] = $Colors[$colorKey]
+        }
+        
+        # Save theme
+        $script:Themes[$Name] = $newTheme
+        
+        Write-Verbose "Created new theme: $Name"
+        
+        return $newTheme
+    } -Context @{ ThemeName = $Name; BaseTheme = $BaseTheme; CustomColors = $Colors } -ErrorHandler {
+        param($Exception)
+        Write-Log -Level Error -Message "Failed to create new TUI Theme '$($Exception.Context.ThemeName)': $($Exception.Message)" -Data $Exception.Context
+        return $null # Return null on error
+    }
+}
+
+function global:Export-TuiTheme {
+    <#
+    .SYNOPSIS
+    Exports a theme to JSON
+    
+    .PARAMETER ThemeName
+    The name of the theme to export
+    
+    .PARAMETER Path
+    The path to save the theme
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ThemeName,
+        
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+    Invoke-WithErrorHandling -Component "ThemeManager.ExportTheme" -ScriptBlock {
+        if ($script:Themes.ContainsKey($ThemeName)) {
+            $theme = $script:Themes[$ThemeName]
+            
+            # Convert ConsoleColor enums to strings for JSON
+            $exportTheme = @{
+                Name = $theme.Name
+                Colors = @{}
+            }
+            
+            foreach ($colorKey in $theme.Colors.Keys) {
+                $exportTheme.Colors[$colorKey] = $theme.Colors[$colorKey].ToString()
+            }
+            
+            $exportTheme | ConvertTo-Json -Depth 3 | Set-Content -Path $Path
+            
+            Write-Verbose "Exported theme to: $Path"
+        } else {
+            Write-Warning "Theme not found: $ThemeName"
+        }
+    } -Context @{ ThemeName = $ThemeName; FilePath = $Path } -ErrorHandler {
+        param($Exception)
+        Write-Log -Level Error -Message "Failed to export TUI Theme '$($Exception.Context.ThemeName)' to '$($Exception.Context.FilePath)': $($Exception.Message)" -Data $Exception.Context
+    }
+}
+
+function global:Import-TuiTheme {
+    <#
+    .SYNOPSIS
+    Imports a theme from JSON
+    
+    .PARAMETER Path
+    The path to the theme file
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+    Invoke-WithErrorHandling -Component "ThemeManager.ImportTheme" -ScriptBlock {
+        if (Test-Path $Path) {
+            try {
+                $importedTheme = Get-Content $Path -Raw | ConvertFrom-Json -AsHashtable
+                
+                $theme = @{
+                    Name = $importedTheme.Name
+                    Colors = @{}
+                }
+                
+                # Convert string color names back to ConsoleColor enums
+                foreach ($colorProp in $importedTheme.Colors.PSObject.Properties) {
+                    $theme.Colors[$colorProp.Name] = [ConsoleColor]$colorProp.Value
+                }
+                
+                $script:Themes[$theme.Name] = $theme
+                
+                Write-Verbose "Imported theme: $($theme.Name)"
+                
+                return $theme
+            } catch {
+                Write-Log -Level Error -Message "Failed to import theme from '$Path': $_" -Data @{ FilePath = $Path; Exception = $_ }
+            }
+        } else {
+            Write-Warning "Theme file not found: $Path"
+        }
+    } -Context @{ FilePath = $Path } -ErrorHandler {
+        param($Exception)
+        Write-Log -Level Error -Message "Failed to import TUI Theme from '$($Exception.Context.FilePath)': $($Exception.Message)" -Data $Exception.Context
+        return $null # Return null on error
+    }
+}
+
+# Export functions
 Export-ModuleMember -Function @(
-    'Initialize-TuiFramework',
-    'Invoke-TuiAsync',
-    'Stop-AllTuiAsyncJobs',
-    'Create-TuiState',
-    'Compare-TuiValue',
-    'Remove-TuiComponent',
-    'Invoke-TuiMethod'
+    'Initialize-ThemeManager',
+    'Set-TuiTheme',
+    'Get-ThemeColor',
+    'Get-TuiTheme',
+    'Get-AvailableThemes',
+    'New-TuiTheme',
+    'Export-TuiTheme',
+    'Import-TuiTheme'
 )
