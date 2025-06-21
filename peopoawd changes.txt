@@ -1,0 +1,266 @@
+Excellent. I have performed a comprehensive analysis of all the provided documents: the full codebase, the developer guide, the quick start guide, the refactor summary, and the implementation log.
+
+The documentation and the `fixes.txt` log show a clear architectural intent and a significant effort to resolve issues. However, by cross-referencing the logs with the current state of the code, I have identified several remaining critical bugs that are preventing the application from running correctly. The fixes logged in `fixes.txt` were either incomplete or did not fully address the root cause of the issues.
+
+This response provides a definitive, step-by-step guide to fix the remaining bugs and align the code with the "Helios" architecture described in your guides. This is designed to be followed by a developer or an AI to successfully complete the refactor.
+
+---
+
+### **Guide to Finalizing the Helios Refactor**
+
+This guide is structured into two parts:
+1.  **Critical Bug Fixes:** These are essential changes to make the application stable and runnable.
+2.  **Architectural Improvements:** These are code quality changes to fully align the codebase with the "Helios" development guide.
+
+---
+
+### Part 1: Critical Bug Fixes
+
+#### Bug #1: Recursive Scope Failure in TUI Engine's Renderer
+
+*   **Symptom:** The application crashes with the error: `The expression after '&' in a pipeline element produced an object that was not valid. It must result in a command name, a script block, or a CommandInfo object.`
+*   **Root Cause:** The `Render-Frame` function in `tui-engine-v2.psm1` defines a recursive scriptblock (`$script:collectComponents`). When called recursively, it loses its execution context and PowerShell can no longer find the variable to execute.
+*   **The Fix:** Bind the scriptblock to its creation context using `.GetNewClosure()`.
+
+**Instructions:**
+
+1.  Open the file `modules/tui-engine-v2.psm1`.
+2.  Locate the `Render-Frame` function.
+3.  Find the definition of the `$script:collectComponents` scriptblock.
+4.  Modify the code as follows:
+
+    ```powershell
+    # File: modules/tui-engine-v2.psm1
+    # Function: Render-Frame
+
+    # --- BEFORE ---
+            $script:collectComponents = {
+                param($component)
+                # ... function body ...
+            }
+
+    # --- AFTER ---
+            # FIX: Bind the scriptblock's context so it can find itself during recursion.
+            $script:collectComponents = {
+                param($component)
+                if (-not $component -or $component.Visible -eq $false) { return }
+                
+                $renderQueue.Add($component)
+                
+                if ($component.Children -and $component.Children.Count -gt 0) {
+                    if ($component.CalculateLayout) {
+                        try { 
+                            [void](& $component.CalculateLayout -self $component)
+                        } catch { 
+                            Write-Log -Level Error -Message "Layout failed for '$($component.Name)'" -Data $_ 
+                        }
+                    }
+                    
+                    foreach ($child in $component.Children) {
+                        & $script:collectComponents $child
+                    }
+                }
+            }.GetNewClosure() # <--- CRITICAL FIX
+    ```
+
+---
+
+#### Bug #2: Incorrect Function Name Generation in Screen Loader
+
+*   **Symptom:** The log shows warnings like: `Expected function 'Get-Timer Start Screen' not found for screen 'timer-start-screen'`.
+*   **Root Cause:** The code in `main-helios.ps1` that generates the factory function name has a string concatenation bug. It joins the PascalCase parts with a space before prepending "Get-".
+*   **The Fix:** Enclose the `-join ""` operation in parentheses to ensure the array is converted to a single string *before* it's concatenated.
+
+**Instructions:**
+
+1.  Open the file `all_processed_data.txt` (representing `main-helios.ps1`).
+2.  Locate the `Initialize-PMCScreens` function.
+3.  Find the `default` block inside the `switch` statement.
+4.  Modify the code as follows:
+
+    ```powershell
+    # File: main-helios.ps1
+    # Function: Initialize-PMCScreens
+
+    # --- BEFORE ---
+                            $functionName = "Get-" + (($screenName -split "-") | ForEach-Object { 
+                                $_.Substring(0,1).ToUpper() + $_.Substring(1) 
+                            }) -join ""
+
+    # --- AFTER ---
+                            # FIX: Enclose the string join operation in parentheses to ensure correct concatenation.
+                            $functionName = "Get-" + ((($screenName -split "-") | ForEach-Object { 
+                                $_.Substring(0,1).ToUpper() + $_.Substring(1) 
+                            }) -join "")
+    ```
+
+---
+
+#### Bug #3: Array Safety in Action Handlers
+
+*   **Symptom:** The application crashes with errors like `The property 'Count' cannot be found on this object` inside the `TASKS_REFRESH` and `TIMERS_REFRESH` actions.
+*   **Root Cause:** `Where-Object` can return a single object or `$null`, neither of which has a `.Count` property. The code assumes it always returns an array.
+*   **The Fix:** Enforce array-like behavior by wrapping the `Where-Object` results in `@(...)` before accessing `.Count` or iterating.
+
+**Instructions:**
+
+1.  Open the file `all_processed_data.txt` (representing `main-helios.ps1`).
+2.  Locate the `Initialize-PMCServices` function.
+3.  Find the scriptblock for the `TASKS_REFRESH` action.
+4.  Modify the code as follows:
+
+    ```powershell
+    # File: main-helios.ps1
+    # Function: Initialize-PMCServices -> TASKS_REFRESH action
+
+    # --- BEFORE ---
+                $activeTasks = ($rawTasks | Where-Object { -not $_.completed }).Count
+                # ... and other similar lines ...
+                $dashboardTasks = ($rawTasks | Where-Object { ... })
+
+    # --- AFTER ---
+                # FIX: Wrap in @() to ensure it's always an array, preventing .Count errors.
+                $activeTasks = @($rawTasks | Where-Object { -not $_.completed }).Count
+                # ... and other similar lines ...
+                $dashboardTasks = @($rawTasks | Where-Object { ... }) # FIX: Ensure this is always an array too.
+    ```
+5.  Apply the same `@(...)` wrapper to all variables that result from a pipeline and are later treated as an array (e.g., `$dashboardTasks`, `$tasksForTable`, `$activeTimers`).
+
+---
+
+#### Bug #4: Exception Handling Robustness
+
+*   **Symptom:** The application crashes with errors like `Unable to find type [StateMutationException]` or `The property 'Timestamp' cannot be found on this object`.
+*   **Root Cause:** The custom exception handling in `exceptions.psm1` has two flaws: 1) `Add-Type` can fail silently, making the custom C# exception types unavailable. 2) It throws a `PSCustomObject` instead of a real exception, which loses properties.
+*   **The Fix:**
+    1.  In `exceptions.psm1`, change `Invoke-WithErrorHandling` to throw a standard `System.Management.Automation.RuntimeException`.
+    2.  Attach the custom error data to the exception's `.Data` property.
+    3.  In `main-helios.ps1`, update the top-level error handler to check for this attached data.
+
+**Instructions:**
+
+1.  Open the file `modules/exceptions.psm1`.
+2.  Locate the `Invoke-WithErrorHandling` function.
+3.  Modify the `catch` block as follows:
+
+    ```powershell
+    # File: modules/exceptions.psm1
+    # Function: Invoke-WithErrorHandling -> catch block
+
+    # --- BEFORE ---
+            # ... (code creating $heliosEx PSObject) ...
+            # This is incorrect as it throws a PSObject, not a real exception.
+            throw $heliosEx
+
+    # --- AFTER ---
+            # ... (code creating $heliosEx PSObject) ...
+            
+            # FIX: Throw a proper exception and attach our custom data.
+            $properException = New-Object System.Management.Automation.RuntimeException($heliosEx.Message)
+            $properException.Data.Add("HeliosException", $heliosEx)
+            throw $properException
+    ```
+2.  Open the file `all_processed_data.txt` (representing `main-helios.ps1`).
+3.  Locate the `Invoke-WithErrorHandling -ErrorHandler { ... }` block at the end of the file.
+4.  Modify the error handler to safely access the custom data.
+
+    ```powershell
+    # File: main-helios.ps1
+    # Function: Main execution block -> Invoke-WithErrorHandling -ErrorHandler
+
+    # --- BEFORE ---
+            $errorMessage = $Exception.Message
+            $component = $Exception.Component
+            $timestamp = $Exception.Timestamp
+
+    # --- AFTER ---
+            # FIX: Safely check for our custom exception data first.
+            $heliosEx = $null
+            if ($Exception -and $Exception.Data -and $Exception.Data.Contains("HeliosException")) {
+                $heliosEx = $Exception.Data["HeliosException"]
+            }
+            
+            # FIX: Safely access properties that might not exist.
+            $errorMessage = if ($heliosEx -and $heliosEx.Message) { $heliosEx.Message }
+                           elseif ($Exception.Message) { $Exception.Message } 
+                           else { "Unknown error" }
+            
+            $component = if ($heliosEx -and $heliosEx.Component) { $heliosEx.Component }
+                        elseif ($Exception.Data -and $Exception.Data.Contains("Component")) { $Exception.Data["Component"] }
+                        else { $null }
+
+            $timestamp = if ($heliosEx -and $heliosEx.Timestamp) { $heliosEx.Timestamp }
+                        elseif ($Exception.Data -and $Exception.Data.Contains("Timestamp")) { $Exception.Data["Timestamp"] }
+                        else { Get-Date }
+    ```
+
+---
+
+### Part 2: Architectural & Code Quality Improvements
+
+#### Improvement #1: Suppress Unwanted Pipeline Output
+
+*   **Problem:** As per the dev guide, the UI should be declarative. Calls like `& $panel.AddChild(...)` return the child object, which gets written to PowerShell's output pipeline. This is unnecessary and can cause side effects.
+*   **The Fix:** Pipe these calls to `Out-Null` to cleanly suppress the output. This is generally safer than `[void]()` which can sometimes have unintended consequences with complex expressions.
+
+**Instructions:**
+
+*   In `screens/dashboard-screen-helios.psm1` and `screens/task-screen-helios.psm1`, find all calls to `$panel.AddChild`.
+*   Modify them as follows:
+
+    ```powershell
+    # File: screens/dashboard-screen-helios.psm1
+    # Function: Init
+
+    # --- BEFORE ---
+    & $quickActionsPanel.AddChild -self $quickActionsPanel -Child $quickActions
+    & $rootPanel.AddChild -self $rootPanel -Child $quickActionsPanel -LayoutProps @{ ... }
+
+    # --- AFTER ---
+    & $quickActionsPanel.AddChild -self $quickActionsPanel -Child $quickActions | Out-Null
+    & $rootPanel.AddChild -self $rootPanel -Child $quickActionsPanel -LayoutProps @{ ... } | Out-Null
+    ```
+
+#### Improvement #2: Refactor Large Action Handlers
+
+*   **Problem:** The `Initialize-PMCServices` function in `main-helios.ps1` contains very large, complex scriptblocks for actions like `TASKS_REFRESH`. This violates the Single Responsibility Principle and makes the composition root difficult to read.
+*   **The Fix:** Move the data transformation logic into dedicated helper functions and have the action handler call them.
+
+**Instructions:**
+
+1.  **Create a new helper function** (e.g., in `data-manager.psm1` or a new `services/action-helpers.psm1` module).
+
+    ```powershell
+    # In a new or existing helper module:
+    function Get-ProcessedTaskData {
+        param($RawTasks)
+        # ... (all the logic from the TASKS_REFRESH block to process tasks) ...
+        return @{ TasksForTable = $tasksForTable; TodaysTasks = $dashboardTasks; ActiveTasks = $activeTasks }
+    }
+    ```
+2.  **Simplify the action handler** in `main-helios.ps1`.
+
+    ```powershell
+    # File: main-helios.ps1
+    # Function: Initialize-PMCServices -> TASKS_REFRESH action
+
+    # --- BEFORE ---
+    & $services.Store.RegisterAction -self $services.Store -actionName "TASKS_REFRESH" -scriptBlock {
+        # ... (50+ lines of complex data processing logic) ...
+    }
+
+    # --- AFTER ---
+    & $services.Store.RegisterAction -self $services.Store -actionName "TASKS_REFRESH" -scriptBlock {
+        param($Context)
+        # 1. Get raw data
+        $rawTasks = @($global:Data.Tasks)
+        # 2. Call the helper to do the heavy lifting
+        $processedData = Get-ProcessedTaskData -RawTasks $rawTasks
+        # 3. Update the state with the clean result
+        & $Context.UpdateState @{ 
+            tasks = $processedData.TasksForTable
+            todaysTasks = $processedData.TodaysTasks
+            "stats.activeTasks" = $processedData.ActiveTasks
+        }
+    }
+    ```
