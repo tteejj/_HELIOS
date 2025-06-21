@@ -3,33 +3,36 @@
 # This module is now self-contained and relies on the main script to load its dependencies.
 
 # Define custom exception types using PowerShell 5-compatible approach
-Add-Type -TypeDefinition @"
-using System;
-using System.Collections;
+# FIX: Only add the type if it doesn't already exist to prevent errors on module re-import.
+if (-not ([System.AppDomain]::CurrentDomain.GetAssemblies() | ForEach-Object { $_.GetType('Helios.HeliosException', $false) })) {
+    Add-Type -TypeDefinition @"
+    using System;
+    using System.Collections;
 
-namespace Helios {
-    public class HeliosException : Exception {
-        public Hashtable Context { get; set; }
-        public string Component { get; set; }
-        public object OriginalError { get; set; }
-        public DateTime Timestamp { get; set; }
-        
-        public HeliosException(string message, Hashtable context) : base(message) {
-            this.Context = context ?? new Hashtable();
-            this.Component = context != null && context.ContainsKey("Component") ? context["Component"].ToString() : "Unknown";
-            this.Timestamp = DateTime.Now;
+    namespace Helios {
+        public class HeliosException : Exception {
+            public Hashtable Context { get; set; }
+            public string Component { get; set; }
+            public object OriginalError { get; set; }
+            public DateTime Timestamp { get; set; }
+            
+            public HeliosException(string message, Hashtable context) : base(message) {
+                this.Context = context ?? new Hashtable();
+                this.Component = context != null && context.ContainsKey("Component") ? context["Component"].ToString() : "Unknown";
+                this.Timestamp = DateTime.Now;
+            }
         }
+        
+        public class NavigationException : HeliosException { public NavigationException(string message, Hashtable context) : base(message, context) { } }
+        public class ServiceInitializationException : HeliosException { public ServiceInitializationException(string message, Hashtable context) : base(message, context) { } }
+        public class ComponentRenderException : HeliosException { public ComponentRenderException(string message, Hashtable context) : base(message, context) { } }
+        public class StateMutationException : HeliosException { public StateMutationException(string message, Hashtable context) : base(message, context) { } }
+        public class InputHandlingException : HeliosException { public InputHandlingException(string message, Hashtable context) : base(message, context) { } }
+        public class DataLoadException : HeliosException { public DataLoadException(string message, Hashtable context) : base(message, context) { } }
+        public class ThemeException : HeliosException { public ThemeException(string message, Hashtable context) : base(message, context) { } }
     }
-    
-    public class NavigationException : HeliosException { public NavigationException(string message, Hashtable context) : base(message, context) { } }
-    public class ServiceInitializationException : HeliosException { public ServiceInitializationException(string message, Hashtable context) : base(message, context) { } }
-    public class ComponentRenderException : HeliosException { public ComponentRenderException(string message, Hashtable context) : base(message, context) { } }
-    public class StateMutationException : HeliosException { public StateMutationException(string message, Hashtable context) : base(message, context) { } }
-    public class InputHandlingException : HeliosException { public InputHandlingException(string message, Hashtable context) : base(message, context) { } }
-    public class DataLoadException : HeliosException { public DataLoadException(string message, Hashtable context) : base(message, context) { } }
-    public class ThemeException : HeliosException { public ThemeException(string message, Hashtable context) : base(message, context) { } }
-}
 "@ -ErrorAction SilentlyContinue
+}
 
 # Global error tracking
 $script:ErrorHistory = [System.Collections.ArrayList]::new()
@@ -231,7 +234,8 @@ function global:Invoke-WithErrorHandling {
         }
         
         if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
-            Write-Log -Level Error -Message "Error in $Component during $OperationName: $errorMessage" -Data $detailedError
+            # FIX: Delimit the last variable with ${} to avoid parsing errors with the colon.
+            Write-Log -Level Error -Message "Error in $Component during $OperationName: ${errorMessage}" -Data $detailedError
         }
         
         [void]$script:ErrorHistory.Add($detailedError)
