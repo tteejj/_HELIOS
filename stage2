@@ -1,0 +1,202 @@
+Of course. Here are the subsequent prompts for your step-by-step refactoring process.
+
+---
+
+### **Step 2: The Core - TUI Engine**
+
+#### **Prompt 2.1: `tui-engine.psm1`**
+
+```text
+Excellent. With the foundation in place, we will now create the core TUI engine.
+
+--- START OF MASTER BLUEPRINT & CODING STANDARDS ---
+
+[... Paste the full content of "Part 1: The Master Blueprint & Core Principles" and "Part 2: Coding Standards & Style Guide" here ...]
+
+--- END OF MASTER BLUEPRINT & CODING STANDARDS ---
+
+**Task:** Create the new `modules/tui-engine.psm1` module.
+
+**Instruction:** This is a critical step. Take the provided legacy `tui-engine-v2.psm1` code and make the following mandatory changes:
+1.  **Refactor `Render-Frame`:** This is the most important change. The new `Render-Frame` function **must be fully recursive** to handle a component tree of any depth. The process must be:
+    a. Create a recursive helper function `collectComponents` that traverses all `.Children` properties of components, starting from the current screen's children.
+    b. This helper function should add every visible component it finds to a single, flat list.
+    c. After collection, sort this flat list by the component's `ZIndex`.
+    d. Iterate through the sorted list and call the `Render` method for each component.
+2.  **Layout Calculation:** The recursive `collectComponents` helper must check if a component is a panel (i.e., it has a `CalculateLayout` method). If it is, it **must call `& $component.CalculateLayout -self $component`** before processing its children. This ensures child components have their correct positions and sizes before they are rendered.
+3.  Ensure all functions adhere to our coding standards, especially `Invoke-WithErrorHandling`.
+
+**Output:** Your output should be ONLY the full, complete PowerShell code for the new `modules/tui-engine.psm1` file.
+
+--- START OF LEGACY tui-engine-v2.psm1 and layout/panels.psm1 CODE ---
+
+[... Paste the full contents of the legacy `tui-engine-v2.psm1` and `layout/panels.psm1` files here ...]
+
+--- END OF LEGACY CODE ---
+```
+
+---
+
+### **Step 3: The UI Toolkit - Components and Panels**
+
+#### **Prompt 3.1: `ui/helios-components.psm1`**
+
+```text
+The TUI engine is complete. Now, we will create the unified UI component library.
+
+--- START OF MASTER BLUEPRINT & CODING STANDARDS ---
+
+[... Paste the full content of "Part 1: The Master Blueprint & Core Principles" and "Part 2: Coding Standards & Style Guide" here ...]
+
+--- END OF MASTER BLUEPRINT & CODING STANDARDS ---
+
+**Task:** Create the unified component library `ui/helios-components.psm1`.
+
+**Instruction:** You must merge the best components from the three provided legacy files (`advanced-data-components.psm1`, `advanced-input-components.psm1`, and `tui-components.psm1`) into a single, cohesive module.
+1.  **Object Model:** All component factory functions **MUST** be refactored to return a `[PSCustomObject]` instead of a hashtable. All methods (like `Render`, `HandleInput`, `ProcessData`) **MUST** be attached using `Add-Member -MemberType ScriptMethod`.
+2.  **Component Selection:** Prioritize the more advanced components. For example, use the `New-TuiDataTable` from `advanced-data-components.psm1` and discard the simpler `New-TuiTable`. Keep the advanced inputs like `New-TuiSearchableDropdown`.
+3.  **Naming Convention:** All new factory functions **MUST** be renamed with a `Helios` prefix. For example, `New-TuiDataTable` becomes `New-HeliosDataTable`, `New-TuiButton` becomes `New-HeliosButton`, and so on.
+
+**Output:** Your output should be ONLY the full, complete PowerShell code for the new `ui/helios-components.psm1` file.
+
+--- START OF LEGACY COMPONENT CODE ---
+
+[... Paste the full contents of `advanced-data-components.psm1`, `advanced-input-components.psm1`, and `tui-components.psm1` here ...]
+
+--- END OF LEGACY CODE ---
+```
+
+#### **Prompt 3.2: `ui/helios-panels.psm1`**
+
+```text
+The component library is done. Now, let's create the declarative layout panels that will contain them.
+
+--- START OF MASTER BLUEPRINT & CODING STANDARDS ---
+
+[... Paste the full content of "Part 1: The Master Blueprint & Core Principles" and "Part 2: Coding Standards & Style Guide" here ...]
+
+--- END OF MASTER BLUEPRINT & CODING STANDARDS ---
+
+**Task:** Create the panel library `ui/helios-panels.psm1`.
+
+**Instruction:** Take the provided legacy `layout/panels.psm1` file and refactor it according to our blueprint.
+1.  **Object Model:** All panel factory functions (`New-TuiStackPanel`, `New-TuiGridPanel`, etc.) **MUST** be refactored to return a `[PSCustomObject]` instead of a hashtable.
+2.  **Methods:** All methods (`AddChild`, `CalculateLayout`, `Render`, etc.) **MUST** be attached using `Add-Member -MemberType ScriptMethod`.
+3.  **Naming Convention:** All new factory functions **MUST** be renamed with a `Helios` prefix. For example, `New-TuiStackPanel` becomes `New-HeliosStackPanel`.
+4.  The core layout calculation logic within the methods should remain the same, but ensure it interacts correctly with the new `PSCustomObject` model.
+
+**Output:** Your output should be ONLY the full, complete PowerShell code for the new `ui/helios-panels.psm1` file.
+
+--- START OF LEGACY panels.psm1 CODE ---
+
+[... Paste the full contents of `layout/panels.psm1` here ...]
+
+--- END OF LEGACY CODE ---
+```
+
+---
+
+### **Step 4: The Services**
+
+#### **Prompt 4.1: `services/task-service.psm1`**
+
+```text
+Now we begin the most significant architectural change: moving to a Service-Oriented Architecture. We will start with the Task Service.
+
+--- START OF MASTER BLUEPRINT & CODING STANDARDS ---
+
+[... Paste the full content of "Part 1: The Master Blueprint & Core Principles" and "Part 2: Coding Standards & Style Guide" here ...]
+
+--- END OF MASTER BLUEPRINT & CODING STANDARDS ---
+
+**Task:** Create the `services/task-service.psm1` module.
+
+**Instruction:** This module will manage all state and business logic related to tasks, replacing the old `app-store` pattern for this domain.
+1.  The module must export one function: `Initialize-TaskService`.
+2.  `Initialize-TaskService` must create and return a `[PSCustomObject]` which is the service instance.
+3.  The service object must contain the state internally (e.g., a private `_tasks` array).
+4.  Take the business logic from the `TASK_CREATE`, `TASK_UPDATE`, `TASK_DELETE`, and `TASKS_REFRESH` action handlers in the provided legacy `main-helios.ps1`'s `Initialize-PMCServices` function.
+5.  Convert this logic into public methods on the service object, such as `AddTask([hashtable]$taskData)`, `UpdateTask([string]$taskId, [hashtable]$updates)`, `DeleteTask([string]$taskId)`, and `GetTasks()`.
+6.  After any state modification (add, update, delete), the service **MUST** announce the change using `New-Event -SourceIdentifier "TaskService" -EventIdentifier "Tasks.Changed"`.
+7.  The service should also use `Register-EngineEvent -SourceIdentifier "TaskService"` to formally declare its events.
+
+**Output:** Your output should be ONLY the full, complete PowerShell code for the new `services/task-service.psm1` file.
+
+--- START OF LEGACY CONTEXT CODE ---
+
+[... Paste the full code of the `Initialize-PMCServices` function from `All.txt` and the full code of `modules/event-system.psm1` here ...]
+
+--- END OF LEGACY CODE ---
+```
+
+---
+
+### **Step 5: The Application Layer - Screens**
+
+#### **Prompt 5.1: `screens/task-screen.psm1`**
+
+```text
+With our first service and new UI toolkit complete, it's time to build a UI screen that uses them.
+
+--- START OF MASTER BLUEPRINT & CODING STANDARDS ---
+
+[... Paste the full content of "Part 1: The Master Blueprint & Core Principles" and "Part 2: Coding Standards & Style Guide" here ...]
+
+--- END OF MASTER BLUEPRINT & CODING STANDARDS ---
+
+**Task:** Create the `screens/task-screen.psm1` module using the new architecture.
+
+**Instruction:** This screen will manage viewing and editing tasks.
+1.  The module must export one factory function: `Get-HeliosTaskScreen`.
+2.  This function must return a `[PSCustomObject]` representing the screen, with `Init`, `OnExit`, and `HandleInput` methods.
+3.  The screen's `Init` method must accept a `$services` hashtable parameter containing the application's services.
+4.  **Layout:** Use the **"Single Screen, Two-Panel"** approach. Create a `listPanel` (using `New-HeliosStackPanel`) that is visible by default, and a `formPanel` that is hidden by default. Both should be children of the screen's root panel.
+5.  **Data Display:** The `listPanel` must contain a `New-HeliosDataTable` to display the tasks.
+6.  **Event Subscription:** In the `Init` method, the screen **MUST** subscribe to the `Tasks.Changed` event from the `TaskService` (e.g., `Register-ObjectEvent -InputObject $services.Task -EventIdentifier "Tasks.Changed"`). The event handler's Action block will update the `.Data` property of the `HeliosDataTable` and refresh it.
+7.  **Memory Management:** The screen **MUST** have an `OnExit` method that calls `Unregister-Event` on all its subscriptions to prevent memory leaks.
+8.  **Interaction:**
+    *   Pressing 'N' for "New" should hide the `listPanel`, show the `formPanel`, and clear the form fields.
+    *   The form's "Save" button's `OnClick` handler **MUST** call the appropriate method on the Task Service directly (e.g., `$services.Task.AddTask(...)`).
+    *   After saving, the screen should switch back to the list view.
+
+**Output:** Your output should be ONLY the full, complete PowerShell code for the new `screens/task-screen.psm1` file.
+
+--- START OF NEW ARCHITECTURE CONTEXT CODE ---
+
+[... Paste the full code of your newly created `services/task-service.psm1`, `ui/helios-components.psm1`, `ui/helios-panels.psm1`, and `modules/event-system.psm1` here ...]
+
+--- END OF NEW ARCHITECTURE CONTEXT CODE ---
+```
+
+---
+
+### **Step 6: The Final Assembly**
+
+#### **Prompt 6.1: `Start-PMCTerminal.ps1`**
+
+```text
+This is the final step. We will rewrite the main application entry point to assemble and launch our newly refactored application.
+
+--- START OF MASTER BLUEPRINT & CODING STANDARDS ---
+
+[... Paste the full content of "Part 1: The Master Blueprint & Core Principles" and "Part 2: Coding Standards & Style Guide" here ...]
+
+--- END OF MASTER BLUEPRINT & CODING STANDARDS ---
+
+**Task:** Create the new main entry point file, `Start-PMCTerminal.ps1`.
+
+**Instruction:** This script will orchestrate the entire application startup.
+1.  **Module Loading:** It must load all the new modules in the correct dependency order: foundation (`logger`, `exceptions`), core (`tui-engine`), UI (`helios-panels`, `helios-components`), services (`task-service`, etc.), and finally screens.
+2.  **Service Initialization:** It must initialize all services (e.g., `Initialize-TaskService`) and collect the returned service objects into a single `$services` hashtable.
+3.  **Dependency Injection:** This `$services` hashtable is the key to our architecture. It must be passed to the Navigation Service's `GoTo` method, which will, in turn, pass it to the screen factory for the initial screen (e.g., `/dashboard`).
+4.  **Cleanup:** All references to the old `app-store`, `Dispatch`, and Redux-style action names must be completely removed. The startup logic should be clean and linear.
+5.  **Main Loop:** The end of the script should simply call `Start-TuiLoop` and include a `finally` block for cleanup, as in the legacy code.
+
+**Output:** Your output should be ONLY the full, complete PowerShell code for the new `Start-PMCTerminal.ps1` file.
+
+--- START OF LEGACY CONTEXT CODE ---
+
+[... Paste the full code of the legacy `All.txt` file here, as it contains the original startup logic that needs to be replaced ...]
+
+--- END OF LEGACY CONTEXT CODE ---
+```
