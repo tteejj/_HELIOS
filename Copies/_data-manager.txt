@@ -13,6 +13,9 @@ $script:Data = @{
         AutoSave = $true
         BackupCount = 5
     }
+    # Additional properties for compatibility with action handlers
+    time_entries = @()    # underscore format for action compatibility
+    timers = @()          # for action compatibility
 }
 
 $script:DataPath = Join-Path ([Environment]::GetFolderPath("LocalApplicationData")) "PMCTerminal\pmc-data.json"

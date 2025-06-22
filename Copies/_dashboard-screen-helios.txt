@@ -42,7 +42,7 @@ function Get-DashboardScreen {
                     ShowGridLines = $false  # Set to true to debug layout
                 }
                 $self.Components.rootPanel = $rootPanel
-                [void]($self.Children += $rootPanel) # FIX: Suppress pipeline output
+                $self.Children += $rootPanel
                 
                 Write-Log -Level Debug -Message "Dashboard: Created rootPanel, Children count=$($self.Children.Count)"
                 
@@ -56,11 +56,14 @@ function Get-DashboardScreen {
                     ForegroundColor = [ConsoleColor]::Gray
                 }
                 
-                # Store services on self BEFORE creating components
+                # CRITICAL FIX: Capture services in a way that persists in closures
                 $self._navigationServices = $services
                 
-                # Capture services for use in handler
+                # Capture services for use in handler with explicit closure
                 $capturedServices = $services
+                if (-not $capturedServices) {
+                    $capturedServices = $self._services
+                }
                 
                 $quickActions = New-TuiDataTable -Props @{
                     Name = "quickActions"; IsFocusable = $true; ShowBorder = $false; ShowHeader = $false; ShowFooter = $false
@@ -92,10 +95,10 @@ function Get-DashboardScreen {
                         }
                     }
                 }
-                # CORRECTED: Wrap AddChild calls in [void]() to suppress pipeline output
-                [void](& $quickActions.ProcessData -self $quickActions)
-                [void](& $quickActionsPanel.AddChild -self $quickActionsPanel -Child $quickActions)
-                [void](& $rootPanel.AddChild -self $rootPanel -Child $quickActionsPanel -LayoutProps @{ "Grid.Row" = 0; "Grid.Column" = 0 })
+                # Process data and add to panel
+                & $quickActions.ProcessData -self $quickActions | Out-Null
+                & $quickActionsPanel.AddChild -self $quickActionsPanel -Child $quickActions | Out-Null
+                & $rootPanel.AddChild -self $rootPanel -Child $quickActionsPanel -LayoutProps @{ "Grid.Row" = 0; "Grid.Column" = 0 } | Out-Null
                 
                 # --- Active Timers Panel ---
                 $timersPanel = New-TuiStackPanel -Props @{ Name = "timersPanel"; Title = " Active Timers "; ShowBorder = $true; Padding = 1 }
@@ -103,9 +106,9 @@ function Get-DashboardScreen {
                     Name = "activeTimers"; IsFocusable = $true; ShowBorder = $false; ShowFooter = $false
                     Columns = @( @{ Name = "Project"; Width = 20 }, @{ Name = "Time"; Width = 10 } ); Data = @()
                 }
-                # CORRECTED: Wrap AddChild calls in [void]()
-                [void](& $timersPanel.AddChild -self $timersPanel -Child $activeTimers)
-                [void](& $rootPanel.AddChild -self $rootPanel -Child $timersPanel -LayoutProps @{ "Grid.Row" = 0; "Grid.Column" = 1 })
+                # Add to panel
+                & $timersPanel.AddChild -self $timersPanel -Child $activeTimers | Out-Null
+                & $rootPanel.AddChild -self $rootPanel -Child $timersPanel -LayoutProps @{ "Grid.Row" = 0; "Grid.Column" = 1 } | Out-Null
                 
                 # --- Stats Panel ---
                 $statsPanel = New-TuiStackPanel -Props @{ Name = "statsPanel"; Title = " Stats "; ShowBorder = $true; Padding = 1; Orientation = "Vertical"; Spacing = 1 }
@@ -113,12 +116,12 @@ function Get-DashboardScreen {
                 $weekLabel = New-TuiLabel -Props @{ Name = "weekHoursLabel"; Text = "Week: 0h"; Height = 1 }
                 $tasksLabel = New-TuiLabel -Props @{ Name = "activeTasksLabel"; Text = "Tasks: 0"; Height = 1 }
                 $timersLabel = New-TuiLabel -Props @{ Name = "runningTimersLabel"; Text = "Timers: 0"; Height = 1 }
-                # CORRECTED: Wrap AddChild calls in [void]()
-                [void](& $statsPanel.AddChild -self $statsPanel -Child $todayLabel)
-                [void](& $statsPanel.AddChild -self $statsPanel -Child $weekLabel)
-                [void](& $statsPanel.AddChild -self $statsPanel -Child $tasksLabel)
-                [void](& $statsPanel.AddChild -self $statsPanel -Child $timersLabel)
-                [void](& $rootPanel.AddChild -self $rootPanel -Child $statsPanel -LayoutProps @{ "Grid.Row" = 0; "Grid.Column" = 2 })
+                # Add to panel
+                & $statsPanel.AddChild -self $statsPanel -Child $todayLabel | Out-Null
+                & $statsPanel.AddChild -self $statsPanel -Child $weekLabel | Out-Null
+                & $statsPanel.AddChild -self $statsPanel -Child $tasksLabel | Out-Null
+                & $statsPanel.AddChild -self $statsPanel -Child $timersLabel | Out-Null
+                & $rootPanel.AddChild -self $rootPanel -Child $statsPanel -LayoutProps @{ "Grid.Row" = 0; "Grid.Column" = 2 } | Out-Null
                 
                 # --- Today's Tasks Panel ---
                 $tasksPanel = New-TuiStackPanel -Props @{ Name = "tasksPanel"; Title = " Today's Tasks "; ShowBorder = $true; Padding = 1 }
@@ -126,20 +129,21 @@ function Get-DashboardScreen {
                     Name = "todaysTasks"; IsFocusable = $true; ShowBorder = $false; ShowFooter = $false
                     Columns = @( @{ Name = "Priority"; Width = 8 }, @{ Name = "Task"; Width = 45 }, @{ Name = "Project"; Width = 15 } ); Data = @()
                 }
-                # CORRECTED: Wrap AddChild calls in [void]()
-                [void](& $tasksPanel.AddChild -self $tasksPanel -Child $todaysTasks)
-                [void](& $rootPanel.AddChild -self $rootPanel -Child $tasksPanel -LayoutProps @{ "Grid.Row" = 1; "Grid.Column" = 0; "Grid.ColumnSpan" = 3 })
+                # Add to panel
+                & $tasksPanel.AddChild -self $tasksPanel -Child $todaysTasks | Out-Null
+                & $rootPanel.AddChild -self $rootPanel -Child $tasksPanel -LayoutProps @{ "Grid.Row" = 1; "Grid.Column" = 0; "Grid.ColumnSpan" = 3 } | Out-Null
                 
-                # ---------------------------------------------------------------------------------
-                # THIS IS THE CRITICAL FIX: Storing references BEFORE creating subscriptions.
-                # ---------------------------------------------------------------------------------
-                $self._quickActions = $quickActions  # FIX: Added missing quickActions storage
+                # FIX: Store component references BEFORE creating subscriptions and ensure they're accessible
+                $self._quickActions = $quickActions
                 $self._activeTimers = $activeTimers
                 $self._todaysTasks = $todaysTasks
                 $self._todayLabel = $todayLabel
                 $self._weekLabel = $weekLabel
                 $self._tasksLabel = $tasksLabel
                 $self._timersLabel = $timersLabel
+                
+                # Also store as Children for the engine to find them
+                $self.Children = @($rootPanel)
                 
                 # Store components in hashtable for easy access
                 $self.Components.quickActions = $quickActions
@@ -174,7 +178,7 @@ function Get-DashboardScreen {
                             if ($screen -and $screen._quickActions) {
                                 if ($newValue -and $newValue.Count -gt 0) {
                                     $screen._quickActions.Data = $newValue 
-                                    [void](& $screen._quickActions.ProcessData -self $screen._quickActions) # FIX: Suppress output
+                                    & $screen._quickActions.ProcessData -self $screen._quickActions
                                     Write-Log -Level Debug -Message "quickActions updated with $($newValue.Count) items"
                                 } else {
                                     Write-Log -Level Debug -Message "quickActions NewValue is null or empty"
@@ -201,7 +205,7 @@ function Get-DashboardScreen {
                             $newValue = if ($data.NewValue -ne $null) { $data.NewValue } else { $data }
                             if ($screen -and $screen._activeTimers -and $newValue) {
                                 $screen._activeTimers.Data = $newValue 
-                                [void](& $screen._activeTimers.ProcessData -self $screen._activeTimers) # FIX: Suppress output
+                                & $screen._activeTimers.ProcessData -self $screen._activeTimers
                             }
                         } -Context @{ Data = $data } -ErrorHandler {
                             param($Exception)
@@ -215,7 +219,7 @@ function Get-DashboardScreen {
                             $newValue = if ($data.NewValue -ne $null) { $data.NewValue } else { $data }
                             if ($screen -and $screen._todaysTasks -and $newValue) {
                                 $screen._todaysTasks.Data = $newValue 
-                                [void](& $screen._todaysTasks.ProcessData -self $screen._todaysTasks) # FIX: Suppress output
+                                & $screen._todaysTasks.ProcessData -self $screen._todaysTasks
                             }
                         } -Context @{ Data = $data } -ErrorHandler {
                             param($Exception)
@@ -360,9 +364,16 @@ function Get-DashboardScreen {
                         if ($passedServices -and $passedServices.Store) {
                             # Check if screen components are ready before refreshing
                             if ($screen -and $screen._quickActions -and $screen._activeTimers) {
-                                $result = & $passedServices.Store.Dispatch -self $passedServices.Store -actionName "DASHBOARD_REFRESH"
-                                if (-not $result.Success) {
-                                    Write-Log -Level Error -Message "Timer DASHBOARD_REFRESH dispatch failed: $($result.Error)"
+                                try {
+                                    $result = & $passedServices.Store.Dispatch -self $passedServices.Store -actionName "DASHBOARD_REFRESH"
+                                    if ($result -and (-not $result.Success)) {
+                                        Write-Log -Level Error -Message "Timer DASHBOARD_REFRESH dispatch failed: $($result.Error)"
+                                    }
+                                } catch {
+                                    Write-Log -Level Error -Message "Timer DASHBOARD_REFRESH dispatch exception: $($_.Exception.Message)" -Data @{
+                                        ExceptionType = $_.Exception.GetType().FullName
+                                        StackTrace = $_.Exception.StackTrace
+                                    }
                                 }
                             } else {
                                 Write-Log -Level Debug -Message "Timer: Screen components not ready yet, skipping refresh"
@@ -372,7 +383,15 @@ function Get-DashboardScreen {
                         }
                     } catch {
                         # We can't throw here, so we log the detailed error.
-                        Write-Log -Level Error -Message "A critical, unhandled error occurred inside the dashboard refresh timer: $_" -Data @{ TimerName = "DashboardRefresh"; Exception = $_ }
+                        try {
+                            Write-Log -Level Error -Message "A critical, unhandled error occurred inside the dashboard refresh timer: $($_.Exception.Message)" -Data @{ 
+                                TimerName = "DashboardRefresh" 
+                                ExceptionType = if ($_.Exception) { $_.Exception.GetType().FullName } else { "Unknown" }
+                                ExceptionMessage = if ($_.Exception) { $_.Exception.Message } else { $_.ToString() }
+                            }
+                        } catch {
+                            # If even logging fails, there's nothing more we can do in this timer context
+                        }
                     }
                 }
                 $self._refreshTimer.Start()

@@ -133,6 +133,14 @@ function global:Set-TuiTheme {
         [string]$ThemeName
     )
     
+    # Defensive check: ensure $script:Themes is initialized
+    if (-not $script:Themes) {
+        Write-Warning "Theme manager not properly initialized, reinitializing themes hashtable"
+        $script:Themes = @{
+            Modern = @{ Name = "Modern"; Colors = @{ Background = [ConsoleColor]::Black; Foreground = [ConsoleColor]::White } }
+        }
+    }
+    
     if ($script:Themes.ContainsKey($ThemeName)) {
         $script:CurrentTheme = $script:Themes[$ThemeName]
         

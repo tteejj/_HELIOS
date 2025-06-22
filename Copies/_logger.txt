@@ -153,15 +153,29 @@ function global:Write-Log {
             $script:LogQueue = $script:LogQueue[-2000..-1]
         }
         
-        # Write to file
+        # Write to file with enhanced error handling
         if ($script:LogPath) {
-            # Check file size and rotate if needed
-            if ((Test-Path $script:LogPath) -and (Get-Item $script:LogPath).Length -gt $script:MaxLogSize) {
-                $archivePath = $script:LogPath -replace '\.log$', "_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
-                Move-Item $script:LogPath $archivePath -Force
+            try {
+                # Ensure directory exists
+                $logDir = Split-Path $script:LogPath -Parent
+                if (-not (Test-Path $logDir)) {
+                    New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+                }
+                
+                # Check file size and rotate if needed
+                if ((Test-Path $script:LogPath) -and (Get-Item $script:LogPath).Length -gt $script:MaxLogSize) {
+                    $archivePath = $script:LogPath -replace '\.log$', "_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
+                    Move-Item $script:LogPath $archivePath -Force
+                }
+                
+                # Force flush to ensure content is written
+                Add-Content -Path $script:LogPath -Value $logEntry -Encoding UTF8 -Force
+                
+            } catch {
+                # If file writing fails, at least output to console
+                Write-Host "LOG WRITE FAILED: $logEntry" -ForegroundColor Yellow
+                Write-Host "Error: $_" -ForegroundColor Red
             }
-            
-            Add-Content -Path $script:LogPath -Value $logEntry -Encoding UTF8
         }
         
         # Also output to console for immediate feedback if Error level

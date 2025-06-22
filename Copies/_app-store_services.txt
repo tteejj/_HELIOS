@@ -168,14 +168,24 @@ function Initialize-AppStore {
                 return @{ Success = $true }
             } 
             catch {
-                throw [StateMutationException]::new(
-                    "Error executing action '$actionName'",
-                    @{
-                        ActionName = $actionName
-                        Payload = $payload
-                        OriginalException = $_
-                    }
-                )
+                # Use PowerShell RuntimeException with attached context data to avoid type dependency issues
+                $contextData = @{
+                    ActionName = $actionName
+                    Payload = $payload
+                    OriginalException = $_.Exception.Message
+                    Component = "AppStore"
+                    OperationName = "Dispatch"
+                    Timestamp = [DateTime]::UtcNow
+                }
+                
+                $runtimeException = New-Object System.Management.Automation.RuntimeException("Error executing action '$actionName': $($_.Exception.Message)")
+                $runtimeException.Data.Add("HeliosException", $contextData)
+                
+                if ($self._enableDebugLogging) { 
+                    Write-Log -Level Error -Message "Action dispatch failed" -Data $contextData 
+                }
+                
+                throw $runtimeException
             }
         }
         

@@ -4,34 +4,69 @@
 
 # Define custom exception types using PowerShell 5-compatible approach
 # FIX: Only add the type if it doesn't already exist to prevent errors on module re-import.
-if (-not ([System.AppDomain]::CurrentDomain.GetAssemblies() | ForEach-Object { $_.GetType('Helios.HeliosException', $false) })) {
-    Add-Type -TypeDefinition @"
-    using System;
-    using System.Collections;
+# Enhanced error handling to prevent compilation failures
+try {
+    if (-not ([System.AppDomain]::CurrentDomain.GetAssemblies() | ForEach-Object { try { $_.GetType('Helios.HeliosException', $false) } catch { $null } } | Where-Object { $_ -ne $null })) {
+        Add-Type -TypeDefinition @"
+        using System;
+        using System.Collections;
 
-    namespace Helios {
-        public class HeliosException : Exception {
-            public Hashtable Context { get; set; }
-            public string Component { get; set; }
-            public object OriginalError { get; set; }
-            public DateTime Timestamp { get; set; }
+        namespace Helios {
+            public class HeliosException : Exception {
+                public Hashtable Context { get; set; }
+                public string Component { get; set; }
+                public object OriginalError { get; set; }
+                public DateTime Timestamp { get; set; }
+                
+                public HeliosException(string message, Hashtable context) : base(message) {
+                    this.Context = context ?? new Hashtable();
+                    this.Component = context != null && context.ContainsKey("Component") ? context["Component"].ToString() : "Unknown";
+                    this.Timestamp = DateTime.Now;
+                }
+            }
             
-            public HeliosException(string message, Hashtable context) : base(message) {
-                this.Context = context ?? new Hashtable();
-                this.Component = context != null && context.ContainsKey("Component") ? context["Component"].ToString() : "Unknown";
-                this.Timestamp = DateTime.Now;
+            public class NavigationException : HeliosException { public NavigationException(string message, Hashtable context) : base(message, context) { } }
+            public class ServiceInitializationException : HeliosException { public ServiceInitializationException(string message, Hashtable context) : base(message, context) { } }
+            public class ComponentRenderException : HeliosException { public ComponentRenderException(string message, Hashtable context) : base(message, context) { } }
+            public class StateMutationException : HeliosException { public StateMutationException(string message, Hashtable context) : base(message, context) { } }
+            public class InputHandlingException : HeliosException { public InputHandlingException(string message, Hashtable context) : base(message, context) { } }
+            public class DataLoadException : HeliosException { public DataLoadException(string message, Hashtable context) : base(message, context) { } }
+            public class ThemeException : HeliosException { public ThemeException(string message, Hashtable context) : base(message, context) { } }
+        }
+"@ -ErrorAction Stop
+        Write-Verbose "Custom Helios exception types compiled successfully"
+    }
+} catch {
+    # If Add-Type fails, log the error prominently and use PowerShell fallbacks
+    Write-Warning "CRITICAL: Failed to compile custom exception types: $($_.Exception.Message)"
+    Write-Warning "This may cause 'Unable to find type [StateMutationException]' errors"
+    Write-Warning "Falling back to PowerShell objects for exception handling"
+    
+    # Create fallback exception types as PowerShell objects
+    $global:HeliosExceptionTypes = @{
+        HeliosException = @{
+            New = { param($message, $context) 
+                [PSCustomObject]@{
+                    Message = $message
+                    Context = $context
+                    Component = if ($context -and $context.Component) { $context.Component } else { "Unknown" }
+                    Timestamp = Get-Date
+                    GetType = { @{ FullName = "Helios.HeliosException" } }
+                }
             }
         }
-        
-        public class NavigationException : HeliosException { public NavigationException(string message, Hashtable context) : base(message, context) { } }
-        public class ServiceInitializationException : HeliosException { public ServiceInitializationException(string message, Hashtable context) : base(message, context) { } }
-        public class ComponentRenderException : HeliosException { public ComponentRenderException(string message, Hashtable context) : base(message, context) { } }
-        public class StateMutationException : HeliosException { public StateMutationException(string message, Hashtable context) : base(message, context) { } }
-        public class InputHandlingException : HeliosException { public InputHandlingException(string message, Hashtable context) : base(message, context) { } }
-        public class DataLoadException : HeliosException { public DataLoadException(string message, Hashtable context) : base(message, context) { } }
-        public class ThemeException : HeliosException { public ThemeException(string message, Hashtable context) : base(message, context) { } }
+        StateMutationException = @{
+            New = { param($message, $context)
+                [PSCustomObject]@{
+                    Message = $message
+                    Context = $context
+                    Component = if ($context -and $context.Component) { $context.Component } else { "Unknown" }
+                    Timestamp = Get-Date
+                    GetType = { @{ FullName = "Helios.StateMutationException" } }
+                }
+            }
+        }
     }
-"@ -ErrorAction SilentlyContinue
 }
 
 # Global error tracking
@@ -216,7 +251,13 @@ function global:Invoke-WithErrorHandling {
     try {
         return (& $ScriptBlock)
     } catch {
-        $errorContext = if ($Context) { $Context.Clone() } else { @{} }
+        $errorContext = if ($Context) { 
+            $newContext = @{}
+            foreach ($key in $Context.Keys) {
+                $newContext[$key] = $Context[$key]
+            }
+            $newContext
+        } else { @{} }
         $errorContext.Component = $Component
         $errorContext.OperationName = $OperationName
         
@@ -235,7 +276,7 @@ function global:Invoke-WithErrorHandling {
         
         if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
             # FIX: Delimit the last variable with ${} to avoid parsing errors with the colon.
-            Write-Log -Level Error -Message "Error in $Component during $OperationName: ${errorMessage}" -Data $detailedError
+            Write-Log -Level Error -Message "Error in $Component during $OperationName ${errorMessage}" -Data $detailedError
         }
         
         [void]$script:ErrorHistory.Add($detailedError)

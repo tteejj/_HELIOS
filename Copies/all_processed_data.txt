@@ -213,9 +213,10 @@ function Initialize-PMCScreens {
                         "simple-test-screen" { $expectedFunctions = @("Get-SimpleTestScreen") }
                         default { 
                             # For other screens, try to guess the function name
-                            $functionName = "Get-" + (($screenName -split "-") | ForEach-Object { 
+                            # FIX: Enclose the string join operation in parentheses to ensure correct concatenation
+                            $functionName = "Get-" + ((($screenName -split "-") | ForEach-Object { 
                                 $_.Substring(0,1).ToUpper() + $_.Substring(1) 
-                            }) -join ""
+                            }) -join "")
                             $expectedFunctions = @($functionName)
                         }
                     }
@@ -346,21 +347,21 @@ function Initialize-PMCServices {
                     $global:Data = @{} 
                     Trace-Step -StepName "TASKS_REFRESH: Created global data"
                 }
-                if (-not ($global:Data.tasks -is [System.Collections.IEnumerable])) { 
-                    $global:Data.tasks = @() 
-                    Trace-Step -StepName "TASKS_REFRESH: Initialized tasks array"
+                if (-not $global:Data.Tasks) { 
+                    $global:Data.Tasks = @() 
+                    Trace-Step -StepName "TASKS_REFRESH: Initialized Tasks array"
                 }
                 
-                $rawTasks = $global:Data.tasks
+                $rawTasks = @($global:Data.Tasks)
                 Trace-Step -StepName "TASKS_REFRESH: Processing tasks" -StepData @{
-                    RawTaskCount = $rawTasks.Count
-                    RawTaskType = $rawTasks.GetType().Name
+                    RawTaskCount = if ($rawTasks) { @($rawTasks).Count } else { 0 }
+                    RawTaskType = if ($rawTasks) { $rawTasks.GetType().Name } else { "null" }
                 }
                 
-                $activeTasks = ($rawTasks | Where-Object { -not $_.completed }).Count
+                $activeTasks = @($rawTasks | Where-Object { -not $_.completed }).Count # FIX: @() ensures array
                 $today = (Get-Date).Date
                 
-                $dashboardTasks = $rawTasks | Where-Object {
+                $dashboardTasks = @($rawTasks | Where-Object {
                     $updatedDate = $null
                     try { 
                         if ($_.updated_at) { 
@@ -374,7 +375,7 @@ function Initialize-PMCServices {
                         }
                     }
                     -not $_.completed -or ($updatedDate -and $updatedDate -eq $today)
-                } | Select-Object -First 10 | ForEach-Object {
+                }) | Select-Object -First 10 | ForEach-Object {
                     @{
                         Priority = switch($_.priority) { "high" { "[HIGH]" } "medium" { "[MED]" } default { "[LOW]" } }
                         Task = $_.title
@@ -382,7 +383,7 @@ function Initialize-PMCServices {
                     }
                 }
 
-                $tasksForTable = $rawTasks | ForEach-Object {
+                $tasksForTable = @($rawTasks | ForEach-Object {
                     $dueDateText = "N/A"
                     if ($_.due_date) { 
                         try { 
@@ -403,11 +404,11 @@ function Initialize-PMCServices {
                         Category = if ($_.project) { $_.project } else { "General" }
                         DueDate = $dueDateText
                     }
-                }
+                })
                 
                 Trace-Step -StepName "TASKS_REFRESH: Updating state" -StepData @{
-                    DashboardTaskCount = $dashboardTasks.Count
-                    TableTaskCount = $tasksForTable.Count
+                    DashboardTaskCount = if ($dashboardTasks) { @($dashboardTasks).Count } else { 0 }
+                    TableTaskCount = if ($tasksForTable) { @($tasksForTable).Count } else { 0 }
                     ActiveTasks = $activeTasks
                 }
                 
@@ -415,7 +416,7 @@ function Initialize-PMCServices {
                 
                 Trace-ServiceCall -ServiceName "Store" -MethodName "TASKS_REFRESH" -Result @{ 
                     Success = $true
-                    ProcessedTasks = $tasksForTable.Count
+                    ProcessedTasks = if ($tasksForTable) { @($tasksForTable).Count } else { 0 }
                     ActiveTasks = $activeTasks
                 }
             } catch {
@@ -436,48 +437,50 @@ function Initialize-PMCServices {
             try {
                 Trace-Step -StepName "TIMERS_REFRESH: Checking global data" -StepData @{
                     GlobalDataExists = ($null -ne $global:Data)
-                    TimersExists = ($null -ne $global:Data.timers)
-                    TimersType = if ($global:Data.timers) { $global:Data.timers.GetType().Name } else { "null" }
+                    ActiveTimersExists = ($null -ne $global:Data.ActiveTimers)
+                    ActiveTimersType = if ($global:Data.ActiveTimers) { $global:Data.ActiveTimers.GetType().Name } else { "null" }
                 }
                 
                 if (-not $global:Data) { 
                     $global:Data = @{} 
                     Trace-Step -StepName "TIMERS_REFRESH: Created global data"
                 }
-                if (-not ($global:Data.timers -is [System.Collections.IEnumerable])) { 
-                    $global:Data.timers = @() 
-                    Trace-Step -StepName "TIMERS_REFRESH: Initialized timers array"
+                if (-not $global:Data.ActiveTimers) { 
+                    $global:Data.ActiveTimers = @{} 
+                    Trace-Step -StepName "TIMERS_REFRESH: Initialized ActiveTimers hashtable"
                 }
                 
-                $rawTimers = $global:Data.timers
+                $rawTimers = @($global:Data.ActiveTimers.Values)
                 Trace-Step -StepName "TIMERS_REFRESH: Processing timers" -StepData @{
-                    RawTimerCount = $rawTimers.Count
-                    RawTimerType = $rawTimers.GetType().Name
+                    RawTimerCount = if ($rawTimers) { @($rawTimers).Count } else { 0 }
+                    RawTimerType = if ($rawTimers) { $rawTimers.GetType().Name } else { "null" }
                 }
                 
-                $runningTimers = ($rawTimers | Where-Object { $_.is_running }).Count
-                $activeTimers = $rawTimers | Where-Object { $_.is_running } | ForEach-Object {
+                $runningTimers = @($rawTimers).Count
+                $activeTimers = @($rawTimers | ForEach-Object {
                     $duration = "00:00:00"
-                    if ($_.start_time) {
+                    if ($_.StartTime) {
                         try {
-                            $start = [DateTime]::Parse($_.start_time)
+                            $start = [DateTime]::Parse($_.StartTime)
                             $duration = "{0:hh\:mm\:ss}" -f ((Get-Date) - $start)
                         } catch { 
                             Trace-Step -StepName "TIMERS_REFRESH: Start time parse error" -StepData @{
-                                TimerId = $_.id
-                                StartTime = $_.start_time
+                                TimerKey = $_.Key
+                                StartTime = $_.StartTime
                                 Error = $_.Exception.Message
                             }
                         }
                     }
                     @{
-                        Project = if ($_.project) { $_.project } else { "No Project" }
+                        Project = if ($_.ProjectKey -and $global:Data.Projects -and $global:Data.Projects[$_.ProjectKey]) { 
+                            $global:Data.Projects[$_.ProjectKey].Name 
+                        } else { "No Project" }
                         Time = $duration
                     }
-                }
+                })
                 
                 Trace-Step -StepName "TIMERS_REFRESH: Updating state" -StepData @{
-                    ActiveTimerCount = $activeTimers.Count
+                    ActiveTimerCount = if ($activeTimers) { @($activeTimers).Count } else { 0 }
                     RunningTimers = $runningTimers
                 }
                 
@@ -485,7 +488,7 @@ function Initialize-PMCServices {
                 
                 Trace-ServiceCall -ServiceName "Store" -MethodName "TIMERS_REFRESH" -Result @{ 
                     Success = $true
-                    ActiveTimers = $activeTimers.Count
+                    ActiveTimers = if ($activeTimers) { @($activeTimers).Count } else { 0 }
                     RunningTimers = $runningTimers
                 }
             } catch {
@@ -518,39 +521,39 @@ function Initialize-PMCServices {
                 
                 Trace-Step -StepName "LOAD_DASHBOARD_DATA: Processing time entries" -StepData @{
                     GlobalDataExists = ($null -ne $global:Data)
-                    TimeEntriesExists = ($null -ne $global:Data.time_entries)
-                    TimeEntriesType = if ($global:Data.time_entries) { $global:Data.time_entries.GetType().Name } else { "null" }
+                    TimeEntriesExists = ($null -ne $global:Data.TimeEntries)
+                    TimeEntriesType = if ($global:Data.TimeEntries) { $global:Data.TimeEntries.GetType().Name } else { "null" }
                 }
                 
                 if (-not $global:Data) { 
                     $global:Data = @{} 
                     Trace-Step -StepName "LOAD_DASHBOARD_DATA: Created global data"
                 }
-                if (-not ($global:Data.time_entries -is [System.Collections.IEnumerable])) { 
-                    $global:Data.time_entries = @() 
-                    Trace-Step -StepName "LOAD_DASHBOARD_DATA: Initialized time entries array"
+                if (-not $global:Data.TimeEntries) { 
+                    $global:Data.TimeEntries = @() 
+                    Trace-Step -StepName "LOAD_DASHBOARD_DATA: Initialized TimeEntries array"
                 }
                 
                 $todayHours = 0; $weekHours = 0
-                if ($global:Data.time_entries -and $global:Data.time_entries.Count -gt 0) {
+                if ($global:Data.TimeEntries -and @($global:Data.TimeEntries).Count -gt 0) {
                     $today = (Get-Date).Date
                     $weekStartDay = [DayOfWeek]::Monday
                     $currentDayOfWeek = $today.DayOfWeek
                     $daysToSubtract = ($currentDayOfWeek - $weekStartDay + 7) % 7
                     $weekStart = $today.AddDays(-$daysToSubtract)
 
-                    foreach ($entry in $global:Data.time_entries) {
-                        if ($entry.start_time) {
+                    foreach ($entry in $global:Data.TimeEntries) {
+                        if ($entry.Date) {
                             try {
-                                $entryDate = [DateTime]::Parse($entry.start_time).Date
-                                if ($entry.duration) {
-                                    if ($entryDate -eq $today) { $todayHours += $entry.duration }
-                                    if ($entryDate -ge $weekStart -and $entryDate -le $today) { $weekHours += $entry.duration }
+                                $entryDate = [DateTime]::Parse($entry.Date).Date
+                                if ($entry.Hours) {
+                                    if ($entryDate -eq $today) { $todayHours += $entry.Hours }
+                                    if ($entryDate -ge $weekStart -and $entryDate -le $today) { $weekHours += $entry.Hours }
                                 }
                             } catch { 
                                 Trace-Step -StepName "LOAD_DASHBOARD_DATA: Time entry parse error" -StepData @{
                                     EntryId = $entry.id
-                                    StartTime = $entry.start_time
+                                    Date = $entry.Date
                                     Error = $_.Exception.Message
                                 }
                             }
@@ -561,7 +564,7 @@ function Initialize-PMCServices {
                 Trace-Step -StepName "LOAD_DASHBOARD_DATA: Updating time stats" -StepData @{
                     TodayHours = $todayHours
                     WeekHours = $weekHours
-                    ProcessedEntries = $global:Data.time_entries.Count
+                    ProcessedEntries = @($global:Data.TimeEntries).Count
                 }
                 
                 & $Context.UpdateState @{ "stats.todayHours" = [Math]::Round($todayHours, 2); "stats.weekHours" = [Math]::Round($weekHours, 2) }
@@ -588,7 +591,7 @@ function Initialize-PMCServices {
             Trace-ServiceCall -ServiceName "Store" -MethodName "TASK_CREATE" -Parameters @{ Payload = $Payload }
             
             if (-not $global:Data) { $global:Data = @{} }
-            if (-not $global:Data.tasks) { $global:Data.tasks = @() }
+            if (-not $global:Data.Tasks) { $global:Data.Tasks = @() }
             if ($Payload.Title) {
                 $newTask = @{
                     id = [Guid]::NewGuid().ToString(); title = $Payload.Title
@@ -596,7 +599,7 @@ function Initialize-PMCServices {
                     completed = $false; priority = "medium"
                     created_at = (Get-Date).ToString("o"); updated_at = (Get-Date).ToString("o")
                 }
-                $global:Data.tasks += $newTask
+                $global:Data.Tasks += $newTask
                 Save-UnifiedData
                 & $Context.Dispatch "TASKS_REFRESH"
                 
@@ -608,8 +611,8 @@ function Initialize-PMCServices {
             param($Context, $Payload)
             Trace-ServiceCall -ServiceName "Store" -MethodName "TASK_TOGGLE_STATUS" -Parameters @{ Payload = $Payload }
             
-            if ($global:Data -and $global:Data.tasks -and $Payload.TaskId) {
-                $taskToUpdate = $global:Data.tasks | Where-Object { $_.id -eq $Payload.TaskId } | Select-Object -First 1
+            if ($global:Data -and $global:Data.Tasks -and $Payload.TaskId) {
+                $taskToUpdate = $global:Data.Tasks | Where-Object { $_.id -eq $Payload.TaskId } | Select-Object -First 1
                 if ($taskToUpdate) {
                     $taskToUpdate.completed = -not $taskToUpdate.completed
                     $taskToUpdate.updated_at = (Get-Date).ToString("o")
@@ -1129,10 +1132,12 @@ try {
 
     # Now that logger is available, initialize it.
     Initialize-Logger
+    Write-Log -Level Info -Message "Logger initialized early in main execution block"
     
     # Initialize basic logging even before modules are loaded
     Write-Host "PMC Terminal v4.2 'Helios' - Enhanced Diagnostics Mode" -ForegroundColor Cyan
     Write-Host "Tracing enabled - All execution steps will be logged" -ForegroundColor Yellow
+    Write-Host "Log files written to: $env:TEMP\PMCTerminal\" -ForegroundColor Green
     Write-Host "Starting initialization sequence..." -ForegroundColor Green
     Write-Host ""
     
@@ -5615,7 +5620,32 @@ function global:Set-TuiTheme {
         [string]$ThemeName
     )
     Invoke-WithErrorHandling -Component "ThemeManager.SetTheme" -ScriptBlock {
-        if ($script:Themes.ContainsKey($ThemeName)) {
+        # Initialize themes if null
+        if ($null -eq $script:Themes) {
+            $script:Themes = @{
+                Modern = @{
+                    Name = "Modern"
+                    Colors = @{
+                        Background = [ConsoleColor]::Black
+                        Foreground = [ConsoleColor]::White
+                        Primary = [ConsoleColor]::White
+                        Secondary = [ConsoleColor]::Gray
+                        Accent = [ConsoleColor]::Cyan
+                        Success = [ConsoleColor]::Green
+                        Warning = [ConsoleColor]::Yellow
+                        Error = [ConsoleColor]::Red
+                        Info = [ConsoleColor]::Blue
+                        Header = [ConsoleColor]::Cyan
+                        Border = [ConsoleColor]::DarkGray
+                        Selection = [ConsoleColor]::Yellow
+                        Highlight = [ConsoleColor]::Cyan
+                        Subtle = [ConsoleColor]::DarkGray
+                    }
+                }
+            }
+        }
+        
+        if ($script:Themes -and $script:Themes.ContainsKey($ThemeName)) {
             $script:CurrentTheme = $script:Themes[$ThemeName]
             
             # --- FIX ---
@@ -6468,7 +6498,7 @@ function Render-Frame {
                     & $script:collectComponents $child
                 }
             }
-        }
+        }.GetNewClosure() # CRITICAL FIX: Bind the scriptblock's context so it can find itself during recursion
 
         # Start collection from the screen's children
         if ($script:TuiState.CurrentScreen -and $script:TuiState.CurrentScreen.Children) {
@@ -7763,6 +7793,14 @@ function global:Set-TuiTheme {
         [string]$ThemeName
     )
     
+    # Defensive check: ensure $script:Themes is initialized
+    if (-not $script:Themes) {
+        Write-Warning "Theme manager not properly initialized, reinitializing themes hashtable"
+        $script:Themes = @{
+            Modern = @{ Name = "Modern"; Colors = @{ Background = [ConsoleColor]::Black; Foreground = [ConsoleColor]::White } }
+        }
+    }
+    
     if ($script:Themes.ContainsKey($ThemeName)) {
         $script:CurrentTheme = $script:Themes[$ThemeName]
         
@@ -8632,15 +8670,29 @@ function global:Write-Log {
             $script:LogQueue = $script:LogQueue[-2000..-1]
         }
         
-        # Write to file
+        # Write to file with enhanced error handling
         if ($script:LogPath) {
-            # Check file size and rotate if needed
-            if ((Test-Path $script:LogPath) -and (Get-Item $script:LogPath).Length -gt $script:MaxLogSize) {
-                $archivePath = $script:LogPath -replace '\.log$', "_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
-                Move-Item $script:LogPath $archivePath -Force
+            try {
+                # Ensure directory exists
+                $logDir = Split-Path $script:LogPath -Parent
+                if (-not (Test-Path $logDir)) {
+                    New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+                }
+                
+                # Check file size and rotate if needed
+                if ((Test-Path $script:LogPath) -and (Get-Item $script:LogPath).Length -gt $script:MaxLogSize) {
+                    $archivePath = $script:LogPath -replace '\.log$', "_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
+                    Move-Item $script:LogPath $archivePath -Force
+                }
+                
+                # Force flush to ensure content is written
+                Add-Content -Path $script:LogPath -Value $logEntry -Encoding UTF8 -Force
+                
+            } catch {
+                # If file writing fails, at least output to console
+                Write-Host "LOG WRITE FAILED: $logEntry" -ForegroundColor Yellow
+                Write-Host "Error: $_" -ForegroundColor Red
             }
-            
-            Add-Content -Path $script:LogPath -Value $logEntry -Encoding UTF8
         }
         
         # Also output to console for immediate feedback if Error level
@@ -9092,7 +9144,7 @@ function global:Subscribe-Event {
         [Parameter(Mandatory = $true)]
         [string]$EventName,
         
-        [Parameter(Mandrandatory = $true)]
+        [Parameter(Mandatory = $true)]
         [scriptblock]$Handler,
         
         [Parameter()]
@@ -10160,6 +10212,9 @@ $script:Data = @{
         AutoSave = $true
         BackupCount = 5
     }
+    # Additional properties for compatibility with action handlers
+    time_entries = @()    # underscore format for action compatibility
+    timers = @()          # for action compatibility
 }
 
 $script:DataPath = Join-Path ([Environment]::GetFolderPath("LocalApplicationData")) "PMCTerminal\pmc-data.json"
@@ -10711,34 +10766,69 @@ Export-ModuleMember -Function @(
 
 # Define custom exception types using PowerShell 5-compatible approach
 # FIX: Only add the type if it doesn't already exist to prevent errors on module re-import.
-if (-not ([System.AppDomain]::CurrentDomain.GetAssemblies() | ForEach-Object { $_.GetType('Helios.HeliosException', $false) })) {
-    Add-Type -TypeDefinition @"
-    using System;
-    using System.Collections;
+# Enhanced error handling to prevent compilation failures
+try {
+    if (-not ([System.AppDomain]::CurrentDomain.GetAssemblies() | ForEach-Object { try { $_.GetType('Helios.HeliosException', $false) } catch { $null } } | Where-Object { $_ -ne $null })) {
+        Add-Type -TypeDefinition @"
+        using System;
+        using System.Collections;
 
-    namespace Helios {
-        public class HeliosException : Exception {
-            public Hashtable Context { get; set; }
-            public string Component { get; set; }
-            public object OriginalError { get; set; }
-            public DateTime Timestamp { get; set; }
+        namespace Helios {
+            public class HeliosException : Exception {
+                public Hashtable Context { get; set; }
+                public string Component { get; set; }
+                public object OriginalError { get; set; }
+                public DateTime Timestamp { get; set; }
+                
+                public HeliosException(string message, Hashtable context) : base(message) {
+                    this.Context = context ?? new Hashtable();
+                    this.Component = context != null && context.ContainsKey("Component") ? context["Component"].ToString() : "Unknown";
+                    this.Timestamp = DateTime.Now;
+                }
+            }
             
-            public HeliosException(string message, Hashtable context) : base(message) {
-                this.Context = context ?? new Hashtable();
-                this.Component = context != null && context.ContainsKey("Component") ? context["Component"].ToString() : "Unknown";
-                this.Timestamp = DateTime.Now;
+            public class NavigationException : HeliosException { public NavigationException(string message, Hashtable context) : base(message, context) { } }
+            public class ServiceInitializationException : HeliosException { public ServiceInitializationException(string message, Hashtable context) : base(message, context) { } }
+            public class ComponentRenderException : HeliosException { public ComponentRenderException(string message, Hashtable context) : base(message, context) { } }
+            public class StateMutationException : HeliosException { public StateMutationException(string message, Hashtable context) : base(message, context) { } }
+            public class InputHandlingException : HeliosException { public InputHandlingException(string message, Hashtable context) : base(message, context) { } }
+            public class DataLoadException : HeliosException { public DataLoadException(string message, Hashtable context) : base(message, context) { } }
+            public class ThemeException : HeliosException { public ThemeException(string message, Hashtable context) : base(message, context) { } }
+        }
+"@ -ErrorAction Stop
+        Write-Verbose "Custom Helios exception types compiled successfully"
+    }
+} catch {
+    # If Add-Type fails, log the error prominently and use PowerShell fallbacks
+    Write-Warning "CRITICAL: Failed to compile custom exception types: $($_.Exception.Message)"
+    Write-Warning "This may cause 'Unable to find type [StateMutationException]' errors"
+    Write-Warning "Falling back to PowerShell objects for exception handling"
+    
+    # Create fallback exception types as PowerShell objects
+    $global:HeliosExceptionTypes = @{
+        HeliosException = @{
+            New = { param($message, $context) 
+                [PSCustomObject]@{
+                    Message = $message
+                    Context = $context
+                    Component = if ($context -and $context.Component) { $context.Component } else { "Unknown" }
+                    Timestamp = Get-Date
+                    GetType = { @{ FullName = "Helios.HeliosException" } }
+                }
             }
         }
-        
-        public class NavigationException : HeliosException { public NavigationException(string message, Hashtable context) : base(message, context) { } }
-        public class ServiceInitializationException : HeliosException { public ServiceInitializationException(string message, Hashtable context) : base(message, context) { } }
-        public class ComponentRenderException : HeliosException { public ComponentRenderException(string message, Hashtable context) : base(message, context) { } }
-        public class StateMutationException : HeliosException { public StateMutationException(string message, Hashtable context) : base(message, context) { } }
-        public class InputHandlingException : HeliosException { public InputHandlingException(string message, Hashtable context) : base(message, context) { } }
-        public class DataLoadException : HeliosException { public DataLoadException(string message, Hashtable context) : base(message, context) { } }
-        public class ThemeException : HeliosException { public ThemeException(string message, Hashtable context) : base(message, context) { } }
+        StateMutationException = @{
+            New = { param($message, $context)
+                [PSCustomObject]@{
+                    Message = $message
+                    Context = $context
+                    Component = if ($context -and $context.Component) { $context.Component } else { "Unknown" }
+                    Timestamp = Get-Date
+                    GetType = { @{ FullName = "Helios.StateMutationException" } }
+                }
+            }
+        }
     }
-"@ -ErrorAction SilentlyContinue
 }
 
 # Global error tracking
@@ -10923,7 +11013,13 @@ function global:Invoke-WithErrorHandling {
     try {
         return (& $ScriptBlock)
     } catch {
-        $errorContext = if ($Context) { $Context.Clone() } else { @{} }
+        $errorContext = if ($Context) { 
+            $newContext = @{}
+            foreach ($key in $Context.Keys) {
+                $newContext[$key] = $Context[$key]
+            }
+            $newContext
+        } else { @{} }
         $errorContext.Component = $Component
         $errorContext.OperationName = $OperationName
         
@@ -10942,7 +11038,7 @@ function global:Invoke-WithErrorHandling {
         
         if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
             # FIX: Delimit the last variable with ${} to avoid parsing errors with the colon.
-            Write-Log -Level Error -Message "Error in $Component during $OperationName: ${errorMessage}" -Data $detailedError
+            Write-Log -Level Error -Message "Error in $Component during $OperationName ${errorMessage}" -Data $detailedError
         }
         
         [void]$script:ErrorHistory.Add($detailedError)
@@ -11032,11 +11128,11 @@ function Get-TaskManagementScreen {
                     ShowBorder = $false; Orientation = "Vertical"; Spacing = 1
                 }
                 $self.Components.rootPanel = $rootPanel
-                [void]($self.Children += $rootPanel) # FIX: Suppress pipeline output
+                $self.Children += $rootPanel
                 
                 # Header & Toolbar
-                [void](& $rootPanel.AddChild -self $rootPanel -Child (New-TuiLabel -Props @{ Text = "Task Management"; Height = 1 }))
-                [void](& $rootPanel.AddChild -self $rootPanel -Child (New-TuiLabel -Props @{ Text = "Filter: [1]All [2]Active [3]Completed | Sort: [P]riority [D]ue Date [C]reated"; Height = 1 }))
+                & $rootPanel.AddChild -self $rootPanel -Child (New-TuiLabel -Props @{ Text = "Task Management"; Height = 1 }) | Out-Null
+                & $rootPanel.AddChild -self $rootPanel -Child (New-TuiLabel -Props @{ Text = "Filter: [1]All [2]Active [3]Completed | Sort: [P]riority [D]ue Date [C]reated"; Height = 1 }) | Out-Null
                 
                 # Task table panel
                 $tablePanel = New-TuiStackPanel -Props @{
@@ -11072,15 +11168,15 @@ function Get-TaskManagementScreen {
                     }
                 }
                 
-                [void](& $tablePanel.AddChild -self $tablePanel -Child $taskTable)
-                [void](& $rootPanel.AddChild -self $rootPanel -Child $tablePanel)
+                & $tablePanel.AddChild -self $tablePanel -Child $taskTable | Out-Null
+                & $rootPanel.AddChild -self $rootPanel -Child $tablePanel | Out-Null
                 
                 $self._taskTable = $taskTable
                 
                 # Create form panel (initially hidden)
                 & $self._CreateFormPanel -self $self
                 if ($self.Components.formPanel) {
-                    [void]($self.Children += $self.Components.formPanel) # FIX: Add formPanel to Children array.
+                    $self.Children += $self.Components.formPanel
                 }
                 
                 # Capture references for use in handlers
@@ -11128,7 +11224,7 @@ function Get-TaskManagementScreen {
                 }
                 
                 # Load initial data
-                [void](& $services.Store.Dispatch -self $services.Store -actionName "TASKS_REFRESH")
+                & $services.Store.Dispatch -self $services.Store -actionName "TASKS_REFRESH"
                 
                 # Register screen with focus manager after all components are created
                 if (Get-Command -Name "Register-ScreenForFocus" -ErrorAction SilentlyContinue) {
@@ -11165,13 +11261,13 @@ function Get-TaskManagementScreen {
                 # Fields
                 $titleLabel = New-TuiLabel -Props @{ Text = "Title:"; Height = 1 }
                 $titleInput = New-TuiTextBox -Props @{ Name = "formTitle"; IsFocusable = $true; Height = 3; Placeholder = "Enter task title..." }
-                [void](& $formPanel.AddChild -self $formPanel -Child $titleLabel -LayoutProps @{ "Grid.Row" = 0; "Grid.Column" = 0 })
-                [void](& $formPanel.AddChild -self $formPanel -Child $titleInput -LayoutProps @{ "Grid.Row" = 0; "Grid.Column" = 1 })
+                & $formPanel.AddChild -self $formPanel -Child $titleLabel -LayoutProps @{ "Grid.Row" = 0; "Grid.Column" = 0 } | Out-Null
+                & $formPanel.AddChild -self $formPanel -Child $titleInput -LayoutProps @{ "Grid.Row" = 0; "Grid.Column" = 1 } | Out-Null
                 
                 $descLabel = New-TuiLabel -Props @{ Text = "Description:"; Height = 1 }
                 $descInput = New-TuiTextBox -Props @{ Name = "formDescription"; IsFocusable = $true; Height = 3; Placeholder = "Enter description..." }
-                [void](& $formPanel.AddChild -self $formPanel -Child $descLabel -LayoutProps @{ "Grid.Row" = 1; "Grid.Column" = 0 })
-                [void](& $formPanel.AddChild -self $formPanel -Child $descInput -LayoutProps @{ "Grid.Row" = 1; "Grid.Column" = 1 })
+                & $formPanel.AddChild -self $formPanel -Child $descLabel -LayoutProps @{ "Grid.Row" = 1; "Grid.Column" = 0 } | Out-Null
+                & $formPanel.AddChild -self $formPanel -Child $descInput -LayoutProps @{ "Grid.Row" = 1; "Grid.Column" = 1 } | Out-Null
                 
                 # Capture screen reference for button handlers
                 $screen = $self
@@ -11180,9 +11276,9 @@ function Get-TaskManagementScreen {
                 $buttonPanel = New-TuiStackPanel -Props @{ Orientation = "Horizontal"; HorizontalAlignment = "Center"; Spacing = 2; Height = 3 }
                 $saveButton = New-TuiButton -Props @{ Text = "Save"; Width = 12; Height = 3; IsFocusable = $true; OnClick = { Invoke-WithErrorHandling -Component "TaskForm.SaveButton.OnClick" -ScriptBlock { & $screen._SaveTask -self $screen } -Context @{ FormFields = $screen._formFields } -ErrorHandler { param($Exception) { Show-AlertDialog -Title "Save Error" -Message "Failed to save task: $($Exception.Message)" } } } }
                 $cancelButton = New-TuiButton -Props @{ Text = "Cancel"; Width = 12; Height = 3; IsFocusable = $true; OnClick = { Invoke-WithErrorHandling -Component "TaskForm.CancelButton.OnClick" -ScriptBlock { & $screen._HideForm -self $screen } -Context @{} -ErrorHandler { param($Exception) { Show-AlertDialog -Title "Cancel Error" -Message "Failed to cancel form: $($Exception.Message)" } } } }
-                [void](& $buttonPanel.AddChild -self $buttonPanel -Child $saveButton)
-                [void](& $buttonPanel.AddChild -self $buttonPanel -Child $cancelButton)
-                [void](& $formPanel.AddChild -self $formPanel -Child $buttonPanel -LayoutProps @{ "Grid.Row" = 5; "Grid.Column" = 0; "Grid.ColumnSpan" = 2 })
+                & $buttonPanel.AddChild -self $buttonPanel -Child $saveButton | Out-Null
+                & $buttonPanel.AddChild -self $buttonPanel -Child $cancelButton | Out-Null
+                & $formPanel.AddChild -self $formPanel -Child $buttonPanel -LayoutProps @{ "Grid.Row" = 5; "Grid.Column" = 0; "Grid.ColumnSpan" = 2 } | Out-Null
                 
                 $self.Components.formPanel = $formPanel
                 $self._formFields = @{ Title = $titleInput; Description = $descInput }
@@ -11234,7 +11330,7 @@ function Get-TaskManagementScreen {
                 $action = if ($self._editingTaskId) { "TASK_UPDATE" } else { "TASK_CREATE" }
                 if ($self._editingTaskId) { $formData.TaskId = $self._editingTaskId }
                 
-                [void](& $self._services.Store.Dispatch -self $self._services.Store -actionName $action -payload $formData)
+                & $self._services.Store.Dispatch -self $self._services.Store -actionName $action -payload $formData
                 & $self._HideForm -self $self
             } -Context @{ ScreenName = $self.Name; EditingTaskId = $self._editingTaskId; FormData = $self._formFields.Title.Text } -ErrorHandler {
                 param($Exception)
@@ -11292,12 +11388,12 @@ function Get-TaskManagementScreen {
                         return $true
                     }
                     'q' { return "Back" }
-                    '1' { [void](& $services.Store.Dispatch -self $services.Store -actionName "UPDATE_STATE" -payload @{ taskFilter = "all" }); return $true }
-                    '2' { [void](& $services.Store.Dispatch -self $services.Store -actionName "UPDATE_STATE" -payload @{ taskFilter = "active" }); return $true }
-                    '3' { [void](& $services.Store.Dispatch -self $services.Store -actionName "UPDATE_STATE" -payload @{ taskFilter = "completed" }); return $true }
-                    'p' { [void](& $services.Store.Dispatch -self $services.Store -actionName "UPDATE_STATE" -payload @{ taskSort = "priority" }); return $true }
-                    'd' { [void](& $services.Store.Dispatch -self $services.Store -actionName "UPDATE_STATE" -payload @{ taskSort = "dueDate" }); return $true }
-                    'c' { [void](& $services.Store.Dispatch -self $services.Store -actionName "UPDATE_STATE" -payload @{ taskSort = "created" }); return $true }
+                    '1' { & $services.Store.Dispatch -self $services.Store -actionName "UPDATE_STATE" -payload @{ taskFilter = "all" }; return $true }
+                    '2' { & $services.Store.Dispatch -self $services.Store -actionName "UPDATE_STATE" -payload @{ taskFilter = "active" }; return $true }
+                    '3' { & $services.Store.Dispatch -self $services.Store -actionName "UPDATE_STATE" -payload @{ taskFilter = "completed" }; return $true }
+                    'p' { & $services.Store.Dispatch -self $services.Store -actionName "UPDATE_STATE" -payload @{ taskSort = "priority" }; return $true }
+                    'd' { & $services.Store.Dispatch -self $services.Store -actionName "UPDATE_STATE" -payload @{ taskSort = "dueDate" }; return $true }
+                    'c' { & $services.Store.Dispatch -self $services.Store -actionName "UPDATE_STATE" -payload @{ taskSort = "created" }; return $true }
                 }
                 
                 return $false
@@ -11327,7 +11423,7 @@ function Get-TaskManagementScreen {
             param($self)
             Invoke-WithErrorHandling -Component "$($self.Name).OnResume" -ScriptBlock {
                 $global:TuiState.RenderStats.FrameCount = 0
-                [void](& $self._services.Store.Dispatch -self $self._services.Store -actionName "TASKS_REFRESH")
+                & $self._services.Store.Dispatch -self $self._services.Store -actionName "TASKS_REFRESH"
                 Request-TuiRefresh
             } -Context @{ ScreenName = $self.Name } -ErrorHandler {
                 param($Exception)
@@ -11390,7 +11486,7 @@ function Get-DashboardScreen {
                     ShowGridLines = $false  # Set to true to debug layout
                 }
                 $self.Components.rootPanel = $rootPanel
-                [void]($self.Children += $rootPanel) # FIX: Suppress pipeline output
+                $self.Children += $rootPanel
                 
                 Write-Log -Level Debug -Message "Dashboard: Created rootPanel, Children count=$($self.Children.Count)"
                 
@@ -11404,11 +11500,14 @@ function Get-DashboardScreen {
                     ForegroundColor = [ConsoleColor]::Gray
                 }
                 
-                # Store services on self BEFORE creating components
+                # CRITICAL FIX: Capture services in a way that persists in closures
                 $self._navigationServices = $services
                 
-                # Capture services for use in handler
+                # Capture services for use in handler with explicit closure
                 $capturedServices = $services
+                if (-not $capturedServices) {
+                    $capturedServices = $self._services
+                }
                 
                 $quickActions = New-TuiDataTable -Props @{
                     Name = "quickActions"; IsFocusable = $true; ShowBorder = $false; ShowHeader = $false; ShowFooter = $false
@@ -11440,10 +11539,10 @@ function Get-DashboardScreen {
                         }
                     }
                 }
-                # CORRECTED: Wrap AddChild calls in [void]() to suppress pipeline output
-                [void](& $quickActions.ProcessData -self $quickActions)
-                [void](& $quickActionsPanel.AddChild -self $quickActionsPanel -Child $quickActions)
-                [void](& $rootPanel.AddChild -self $rootPanel -Child $quickActionsPanel -LayoutProps @{ "Grid.Row" = 0; "Grid.Column" = 0 })
+                # Process data and add to panel
+                & $quickActions.ProcessData -self $quickActions | Out-Null
+                & $quickActionsPanel.AddChild -self $quickActionsPanel -Child $quickActions | Out-Null
+                & $rootPanel.AddChild -self $rootPanel -Child $quickActionsPanel -LayoutProps @{ "Grid.Row" = 0; "Grid.Column" = 0 } | Out-Null
                 
                 # --- Active Timers Panel ---
                 $timersPanel = New-TuiStackPanel -Props @{ Name = "timersPanel"; Title = " Active Timers "; ShowBorder = $true; Padding = 1 }
@@ -11451,9 +11550,9 @@ function Get-DashboardScreen {
                     Name = "activeTimers"; IsFocusable = $true; ShowBorder = $false; ShowFooter = $false
                     Columns = @( @{ Name = "Project"; Width = 20 }, @{ Name = "Time"; Width = 10 } ); Data = @()
                 }
-                # CORRECTED: Wrap AddChild calls in [void]()
-                [void](& $timersPanel.AddChild -self $timersPanel -Child $activeTimers)
-                [void](& $rootPanel.AddChild -self $rootPanel -Child $timersPanel -LayoutProps @{ "Grid.Row" = 0; "Grid.Column" = 1 })
+                # Add to panel
+                & $timersPanel.AddChild -self $timersPanel -Child $activeTimers | Out-Null
+                & $rootPanel.AddChild -self $rootPanel -Child $timersPanel -LayoutProps @{ "Grid.Row" = 0; "Grid.Column" = 1 } | Out-Null
                 
                 # --- Stats Panel ---
                 $statsPanel = New-TuiStackPanel -Props @{ Name = "statsPanel"; Title = " Stats "; ShowBorder = $true; Padding = 1; Orientation = "Vertical"; Spacing = 1 }
@@ -11461,12 +11560,12 @@ function Get-DashboardScreen {
                 $weekLabel = New-TuiLabel -Props @{ Name = "weekHoursLabel"; Text = "Week: 0h"; Height = 1 }
                 $tasksLabel = New-TuiLabel -Props @{ Name = "activeTasksLabel"; Text = "Tasks: 0"; Height = 1 }
                 $timersLabel = New-TuiLabel -Props @{ Name = "runningTimersLabel"; Text = "Timers: 0"; Height = 1 }
-                # CORRECTED: Wrap AddChild calls in [void]()
-                [void](& $statsPanel.AddChild -self $statsPanel -Child $todayLabel)
-                [void](& $statsPanel.AddChild -self $statsPanel -Child $weekLabel)
-                [void](& $statsPanel.AddChild -self $statsPanel -Child $tasksLabel)
-                [void](& $statsPanel.AddChild -self $statsPanel -Child $timersLabel)
-                [void](& $rootPanel.AddChild -self $rootPanel -Child $statsPanel -LayoutProps @{ "Grid.Row" = 0; "Grid.Column" = 2 })
+                # Add to panel
+                & $statsPanel.AddChild -self $statsPanel -Child $todayLabel | Out-Null
+                & $statsPanel.AddChild -self $statsPanel -Child $weekLabel | Out-Null
+                & $statsPanel.AddChild -self $statsPanel -Child $tasksLabel | Out-Null
+                & $statsPanel.AddChild -self $statsPanel -Child $timersLabel | Out-Null
+                & $rootPanel.AddChild -self $rootPanel -Child $statsPanel -LayoutProps @{ "Grid.Row" = 0; "Grid.Column" = 2 } | Out-Null
                 
                 # --- Today's Tasks Panel ---
                 $tasksPanel = New-TuiStackPanel -Props @{ Name = "tasksPanel"; Title = " Today's Tasks "; ShowBorder = $true; Padding = 1 }
@@ -11474,20 +11573,21 @@ function Get-DashboardScreen {
                     Name = "todaysTasks"; IsFocusable = $true; ShowBorder = $false; ShowFooter = $false
                     Columns = @( @{ Name = "Priority"; Width = 8 }, @{ Name = "Task"; Width = 45 }, @{ Name = "Project"; Width = 15 } ); Data = @()
                 }
-                # CORRECTED: Wrap AddChild calls in [void]()
-                [void](& $tasksPanel.AddChild -self $tasksPanel -Child $todaysTasks)
-                [void](& $rootPanel.AddChild -self $rootPanel -Child $tasksPanel -LayoutProps @{ "Grid.Row" = 1; "Grid.Column" = 0; "Grid.ColumnSpan" = 3 })
+                # Add to panel
+                & $tasksPanel.AddChild -self $tasksPanel -Child $todaysTasks | Out-Null
+                & $rootPanel.AddChild -self $rootPanel -Child $tasksPanel -LayoutProps @{ "Grid.Row" = 1; "Grid.Column" = 0; "Grid.ColumnSpan" = 3 } | Out-Null
                 
-                # ---------------------------------------------------------------------------------
-                # THIS IS THE CRITICAL FIX: Storing references BEFORE creating subscriptions.
-                # ---------------------------------------------------------------------------------
-                $self._quickActions = $quickActions  # FIX: Added missing quickActions storage
+                # FIX: Store component references BEFORE creating subscriptions and ensure they're accessible
+                $self._quickActions = $quickActions
                 $self._activeTimers = $activeTimers
                 $self._todaysTasks = $todaysTasks
                 $self._todayLabel = $todayLabel
                 $self._weekLabel = $weekLabel
                 $self._tasksLabel = $tasksLabel
                 $self._timersLabel = $timersLabel
+                
+                # Also store as Children for the engine to find them
+                $self.Children = @($rootPanel)
                 
                 # Store components in hashtable for easy access
                 $self.Components.quickActions = $quickActions
@@ -11522,7 +11622,7 @@ function Get-DashboardScreen {
                             if ($screen -and $screen._quickActions) {
                                 if ($newValue -and $newValue.Count -gt 0) {
                                     $screen._quickActions.Data = $newValue 
-                                    [void](& $screen._quickActions.ProcessData -self $screen._quickActions) # FIX: Suppress output
+                                    & $screen._quickActions.ProcessData -self $screen._quickActions
                                     Write-Log -Level Debug -Message "quickActions updated with $($newValue.Count) items"
                                 } else {
                                     Write-Log -Level Debug -Message "quickActions NewValue is null or empty"
@@ -11549,7 +11649,7 @@ function Get-DashboardScreen {
                             $newValue = if ($data.NewValue -ne $null) { $data.NewValue } else { $data }
                             if ($screen -and $screen._activeTimers -and $newValue) {
                                 $screen._activeTimers.Data = $newValue 
-                                [void](& $screen._activeTimers.ProcessData -self $screen._activeTimers) # FIX: Suppress output
+                                & $screen._activeTimers.ProcessData -self $screen._activeTimers
                             }
                         } -Context @{ Data = $data } -ErrorHandler {
                             param($Exception)
@@ -11563,7 +11663,7 @@ function Get-DashboardScreen {
                             $newValue = if ($data.NewValue -ne $null) { $data.NewValue } else { $data }
                             if ($screen -and $screen._todaysTasks -and $newValue) {
                                 $screen._todaysTasks.Data = $newValue 
-                                [void](& $screen._todaysTasks.ProcessData -self $screen._todaysTasks) # FIX: Suppress output
+                                & $screen._todaysTasks.ProcessData -self $screen._todaysTasks
                             }
                         } -Context @{ Data = $data } -ErrorHandler {
                             param($Exception)
@@ -11708,9 +11808,16 @@ function Get-DashboardScreen {
                         if ($passedServices -and $passedServices.Store) {
                             # Check if screen components are ready before refreshing
                             if ($screen -and $screen._quickActions -and $screen._activeTimers) {
-                                $result = & $passedServices.Store.Dispatch -self $passedServices.Store -actionName "DASHBOARD_REFRESH"
-                                if (-not $result.Success) {
-                                    Write-Log -Level Error -Message "Timer DASHBOARD_REFRESH dispatch failed: $($result.Error)"
+                                try {
+                                    $result = & $passedServices.Store.Dispatch -self $passedServices.Store -actionName "DASHBOARD_REFRESH"
+                                    if ($result -and (-not $result.Success)) {
+                                        Write-Log -Level Error -Message "Timer DASHBOARD_REFRESH dispatch failed: $($result.Error)"
+                                    }
+                                } catch {
+                                    Write-Log -Level Error -Message "Timer DASHBOARD_REFRESH dispatch exception: $($_.Exception.Message)" -Data @{
+                                        ExceptionType = $_.Exception.GetType().FullName
+                                        StackTrace = $_.Exception.StackTrace
+                                    }
                                 }
                             } else {
                                 Write-Log -Level Debug -Message "Timer: Screen components not ready yet, skipping refresh"
@@ -11720,7 +11827,15 @@ function Get-DashboardScreen {
                         }
                     } catch {
                         # We can't throw here, so we log the detailed error.
-                        Write-Log -Level Error -Message "A critical, unhandled error occurred inside the dashboard refresh timer: $_" -Data @{ TimerName = "DashboardRefresh"; Exception = $_ }
+                        try {
+                            Write-Log -Level Error -Message "A critical, unhandled error occurred inside the dashboard refresh timer: $($_.Exception.Message)" -Data @{ 
+                                TimerName = "DashboardRefresh" 
+                                ExceptionType = if ($_.Exception) { $_.Exception.GetType().FullName } else { "Unknown" }
+                                ExceptionMessage = if ($_.Exception) { $_.Exception.Message } else { $_.ToString() }
+                            }
+                        } catch {
+                            # If even logging fails, there's nothing more we can do in this timer context
+                        }
                     }
                 }
                 $self._refreshTimer.Start()
@@ -12093,14 +12208,24 @@ function Initialize-AppStore {
                 return @{ Success = $true }
             } 
             catch {
-                throw [StateMutationException]::new(
-                    "Error executing action '$actionName'",
-                    @{
-                        ActionName = $actionName
-                        Payload = $payload
-                        OriginalException = $_
-                    }
-                )
+                # Use PowerShell RuntimeException with attached context data to avoid type dependency issues
+                $contextData = @{
+                    ActionName = $actionName
+                    Payload = $payload
+                    OriginalException = $_.Exception.Message
+                    Component = "AppStore"
+                    OperationName = "Dispatch"
+                    Timestamp = [DateTime]::UtcNow
+                }
+                
+                $runtimeException = New-Object System.Management.Automation.RuntimeException("Error executing action '$actionName': $($_.Exception.Message)")
+                $runtimeException.Data.Add("HeliosException", $contextData)
+                
+                if ($self._enableDebugLogging) { 
+                    Write-Log -Level Error -Message "Action dispatch failed" -Data $contextData 
+                }
+                
+                throw $runtimeException
             }
         }
         
@@ -13514,7 +13639,7 @@ function global:Focus-NextInScope {
                     & $FindScopeFocusable -component $child
                 }
             }
-        }
+        }.GetNewClosure()
         
         & $FindScopeFocusable -component $Scope
         
