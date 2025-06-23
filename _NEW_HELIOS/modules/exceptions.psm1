@@ -1,9 +1,7 @@
-#
-# MODULE: exceptions.psm1
+# modules\exceptions.psm1
 # PURPOSE: Provides custom exception types and a centralized error handling wrapper
 # for the PMC Terminal application. This ensures all errors are consistently logged
 # with rich contextual information.
-#
 
 # ------------------------------------------------------------------------------
 # Module-Scoped State Variables
@@ -35,20 +33,20 @@ try {
                 public DateTime Timestamp { get; set; }
 
                 public HeliosException(string message, string component, Hashtable detailedContext, Exception innerException)
-                    : base(message, innerException)
+                     : base(message, innerException)
                 {
                     this.Component = component ?? "Unknown";
                     this.DetailedContext = detailedContext ?? new Hashtable();
                     this.Timestamp = DateTime.Now;
-                }
+                 }
             }
 
             // Specific exception types for better categorization and targeted catch blocks.
-            public class NavigationException : HeliosException { public NavigationException(string m, string c, Hashtable ctx, Exception i) : base(m, c, ctx, i) { } }
-            public class ServiceInitializationException : HeliosException { public ServiceInitializationException(string m, string c, Hashtable ctx, Exception i) : base(m, c, ctx, i) { } }
-            public class ComponentRenderException : HeliosException { public ComponentRenderException(string m, string c, Hashtable ctx, Exception i) : base(m, c, ctx, i) { } }
+            public class NavigationException : HeliosException { public NavigationException(string m, string c, Hashtable ctx, Exception i) : base( m, c, ctx, i) { } }
+            public class ServiceInitializationException : HeliosException { public ServiceInitializationException(string m, string c, Hashtable ctx, Exception i) : base(m, c, ctx , i) { } }
+            public class ComponentRenderException : HeliosException { public ComponentRenderException(string m, string c, Hashtable ctx, Exception i) : base(m, c, ctx, i) { }  }
             public class StateMutationException : HeliosException { public StateMutationException(string m, string c, Hashtable ctx, Exception i) : base(m, c, ctx, i) { } }
-            public class InputHandlingException : HeliosException { public InputHandlingException(string m, string c, Hashtable ctx, Exception i) : base(m, c, ctx, i) { } }
+            public class  InputHandlingException : HeliosException { public InputHandlingException(string m, string c, Hashtable ctx, Exception i) : base(m, c, ctx, i) { } }
             public class DataLoadException : HeliosException { public DataLoadException(string m, string c, Hashtable ctx, Exception i) : base(m, c, ctx, i) { } }
         }
 "@ -ErrorAction Stop
@@ -62,7 +60,6 @@ try {
     # The application will fall back to using standard RuntimeExceptions.
     Write-Warning "CRITICAL: Failed to compile custom Helios exception types: $($_.Exception.Message). The application will lack detailed error information."
 }
-
 
 # ------------------------------------------------------------------------------
 # Private Helper Functions
@@ -182,7 +179,7 @@ function Invoke-WithErrorHandling {
         [Parameter(Mandatory)]
         [string]$Component,
         [Parameter(Mandatory)]
-        [hashtable]$Context, # FIX: Changed from [string] to [hashtable]
+        [hashtable]$Context,
         [hashtable]$AdditionalData = @{}
     )
 
@@ -194,8 +191,6 @@ function Invoke-WithErrorHandling {
     if ([string]::IsNullOrWhiteSpace($Component)) {
         $Component = "Unknown Component"
     }
-    # Note: No longer checking IsNullOrWhiteSpace for $Context here, as it's now a hashtable.
-    # The caller is responsible for providing a meaningful hashtable.
 
     try {
         # Execute the provided scriptblock.
@@ -210,7 +205,6 @@ function Invoke-WithErrorHandling {
         $finalComponent = if ($Component -ne "Unknown Component") { $Component } else { $identifiedComponent }
 
         # 2. Gather all possible details about the error.
-        # FIX: Clone the incoming Context hashtable to avoid modifying the original and to merge with AdditionalData
         $errorContext = $Context.Clone()
         # Merge additional data provided by the caller.
         $AdditionalData.GetEnumerator() | ForEach-Object { $errorContext[$_.Name] = $_.Value }
@@ -218,7 +212,6 @@ function Invoke-WithErrorHandling {
 
         # 3. Log the error using the logger module.
         if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
-            # FIX: Get a meaningful operation name from the Context hashtable
             $operationDescription = if ($Context.ContainsKey('Operation')) { $Context.Operation } else { $Context.ToString() }
             Write-Log -Level Error -Message "Error in '$finalComponent' during '$operationDescription': $($originalErrorRecord.Exception.Message)" -Data $detailedError
         }
@@ -262,7 +255,3 @@ function Get-ErrorHistory {
 Export-ModuleMember -Function @(
     'Invoke-WithErrorHandling',
     'Get-ErrorHistory'
-)
-
-# NOTE: Custom types defined with Add-Type are automatically available to the session
-# after the module is imported. They do not need to be explicitly exported.
