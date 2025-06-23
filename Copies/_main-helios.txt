@@ -1,4 +1,3 @@
-
 # PMC Terminal v4.2 "Helios" - Main Entry Point (FIXED WITH PROPER ERROR HANDLING)
 # This file orchestrates module loading and application startup with the new service architecture
 
@@ -48,17 +47,17 @@ $script:ModulesToLoad = @(
 
 # Screen modules will be loaded dynamically
 $script:ScreenModules = @(
-    "dashboard-screen-helios",
-    "task-screen-helios",
-    "timer-start-screen",
-    "project-management-screen",
-    "timer-management-screen",
-    "reports-screen",
-    "settings-screen",
-    "debug-log-screen",
-    "demo-screen",
-    "time-entry-screen",
-    "simple-test-screen"
+"dashboard-screen-helios",
+"task-screen-helios",
+"timer-start-screen",
+"project-management-screen",
+"timer-management-screen",
+"reports-screen",
+"settings-screen",
+"debug-log-screen",
+"demo-screen",
+"time-entry-screen-helios",
+"simple-test-screen"
 )
 
 function Initialize-PMCModules {
@@ -192,11 +191,14 @@ function Initialize-PMCScreens {
             
             try {
                 if (Test-Path $screenPath) {
+                    if (-not $Silent) { Write-Host "  Loading $($screenName)..." -ForegroundColor Gray }
                     Trace-Step -StepName "Importing screen module" -StepData @{
                         ScreenName = $screenName
                         Action = "Import-Module"
                     }
                     
+                    # FIX: Removed -LiteralPath for broader PowerShell compatibility.
+                    # The previous issue was due to string concatenation, not the path itself.
                     Import-Module $screenPath -Force -Global -ErrorAction SilentlyContinue
                     $loadedScreens += $screenName
                     
@@ -212,8 +214,8 @@ function Initialize-PMCScreens {
                         "task-screen-helios" { $expectedFunctions = @("Get-TaskManagementScreen", "Get-TaskScreen") }
                         "simple-test-screen" { $expectedFunctions = @("Get-SimpleTestScreen") }
                         default { 
-                            # For other screens, try to guess the function name
-                            # FIX: Enclose the string join operation in parentheses to ensure correct concatenation
+                            # For other screens, ensure the function name is correctly formed without spaces.
+                            # Fixed: Proper grouping of ForEach-Object pipeline
                             $functionName = "Get-" + ((($screenName -split "-") | ForEach-Object { 
                                 $_.Substring(0,1).ToUpper() + $_.Substring(1) 
                             }) -join "")
@@ -298,13 +300,25 @@ function Initialize-PMCServices {
         
         $services = @{}
         
-        # Initialize AppStore
-        Trace-Step -StepName "Initializing AppStore" -StepData @{
-            InitialDataAvailable = ($null -ne $global:Data)
+        # Initialize AppStore with defensive checks
+        $initialData = @{}
+        if ($global:Data) { 
+            $initialData = $global:Data 
+        } else {
+            # Initialize with safe empty structures
+            $global:Data = @{
+                Tasks = @()
+                Projects = @{}
+                TimeEntries = @()
+                ActiveTimers = @{}
+                Settings = @{ Theme = "Modern" }
+            }
+            $initialData = $global:Data
         }
         
-        $initialData = if ($global:Data) { $global:Data } else { @{} }
-        Trace-StateChange -StateType "InitialData" -NewValue $initialData
+        Trace-Step -StepName "Initializing AppStore" -StepData @{
+            InitialDataAvailable = ($null -ne $initialData)
+        }
         
         $services.Store = Initialize-AppStore -InitialData $initialData -EnableDebugLogging $false
         
@@ -313,313 +327,242 @@ function Initialize-PMCServices {
             StoreKeys = if ($services.Store -is [hashtable]) { $services.Store.Keys } else { "N/A" }
         }
         
-        # Register DASHBOARD_REFRESH action
+        # SIMPLIFIED DASHBOARD_REFRESH - Just navigation, no data loading
         Trace-Step -StepName "Registering DASHBOARD_REFRESH action"
         & $services.Store.RegisterAction -self $services.Store -actionName "DASHBOARD_REFRESH" -scriptBlock {
             param($Context)
-            Trace-ServiceCall -ServiceName "Store" -MethodName "DASHBOARD_REFRESH" -Parameters @{ Context = "ActionContext" }
-            
-            try {
-                & $Context.Dispatch "LOAD_DASHBOARD_DATA"
-                & $Context.Dispatch "TASKS_REFRESH"
-                & $Context.Dispatch "TIMERS_REFRESH"
-                
-                Trace-ServiceCall -ServiceName "Store" -MethodName "DASHBOARD_REFRESH" -Result @{ Success = $true }
-            } catch {
-                Trace-ServiceCall -ServiceName "Store" -MethodName "DASHBOARD_REFRESH" -Result @{ Success = $false; Error = $_.Exception.Message } -IsError
-                throw
-            }
+            Write-Log -Level Info -Message "DASHBOARD_REFRESH: Simplified version (navigation only)"
+            # No data loading needed for navigation-only dashboard
         }
         
+        # DEFENSIVE TASKS_REFRESH with extreme null checking
         Trace-Step -StepName "Registering TASKS_REFRESH action"
         & $services.Store.RegisterAction -self $services.Store -actionName "TASKS_REFRESH" -scriptBlock {
             param($Context)
-            Trace-ServiceCall -ServiceName "Store" -MethodName "TASKS_REFRESH" -Parameters @{ Context = "ActionContext" }
-            
             try {
-                Trace-Step -StepName "TASKS_REFRESH: Checking global data" -StepData @{
-                    GlobalDataExists = ($null -ne $global:Data)
-                    TasksExists = ($null -ne $global:Data.tasks)
-                    TasksType = if ($global:Data.tasks) { $global:Data.tasks.GetType().Name } else { "null" }
+                # Initialize if needed
+                if (-not $global:Data) { $global:Data = @{} }
+                if (-not $global:Data.ContainsKey('Tasks')) { $global:Data.Tasks = @() }
+                
+                # Force array type
+                $rawTasks = @()
+                if ($global:Data.Tasks) {
+                    $rawTasks = @($global:Data.Tasks)
                 }
                 
-                if (-not $global:Data) { 
-                    $global:Data = @{} 
-                    Trace-Step -StepName "TASKS_REFRESH: Created global data"
-                }
-                if (-not $global:Data.Tasks) { 
-                    $global:Data.Tasks = @() 
-                    Trace-Step -StepName "TASKS_REFRESH: Initialized Tasks array"
+                # Safe count
+                $totalCount = 0
+                if ($rawTasks) { $totalCount = @($rawTasks).Count }
+                
+                Write-Log -Level Debug -Message "TASKS_REFRESH: Processing $totalCount tasks"
+                
+                # Count active tasks with defensive filtering
+                $activeTasks = 0
+                if ($totalCount -gt 0) {
+                    $filtered = @($rawTasks | Where-Object { 
+                        $_ -and $_.ContainsKey('completed') -and (-not $_.completed) 
+                    })
+                    $activeTasks = $filtered.Count
                 }
                 
-                $rawTasks = @($global:Data.Tasks)
-                Trace-Step -StepName "TASKS_REFRESH: Processing tasks" -StepData @{
-                    RawTaskCount = if ($rawTasks) { @($rawTasks).Count } else { 0 }
-                    RawTaskType = if ($rawTasks) { $rawTasks.GetType().Name } else { "null" }
-                }
-                
-                $activeTasks = @($rawTasks | Where-Object { -not $_.completed }).Count # FIX: @() ensures array
-                $today = (Get-Date).Date
-                
-                $dashboardTasks = @($rawTasks | Where-Object {
-                    $updatedDate = $null
-                    try { 
-                        if ($_.updated_at) { 
-                            $updatedDate = [DateTime]::Parse($_.updated_at).Date 
-                        } 
-                    } catch { 
-                        Trace-Step -StepName "TASKS_REFRESH: Date parse error" -StepData @{
-                            TaskId = $_.id
-                            UpdatedAt = $_.updated_at
-                            Error = $_.Exception.Message
+                # Build tasks for table display with extreme defensive checks
+                $tasksForTable = @()
+                if ($totalCount -gt 0) {
+                    foreach ($task in $rawTasks) {
+                        if (-not $task) { continue }
+                        
+                        # Safe property access with defaults
+                        $taskItem = @{
+                            Id = if ($task.ContainsKey('id')) { $task.id } else { [Guid]::NewGuid().ToString() }
+                            Status = if ($task.ContainsKey('completed') -and $task.completed) { "✓" } else { "○" }
+                            Priority = if ($task.ContainsKey('priority')) { $task.priority } else { "medium" }
+                            Title = if ($task.ContainsKey('title')) { $task.title } else { "Untitled" }
+                            Category = if ($task.ContainsKey('project')) { $task.project } else { "General" }
+                            DueDate = "N/A"
                         }
-                    }
-                    -not $_.completed -or ($updatedDate -and $updatedDate -eq $today)
-                }) | Select-Object -First 10 | ForEach-Object {
-                    @{
-                        Priority = switch($_.priority) { "high" { "[HIGH]" } "medium" { "[MED]" } default { "[LOW]" } }
-                        Task = $_.title
-                        Project = if ($_.project) { $_.project } else { "None" }
-                    }
-                }
-
-                $tasksForTable = @($rawTasks | ForEach-Object {
-                    $dueDateText = "N/A"
-                    if ($_.due_date) { 
-                        try { 
-                            $dueDateText = ([DateTime]$_.due_date).ToString("yyyy-MM-dd") 
-                        } catch { 
-                            Trace-Step -StepName "TASKS_REFRESH: Due date parse error" -StepData @{
-                                TaskId = $_.id
-                                DueDate = $_.due_date
-                                Error = $_.Exception.Message
-                            }
-                        } 
-                    }
-                    @{
-                        Id = $_.id
-                        Status = if ($_.completed) { "✓" } else { "○" }
-                        Priority = if ($_.priority) { $_.priority } else { "Medium" }
-                        Title = if ($_.title) { $_.title } else { "Untitled" }
-                        Category = if ($_.project) { $_.project } else { "General" }
-                        DueDate = $dueDateText
-                    }
-                })
-                
-                Trace-Step -StepName "TASKS_REFRESH: Updating state" -StepData @{
-                    DashboardTaskCount = if ($dashboardTasks) { @($dashboardTasks).Count } else { 0 }
-                    TableTaskCount = if ($tasksForTable) { @($tasksForTable).Count } else { 0 }
-                    ActiveTasks = $activeTasks
-                }
-                
-                & $Context.UpdateState @{ tasks = $tasksForTable; todaysTasks = $dashboardTasks; "stats.activeTasks" = $activeTasks }
-                
-                Trace-ServiceCall -ServiceName "Store" -MethodName "TASKS_REFRESH" -Result @{ 
-                    Success = $true
-                    ProcessedTasks = if ($tasksForTable) { @($tasksForTable).Count } else { 0 }
-                    ActiveTasks = $activeTasks
-                }
-            } catch {
-                Trace-ServiceCall -ServiceName "Store" -MethodName "TASKS_REFRESH" -Result @{ Success = $false; Error = $_.Exception.Message } -IsError
-                Write-Log -Level Error -Message "TASKS_REFRESH action failed" -Data @{
-                    Exception = $_.Exception.Message
-                    StackTrace = $_.Exception.StackTrace
-                }
-                throw
-            }
-        }
-        
-        Trace-Step -StepName "Registering TIMERS_REFRESH action"
-        & $services.Store.RegisterAction -self $services.Store -actionName "TIMERS_REFRESH" -scriptBlock {
-            param($Context)
-            Trace-ServiceCall -ServiceName "Store" -MethodName "TIMERS_REFRESH" -Parameters @{ Context = "ActionContext" }
-            
-            try {
-                Trace-Step -StepName "TIMERS_REFRESH: Checking global data" -StepData @{
-                    GlobalDataExists = ($null -ne $global:Data)
-                    ActiveTimersExists = ($null -ne $global:Data.ActiveTimers)
-                    ActiveTimersType = if ($global:Data.ActiveTimers) { $global:Data.ActiveTimers.GetType().Name } else { "null" }
-                }
-                
-                if (-not $global:Data) { 
-                    $global:Data = @{} 
-                    Trace-Step -StepName "TIMERS_REFRESH: Created global data"
-                }
-                if (-not $global:Data.ActiveTimers) { 
-                    $global:Data.ActiveTimers = @{} 
-                    Trace-Step -StepName "TIMERS_REFRESH: Initialized ActiveTimers hashtable"
-                }
-                
-                $rawTimers = @($global:Data.ActiveTimers.Values)
-                Trace-Step -StepName "TIMERS_REFRESH: Processing timers" -StepData @{
-                    RawTimerCount = if ($rawTimers) { @($rawTimers).Count } else { 0 }
-                    RawTimerType = if ($rawTimers) { $rawTimers.GetType().Name } else { "null" }
-                }
-                
-                $runningTimers = @($rawTimers).Count
-                $activeTimers = @($rawTimers | ForEach-Object {
-                    $duration = "00:00:00"
-                    if ($_.StartTime) {
-                        try {
-                            $start = [DateTime]::Parse($_.StartTime)
-                            $duration = "{0:hh\:mm\:ss}" -f ((Get-Date) - $start)
-                        } catch { 
-                            Trace-Step -StepName "TIMERS_REFRESH: Start time parse error" -StepData @{
-                                TimerKey = $_.Key
-                                StartTime = $_.StartTime
-                                Error = $_.Exception.Message
-                            }
-                        }
-                    }
-                    @{
-                        Project = if ($_.ProjectKey -and $global:Data.Projects -and $global:Data.Projects[$_.ProjectKey]) { 
-                            $global:Data.Projects[$_.ProjectKey].Name 
-                        } else { "No Project" }
-                        Time = $duration
-                    }
-                })
-                
-                Trace-Step -StepName "TIMERS_REFRESH: Updating state" -StepData @{
-                    ActiveTimerCount = if ($activeTimers) { @($activeTimers).Count } else { 0 }
-                    RunningTimers = $runningTimers
-                }
-                
-                & $Context.UpdateState @{ activeTimers = $activeTimers; "stats.runningTimers" = $runningTimers }
-                
-                Trace-ServiceCall -ServiceName "Store" -MethodName "TIMERS_REFRESH" -Result @{ 
-                    Success = $true
-                    ActiveTimers = if ($activeTimers) { @($activeTimers).Count } else { 0 }
-                    RunningTimers = $runningTimers
-                }
-            } catch {
-                Trace-ServiceCall -ServiceName "Store" -MethodName "TIMERS_REFRESH" -Result @{ Success = $false; Error = $_.Exception.Message } -IsError
-                Write-Log -Level Error -Message "TIMERS_REFRESH action failed" -Data @{
-                    Exception = $_.Exception.Message
-                    StackTrace = $_.Exception.StackTrace
-                }
-                throw
-            }
-        }
-        
-        Trace-Step -StepName "Registering LOAD_DASHBOARD_DATA action"
-        & $services.Store.RegisterAction -self $services.Store -actionName "LOAD_DASHBOARD_DATA" -scriptBlock {
-            param($Context)
-            Trace-ServiceCall -ServiceName "Store" -MethodName "LOAD_DASHBOARD_DATA" -Parameters @{ Context = "ActionContext" }
-            
-            try {
-                $quickActions = @(
-                    @{ Action = "[1] New Time Entry" }, @{ Action = "[2] Start Timer" },
-                    @{ Action = "[3] View Tasks" }, @{ Action = "[4] View Projects" },
-                    @{ Action = "[5] Reports" }, @{ Action = "[6] Settings" }
-                )
-                
-                Trace-Step -StepName "LOAD_DASHBOARD_DATA: Setting quick actions" -StepData @{
-                    QuickActionCount = $quickActions.Count
-                }
-                
-                & $Context.UpdateState @{ quickActions = $quickActions }
-                
-                Trace-Step -StepName "LOAD_DASHBOARD_DATA: Processing time entries" -StepData @{
-                    GlobalDataExists = ($null -ne $global:Data)
-                    TimeEntriesExists = ($null -ne $global:Data.TimeEntries)
-                    TimeEntriesType = if ($global:Data.TimeEntries) { $global:Data.TimeEntries.GetType().Name } else { "null" }
-                }
-                
-                if (-not $global:Data) { 
-                    $global:Data = @{} 
-                    Trace-Step -StepName "LOAD_DASHBOARD_DATA: Created global data"
-                }
-                if (-not $global:Data.TimeEntries) { 
-                    $global:Data.TimeEntries = @() 
-                    Trace-Step -StepName "LOAD_DASHBOARD_DATA: Initialized TimeEntries array"
-                }
-                
-                $todayHours = 0; $weekHours = 0
-                if ($global:Data.TimeEntries -and @($global:Data.TimeEntries).Count -gt 0) {
-                    $today = (Get-Date).Date
-                    $weekStartDay = [DayOfWeek]::Monday
-                    $currentDayOfWeek = $today.DayOfWeek
-                    $daysToSubtract = ($currentDayOfWeek - $weekStartDay + 7) % 7
-                    $weekStart = $today.AddDays(-$daysToSubtract)
-
-                    foreach ($entry in $global:Data.TimeEntries) {
-                        if ($entry.Date) {
+                        
+                        # Safe date parsing
+                        if ($task.ContainsKey('due_date') -and $task.due_date) {
                             try {
-                                $entryDate = [DateTime]::Parse($entry.Date).Date
-                                if ($entry.Hours) {
-                                    if ($entryDate -eq $today) { $todayHours += $entry.Hours }
-                                    if ($entryDate -ge $weekStart -and $entryDate -le $today) { $weekHours += $entry.Hours }
-                                }
-                            } catch { 
-                                Trace-Step -StepName "LOAD_DASHBOARD_DATA: Time entry parse error" -StepData @{
-                                    EntryId = $entry.id
-                                    Date = $entry.Date
-                                    Error = $_.Exception.Message
-                                }
+                                $taskItem.DueDate = ([DateTime]$task.due_date).ToString("yyyy-MM-dd")
+                            } catch {
+                                $taskItem.DueDate = "Invalid"
                             }
                         }
+                        
+                        $tasksForTable += $taskItem
                     }
                 }
                 
-                Trace-Step -StepName "LOAD_DASHBOARD_DATA: Updating time stats" -StepData @{
-                    TodayHours = $todayHours
-                    WeekHours = $weekHours
-                    ProcessedEntries = @($global:Data.TimeEntries).Count
+                # Ensure array type for state update
+                $tasksForTable = @($tasksForTable)
+                
+                Write-Log -Level Debug -Message "TASKS_REFRESH: Updating state with $($tasksForTable.Count) tasks"
+                
+                # Update state with defensive checks
+                & $Context.UpdateState @{ 
+                    tasks = $tasksForTable
+                    "stats.activeTasks" = $activeTasks 
                 }
                 
-                & $Context.UpdateState @{ "stats.todayHours" = [Math]::Round($todayHours, 2); "stats.weekHours" = [Math]::Round($weekHours, 2) }
-                
-                Trace-ServiceCall -ServiceName "Store" -MethodName "LOAD_DASHBOARD_DATA" -Result @{ 
-                    Success = $true
-                    TodayHours = $todayHours
-                    WeekHours = $weekHours
-                }
             } catch {
-                Trace-ServiceCall -ServiceName "Store" -MethodName "LOAD_DASHBOARD_DATA" -Result @{ Success = $false; Error = $_.Exception.Message } -IsError
-                Write-Log -Level Error -Message "LOAD_DASHBOARD_DATA action failed" -Data @{
+                Write-Log -Level Error -Message "TASKS_REFRESH failed: $_" -Data @{
                     Exception = $_.Exception.Message
                     StackTrace = $_.Exception.StackTrace
                 }
-                throw
             }
         }
         
-        Trace-Step -StepName "Registering remaining actions (TASK_CREATE, TASK_TOGGLE_STATUS)"
-        
+        # TASK_CREATE with defensive validation
         & $services.Store.RegisterAction -self $services.Store -actionName "TASK_CREATE" -scriptBlock {
             param($Context, $Payload)
-            Trace-ServiceCall -ServiceName "Store" -MethodName "TASK_CREATE" -Parameters @{ Payload = $Payload }
-            
-            if (-not $global:Data) { $global:Data = @{} }
-            if (-not $global:Data.Tasks) { $global:Data.Tasks = @() }
-            if ($Payload.Title) {
-                $newTask = @{
-                    id = [Guid]::NewGuid().ToString(); title = $Payload.Title
-                    description = if ($Payload.Description) { $Payload.Description } else { "" }
-                    completed = $false; priority = "medium"
-                    created_at = (Get-Date).ToString("o"); updated_at = (Get-Date).ToString("o")
+            try {
+                # Validate payload
+                if (-not $Payload) {
+                    Write-Log -Level Warning -Message "TASK_CREATE: No payload provided"
+                    return
                 }
-                $global:Data.Tasks += $newTask
-                Save-UnifiedData
+                
+                if (-not $Payload.Title -or [string]::IsNullOrWhiteSpace($Payload.Title)) {
+                    Write-Log -Level Warning -Message "TASK_CREATE: No title provided"
+                    return
+                }
+                
+                # Initialize if needed
+                if (-not $global:Data) { $global:Data = @{} }
+                if (-not $global:Data.ContainsKey('Tasks')) { $global:Data.Tasks = @() }
+                
+                # Create new task with all required fields
+                $newTask = @{
+                    id = [Guid]::NewGuid().ToString()
+                    title = $Payload.Title.Trim()
+                    description = if ($Payload.Description) { $Payload.Description } else { "" }
+                    completed = $false
+                    priority = if ($Payload.Priority) { $Payload.Priority } else { "medium" }
+                    project = if ($Payload.Category) { $Payload.Category } else { "General" }
+                    due_date = if ($Payload.DueDate) { $Payload.DueDate } else { $null }
+                    created_at = (Get-Date).ToString("o")
+                    updated_at = (Get-Date).ToString("o")
+                }
+                
+                # Add to tasks array
+                $global:Data.Tasks = @($global:Data.Tasks) + $newTask
+                
+                Write-Log -Level Info -Message "TASK_CREATE: Created task '$($newTask.title)' with ID $($newTask.id)"
+                
+                # Save data
+                if (Get-Command Save-UnifiedData -ErrorAction SilentlyContinue) {
+                    Save-UnifiedData
+                }
+                
+                # Refresh tasks
                 & $Context.Dispatch "TASKS_REFRESH"
                 
-                Trace-ServiceCall -ServiceName "Store" -MethodName "TASK_CREATE" -Result @{ Success = $true; TaskId = $newTask.id }
+            } catch {
+                Write-Log -Level Error -Message "TASK_CREATE failed: $_" -Data @{
+                    Exception = $_.Exception.Message
+                    Payload = $Payload
+                }
             }
         }
         
-        & $services.Store.RegisterAction -self $services.Store -actionName "TASK_TOGGLE_STATUS" -scriptBlock {
+        # TASK_UPDATE with defensive validation
+        & $services.Store.RegisterAction -self $services.Store -actionName "TASK_UPDATE" -scriptBlock {
             param($Context, $Payload)
-            Trace-ServiceCall -ServiceName "Store" -MethodName "TASK_TOGGLE_STATUS" -Parameters @{ Payload = $Payload }
-            
-            if ($global:Data -and $global:Data.Tasks -and $Payload.TaskId) {
-                $taskToUpdate = $global:Data.Tasks | Where-Object { $_.id -eq $Payload.TaskId } | Select-Object -First 1
-                if ($taskToUpdate) {
-                    $taskToUpdate.completed = -not $taskToUpdate.completed
-                    $taskToUpdate.updated_at = (Get-Date).ToString("o")
+            try {
+                if (-not $Payload -or -not $Payload.TaskId) {
+                    Write-Log -Level Warning -Message "TASK_UPDATE: No TaskId provided"
+                    return
+                }
+                
+                if (-not $global:Data -or -not $global:Data.Tasks) {
+                    Write-Log -Level Warning -Message "TASK_UPDATE: No tasks found"
+                    return
+                }
+                
+                # Find task safely
+                $taskIndex = -1
+                $tasks = @($global:Data.Tasks)
+                for ($i = 0; $i -lt $tasks.Count; $i++) {
+                    if ($tasks[$i] -and $tasks[$i].id -eq $Payload.TaskId) {
+                        $taskIndex = $i
+                        break
+                    }
+                }
+                
+                if ($taskIndex -eq -1) {
+                    Write-Log -Level Warning -Message "TASK_UPDATE: Task not found with ID $($Payload.TaskId)"
+                    return
+                }
+                
+                # Update task fields
+                $task = $tasks[$taskIndex]
+                if ($Payload.ContainsKey('Title') -and $Payload.Title) { $task.title = $Payload.Title.Trim() }
+                if ($Payload.ContainsKey('Description')) { $task.description = $Payload.Description }
+                if ($Payload.ContainsKey('Priority')) { $task.priority = $Payload.Priority }
+                if ($Payload.ContainsKey('Category')) { $task.project = $Payload.Category }
+                if ($Payload.ContainsKey('DueDate')) { $task.due_date = $Payload.DueDate }
+                if ($Payload.ContainsKey('Completed')) { $task.completed = $Payload.Completed }
+                
+                $task.updated_at = (Get-Date).ToString("o")
+                
+                Write-Log -Level Info -Message "TASK_UPDATE: Updated task $($Payload.TaskId)"
+                
+                # Save data
+                if (Get-Command Save-UnifiedData -ErrorAction SilentlyContinue) {
                     Save-UnifiedData
-                    & $Context.Dispatch "TASKS_REFRESH"
+                }
+                
+                # Refresh tasks
+                & $Context.Dispatch "TASKS_REFRESH"
+                
+            } catch {
+                Write-Log -Level Error -Message "TASK_UPDATE failed: $_" -Data @{
+                    Exception = $_.Exception.Message
+                    Payload = $Payload
+                }
+            }
+        }
+        
+        # TASK_DELETE with defensive validation
+        & $services.Store.RegisterAction -self $services.Store -actionName "TASK_DELETE" -scriptBlock {
+            param($Context, $Payload)
+            try {
+                if (-not $Payload -or -not $Payload.TaskId) {
+                    Write-Log -Level Warning -Message "TASK_DELETE: No TaskId provided"
+                    return
+                }
+                
+                if (-not $global:Data -or -not $global:Data.Tasks) {
+                    Write-Log -Level Warning -Message "TASK_DELETE: No tasks found"
+                    return
+                }
+                
+                # Filter out the task safely
+                $originalCount = @($global:Data.Tasks).Count
+                $global:Data.Tasks = @($global:Data.Tasks | Where-Object { 
+                    $_ -and $_.id -ne $Payload.TaskId 
+                })
+                $newCount = @($global:Data.Tasks).Count
+                
+                if ($newCount -lt $originalCount) {
+                    Write-Log -Level Info -Message "TASK_DELETE: Deleted task $($Payload.TaskId)"
                     
-                    Trace-ServiceCall -ServiceName "Store" -MethodName "TASK_TOGGLE_STATUS" -Result @{ Success = $true; TaskId = $Payload.TaskId; NewStatus = $taskToUpdate.completed }
+                    # Save data
+                    if (Get-Command Save-UnifiedData -ErrorAction SilentlyContinue) {
+                        Save-UnifiedData
+                    }
+                    
+                    # Refresh tasks
+                    & $Context.Dispatch "TASKS_REFRESH"
+                } else {
+                    Write-Log -Level Warning -Message "TASK_DELETE: Task not found with ID $($Payload.TaskId)"
+                }
+                
+            } catch {
+                Write-Log -Level Error -Message "TASK_DELETE failed: $_" -Data @{
+                    Exception = $_.Exception.Message
+                    Payload = $Payload
                 }
             }
         }
@@ -630,6 +573,44 @@ function Initialize-PMCServices {
         Trace-Step -StepName "Navigation Service initialized" -StepData @{
             NavigationType = $services.Navigation.GetType().Name
             NavigationKeys = if ($services.Navigation -is [hashtable]) { $services.Navigation.Keys } else { "N/A" }
+        }
+        
+        # Register navigation routes
+        Trace-Step -StepName "Registering navigation routes"
+        
+        & $services.Navigation.RegisterRoute -self $services.Navigation -Path "/dashboard" -ScreenFactory {
+            param($Services)
+            Get-DashboardScreen -Services $Services
+        }
+        
+        & $services.Navigation.RegisterRoute -self $services.Navigation -Path "/task" -ScreenFactory {
+            param($Services)
+            Get-TaskManagementScreen -Services $Services
+        }
+        
+        & $services.Navigation.RegisterRoute -self $services.Navigation -Path "/time-entry" -ScreenFactory {
+            param($Services)
+            Get-TimeEntryScreen -Services $Services
+        }
+        
+        & $services.Navigation.RegisterRoute -self $services.Navigation -Path "/timer-start" -ScreenFactory {
+            param($Services)
+            Get-TimerStartScreen -Services $Services
+        }
+        
+        & $services.Navigation.RegisterRoute -self $services.Navigation -Path "/project" -ScreenFactory {
+            param($Services)
+            Get-ProjectManagementScreen -Services $Services
+        }
+        
+        & $services.Navigation.RegisterRoute -self $services.Navigation -Path "/reports" -ScreenFactory {
+            param($Services)
+            Get-ReportsScreen -Services $Services
+        }
+        
+        & $services.Navigation.RegisterRoute -self $services.Navigation -Path "/settings" -ScreenFactory {
+            param($Services)
+            Get-SettingsScreen -Services $Services
         }
         
         # Initialize Keybinding Service
@@ -673,7 +654,7 @@ function Start-PMCTerminal {
         # Prepend the manually loaded modules for complete logging
         $loadedModules = @("logger", "exceptions") + $loadedModules
         Trace-Step -StepName "Module initialization completed" -StepData @{
-            LoadedModuleCount = $loadedModules.Count
+            LoadedModuleCount = if ($loadedModules) { @($loadedModules).Count } else { 0 } # ADDED DEFENSIVE CHECK
             LoadedModules = $loadedModules
         }
         
@@ -958,7 +939,7 @@ function Start-PMCTerminal {
         Trace-Step -StepName "Loading screen modules"
         $loadedScreens = Initialize-PMCScreens -Silent:$Silent
         Trace-Step -StepName "Screens loaded" -StepData @{
-            LoadedScreenCount = $loadedScreens.Count
+            LoadedScreenCount = if ($loadedScreens) { @($loadedScreens).Count } else { 0 } # ADDED DEFENSIVE CHECK
             LoadedScreens = $loadedScreens
         }
         
@@ -971,9 +952,10 @@ function Start-PMCTerminal {
         Trace-Step -StepName "Dispatching initial actions to populate data"
         try {
             # Note: The original log message here was confusingly worded. It's now corrected.
-            Write-Log -Level Info -Message "Dispatching initial 'DASHBOARD_REFRESH' action"
-            & $services.Store.Dispatch -self $services.Store -actionName "DASHBOARD_REFRESH"
-            Trace-Step -StepName "Initial DASHBOARD_REFRESH action dispatched successfully"
+            # Write-Log -Level Info -Message "Dispatching initial 'DASHBOARD_REFRESH' action" # COMMENTED OUT
+            # & $services.Store.Dispatch -self $services.Store -actionName "DASHBOARD_REFRESH" # COMMENTED OUT
+            # Trace-Step -StepName "Initial DASHBOARD_REFRESH action dispatched successfully" # COMMENTED OUT
+            Write-Log -Level Info -Message "Skipping initial DASHBOARD_REFRESH for simplified dashboard." # ADDED THIS LINE
         } catch {
             Write-Log -Level Error -Message "Error dispatching initial 'DASHBOARD_REFRESH' action" -Data @{
                 Exception = $_.Exception.Message

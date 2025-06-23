@@ -606,7 +606,7 @@ function Render-Frame {
                     & $script:collectComponents $child
                 }
             }
-        }.GetNewClosure() # CRITICAL FIX: Bind the scriptblock's context so it can find itself during recursion
+        }
 
         # Start collection from the screen's children
         if ($script:TuiState.CurrentScreen -and $script:TuiState.CurrentScreen.Children) {

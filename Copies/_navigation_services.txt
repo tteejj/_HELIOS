@@ -1,46 +1,3 @@
-@{
-    # Module manifest for navigation service
-    RootModule = 'navigation.psm1'
-    ModuleVersion = '1.0.0'
-    GUID = 'b2c3d4e5-6f7a-8b9c-0d1e-2f3a4b5c6d7e'
-    Author = 'PMC Terminal Team'
-    CompanyName = 'PMC Terminal'
-    Copyright = '(c) 2025 PMC Terminal. All rights reserved.'
-    Description = 'Centralized navigation service with routing and breadcrumbs for PMC Terminal'
-    
-    # Minimum PowerShell version
-    PowerShellVersion = '5.1'
-    
-    # Functions to export
-    FunctionsToExport = @('Initialize-NavigationService')
-    
-    # Variables to export
-    VariablesToExport = @()
-    
-    # Aliases to export
-    AliasesToExport = @()
-    
-    # Cmdlets to export
-    CmdletsToExport = @()
-    
-    # Required modules
-    RequiredModules = @(
-        @{ ModuleName = 'tui-engine-v2'; ModuleVersion = '1.0.0' },
-        @{ ModuleName = 'dialog-system'; ModuleVersion = '1.0.0' }
-    )
-    
-    # Module dependencies that must be loaded
-    NestedModules = @()
-    
-    # Private data
-    PrivateData = @{
-        PSData = @{
-            Tags = @('Navigation', 'Routing', 'TUI', 'PMC')
-            ProjectUri = 'https://github.com/pmc-terminal/pmc-terminal'
-            ReleaseNotes = 'Initial release of navigation service with route guards and breadcrumbs'
-        }
-    }
-}
 # FILE: services/navigation.psm1
 # PURPOSE: Decouples screens by managing all navigation through a centralized route map.
 
@@ -90,6 +47,11 @@ function Initialize-NavigationService {
             "/log" = @{ 
                 Factory = { Get-DebugLogScreen }
                 Title = "Debug Log"
+                RequiresAuth = $false
+            }
+            "/simple-test" = @{ # ADDED THIS ROUTE
+                Factory = { Get-SimpleTestScreen }
+                Title = "Simple Test"
                 RequiresAuth = $false
             }
         }
@@ -265,6 +227,24 @@ function Initialize-NavigationService {
                 } -Context @{ Path = $Path; RouteConfig = $RouteConfig } -ErrorHandler {
                     param($Exception)
                     Write-Log -Level Error -Message "NavigationService AddRoute error for path '$($Exception.Context.Path)': $($Exception.Message)" -Data $Exception.Context
+                }
+            }
+            
+            RegisterRoute = {
+                param($self, [string]$Path, [scriptblock]$ScreenFactory)
+                Invoke-WithErrorHandling -Component "NavigationService.RegisterRoute" -ScriptBlock {
+                    # Convert the simpler RegisterRoute format to the AddRoute format
+                    $routeConfig = @{
+                        Factory = $ScreenFactory
+                        Title = $Path.Substring(1).Replace('/', ' ').Replace('-', ' ')
+                        RequiresAuth = $false
+                    }
+                    # Call AddRoute with the proper format
+                    & $self.AddRoute -self $self -Path $Path -RouteConfig $routeConfig
+                    Write-Log -Level Debug -Message "Registered route: $Path"
+                } -Context @{ Path = $Path } -ErrorHandler {
+                    param($Exception)
+                    Write-Log -Level Error -Message "NavigationService RegisterRoute error for path '$($Exception.Context.Path)': $($Exception.Message)" -Data $Exception.Context
                 }
             }
             

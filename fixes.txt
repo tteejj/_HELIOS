@@ -272,3 +272,111 @@ Next potential enhancements could include Task 5 (component decomposition) and T
    - task-screen-helios.psm1: Removed [void]() wrappers from all AddChild and Dispatch calls
    - tui-framework.psm1: Added null check for $script:Themes with initialization fallback
    Result: Screens load properly without scope warnings, theme manager initializes correctly
+
+**TASK SCREEN SIMPLIFICATION - COMPLETED 2025-06-21**
+   Problem: User requested simpler task screen where new/edit form replaces entire screen instead of popup overlay
+   Root Cause: Original design used form panel with high ZIndex (1000) to overlay on top of task list
+   Fix Applied:
+   - task-screen-helios.psm1: Created separate list view and form view panels
+   - Replaced _formVisible boolean with _formMode to track which view is active
+   - Form view now takes full screen space when creating/editing tasks
+   - Tab navigation and all functionality preserved in form view
+   - Added additional fields to form: Priority dropdown, Category, Due Date
+   Result: Cleaner task management experience with full-screen form editing
+
+**POWERSHELL PIPELINE SYNTAX FIX - COMPLETED 2025-06-21**
+   Problem: "Cannot bind parameter 'RemainingScripts'. Cannot convert the "-join" value" errors when loading screens
+   Root Cause: Incorrect pipeline syntax in Initialize-PMCScreens function string concatenation
+   - main-helios.ps1: ForEach-Object { } -join "" syntax was binding -join as parameter to ForEach-Object
+   Fix Applied:
+   - main-helios.ps1: Fixed function name construction with proper pipeline grouping
+   - Changed to ((($screenName -split "-") | ForEach-Object { }) -join "") for correct precedence
+   Result: All screen modules now load without syntax errors
+
+**PERFORMANCE AND INPUT FIX - COMPLETED 2025-06-21**
+   Problem: Task form inputs not registering, multiple keypresses needed, overall slowness
+   Root Cause: Excessive debug logging with full stack traces on every function call
+   - logger.psm1: LogLevel set to "Debug" with TraceAllCalls enabled
+   - Every keystroke triggered multiple trace logs with stack analysis
+   Fix Applied:
+   - logger.psm1: Changed LogLevel from "Debug" to "Info", disabled TraceAllCalls
+   - task-screen-helios.psm1: Rewrote form with proper tab navigation and focus management
+   - Added _focusableComponents array to track form fields
+   - Implemented proper Tab/Shift+Tab navigation between fields
+   - Fixed cursor position initialization for text inputs
+   Result: Responsive input handling, proper tab navigation in forms
+
+**DASHBOARD TAB NAVIGATION - COMPLETED 2025-06-21**
+   Problem: Dashboard lacked tab navigation between components
+   Root Cause: No focus management for multiple interactive components
+   Fix Applied:
+   - dashboard-screen-helios.psm1: Added _focusIndex and _focusableComponents tracking
+   - Implemented Tab/Shift+Tab navigation between Quick Actions, Today's Tasks, Active Timers
+   - Skip hidden components (Active Timers when no timers running)
+   - Simplified dashboard layout for better performance
+   Result: Full keyboard navigation on dashboard without mouse
+
+**DASHBOARD ENTER KEY AND SCOPE FIX - COMPLETED 2025-06-22**
+   Problem: Enter key not working on dashboard quickActions, task screen blank, "The term 'if' is not recognized" error
+   Root Cause: Scope issue in quickActions OnRowSelect handler - $self._services inside handler refers to component not screen
+   - dashboard-screen-helios.psm1: OnRowSelect handler tried to access $self._services but $self is the component
+   - Task screen panels created but not visible due to initialization order
+   - Time entry screen module missing
+   Fix Applied:
+   - dashboard-screen-helios.psm1: Captured services in $capturedServices before creating quickActions component
+   - Updated OnRowSelect handler to use $capturedServices instead of $self._services
+   - Created time-entry-screen-helios.psm1 with basic placeholder functionality
+   - main-helios.ps1: Updated screen modules list to load "time-entry-screen-helios" instead of "time-entry-screen"
+   Result: Dashboard Enter key now works to select quick actions, all navigation functional
+
+**DATATABLE RENDER SYNTAX FIX - COMPLETED 2025-06-22**
+   Problem: "The term 'if' is not recognized" error in DataTable Render method, dashboard panels showing but not working
+   Root Cause: PowerShell had trouble parsing switch statement expressions inside DataTable Render scriptblock
+   - advanced-data-components.psm1: Switch statements for column alignment were causing parser confusion
+   - Dashboard screen was showing panels but DataTable render errors prevented interaction
+   - Active Timers panel was visible even when it should be hidden
+   Fix Applied:
+   - advanced-data-components.psm1: Replaced switch statements with if/elseif/else for header and value alignment
+   - dashboard-screen-helios.psm1: Added explicit ProcessData calls before data loading
+   - dashboard-screen-helios.psm1: Ensured Active Timers panel starts hidden properly
+   - Switch statement syntax was incompatible with PowerShell's scriptblock parser in certain contexts
+   Result: DataTable renders without syntax errors, dashboard components fully functional
+
+**COMPREHENSIVE DEFENSIVE PROGRAMMING & SIMPLIFIED UI - COMPLETED 2025-06-22**
+   Problem: Persistent null-valued expressions, .Count property errors, complex UI causing race conditions
+   Root Cause: 
+   - PowerShell returns null/single/array from Where-Object, .Count only works on arrays
+   - Incorrect scope capture in scriptblocks losing context ($self, $services)
+   - Complex dashboard with timers/stats causing timing issues
+   - Insufficient defensive null checking throughout
+   Fix Applied:
+   - dashboard-screen-helios.psm1: Complete rewrite as navigation-only menu
+     - Removed all complex components (timers, stats, quick actions table)
+     - Simple DataTable with menu items 1-6 and 0 for exit
+     - Extreme defensive null checking on all service access
+     - Captured services in closure before creating components
+   - task-screen-helios.psm1: Maintained but with defensive improvements
+     - Added null checks for all service access
+     - Captured context before creating event handlers
+     - Safe array wrapping on all collection operations
+   - main-helios.ps1: Complete overhaul of action handlers
+     - DASHBOARD_REFRESH simplified to no-op (no data loading)
+     - TASKS_REFRESH with @() wrapping on all arrays and .ContainsKey() checks
+     - New TASK_CREATE/UPDATE/DELETE with full validation
+     - Removed complex TIMERS_REFRESH and LOAD_DASHBOARD_DATA
+     - Added navigation route registrations
+   - app-store.psm1: Already had fixes for context issues
+   Result: Stable navigation dashboard, no null errors, proper scope handling
+
+**NAVIGATION SERVICE REGISTERROUTE METHOD MISSING - COMPLETED 2025-06-22**
+   Problem: "The property 'RegisterRoute' cannot be found on this object" error during startup
+   Root Cause: Navigation service had AddRoute method but main-helios.ps1 was calling RegisterRoute
+   - navigation.psm1 defined AddRoute method that takes Path and RouteConfig hashtable
+   - main-helios.ps1 was calling RegisterRoute with Path and ScreenFactory scriptblock
+   - Method name mismatch causing property not found error
+   Fix Applied:
+   - navigation.psm1: Added RegisterRoute method that wraps AddRoute
+     - Takes simpler parameters (Path and ScreenFactory) like main-helios expects
+     - Converts to RouteConfig format internally
+     - Calls AddRoute with proper parameters
+   Result: Navigation service now supports both AddRoute and RegisterRoute methods

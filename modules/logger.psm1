@@ -2,12 +2,12 @@
 # Provides EXTREMELY detailed logging functionality to track down all issues
 
 $script:LogPath = $null
-$script:LogLevel = "Debug"  # Set to most verbose by default
+$script:LogLevel = "Info"  # Reduced for performance
 $script:LogQueue = @()
 $script:MaxLogSize = 5MB  # Increased for detailed logging
 $script:LogInitialized = $false
 $script:CallDepth = 0
-$script:TraceAllCalls = $true
+$script:TraceAllCalls = $false
 
 function global:Initialize-Logger {
     param(

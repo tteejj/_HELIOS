@@ -510,7 +510,7 @@ function global:Focus-NextInScope {
                     & $FindScopeFocusable -component $child
                 }
             }
-        }.GetNewClosure()
+        }
         
         & $FindScopeFocusable -component $Scope
         

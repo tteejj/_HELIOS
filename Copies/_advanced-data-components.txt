@@ -190,7 +190,8 @@ function global:New-TuiDataTable {
                 if ($null -eq $totalDefinedWidth) { $totalDefinedWidth = 0 }
                 $flexColumns = @($self.Columns | Where-Object { -not $_.Width })
                 $columnSeparators = if ($self.Columns.Count -gt 1) { $self.Columns.Count - 1 } else { 0 }  # Only add separators if multiple columns
-                $remainingWidth = $innerWidth - $totalDefinedWidth - ($self.ShowRowNumbers ? 5 : 0) - $columnSeparators
+                $rowNumberWidth = if ($self.ShowRowNumbers) { 5 } else { 0 }
+                $remainingWidth = $innerWidth - $totalDefinedWidth - $rowNumberWidth - $columnSeparators
                 
                 # CRITICAL FIX: Ensure flex columns get adequate width, especially for single-column tables
                 $flexWidth = 0
@@ -238,15 +239,15 @@ function global:New-TuiDataTable {
                         }
                         
                         # Align header
-                        $alignedText = switch ($col.Align) {
-                            "Right" { $headerText.PadLeft($width) }
-                            "Center" { 
-                                $padding = $width - $headerText.Length
-                                $leftPad = [Math]::Floor($padding / 2)
-                                $rightPad = $padding - $leftPad
-                                " " * $leftPad + $headerText + " " * $rightPad
-                            }
-                            default { $headerText.PadRight($width) }
+                        if ($col.Align -eq "Right") {
+                            $alignedText = $headerText.PadLeft($width)
+                        } elseif ($col.Align -eq "Center") {
+                            $padding = $width - $headerText.Length
+                            $leftPad = [Math]::Floor($padding / 2)
+                            $rightPad = $padding - $leftPad
+                            $alignedText = " " * $leftPad + $headerText + " " * $rightPad
+                        } else {
+                            $alignedText = $headerText.PadRight($width)
                         }
                         
                         Write-BufferString -X $headerX -Y $currentY -Text $alignedText `
@@ -336,15 +337,15 @@ function global:New-TuiDataTable {
                         
                         
                         # Align value
-                        $alignedValue = switch ($col.Align) {
-                            "Right" { $displayValue.PadLeft($width) }
-                            "Center" { 
-                                $padding = $width - $displayValue.Length
-                                $leftPad = [Math]::Floor($padding / 2)
-                                $rightPad = $padding - $leftPad
-                                " " * $leftPad + $displayValue + " " * $rightPad
-                            }
-                            default { $displayValue.PadRight($width) }
+                        if ($col.Align -eq "Right") {
+                            $alignedValue = $displayValue.PadLeft($width)
+                        } elseif ($col.Align -eq "Center") {
+                            $padding = $width - $displayValue.Length
+                            $leftPad = [Math]::Floor($padding / 2)
+                            $rightPad = $padding - $leftPad
+                            $alignedValue = " " * $leftPad + $displayValue + " " * $rightPad
+                        } else {
+                            $alignedValue = $displayValue.PadRight($width)
                         }
                         
                         # Determine color
