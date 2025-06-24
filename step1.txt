@@ -1,10 +1,8 @@
-Of course. This is the perfect approach. Let's create your "LLM Project Management Guide" for the PMC Terminal refactor.
-
-This guide is structured to be your single source of truth. For each step of the refactor, you'll copy/paste sections from this guide into your prompts. This ensures consistency and provides the LLM with all the context it needs, exactly when it needs it.
+Excellent. Here is the revised and final version of the LLM Refactoring Guide, incorporating your feedback and the suggested refinements. The instructions are now even more precise and include self-verification steps.
 
 ---
 
-### PMC Terminal v5: LLM Refactoring Guide
+### **PMC Terminal v5: LLM Refactoring Protocol (Definitive Edition)**
 
 This document contains the complete architectural vision, coding standards, and step-by-step plan for refactoring the PMC Terminal application.
 
@@ -13,977 +11,185 @@ This document contains the complete architectural vision, coding standards, and 
 **(Use this section in your *first* prompt and as a reference in all subsequent prompts.)**
 
 > **Project Goal:**
-> We are refactoring a PowerShell TUI application named "PMC Terminal v5". The goal is to move from a complex, JavaScript-inspired architecture to a simpler, more robust, and idiomatic PowerShell architecture. The primary objectives are stability, maintainability, and predictability.
+> We are refactoring a PowerShell TUI application named "PMC Terminal v5". The goal is to move from a complex, JavaScript-inspired architecture (`app-store` with `Dispatch`) to a simpler, more robust, and idiomatic PowerShell architecture using a **Service-Oriented** approach with **direct function calls**.
 >
 > **Core Architectural Principles (The "PowerShell-First" Philosophy):**
 >
-> 1.  **Object Model:** All logical entities (UI Components, Services, Screens) **MUST** be created as `[PSCustomObject]`. Methods **MUST** be attached using `Add-Member -MemberType ScriptMethod`. This provides discoverability via `Get-Member` and clean `$object.Method()` syntax. The old pattern of using hashtables with scriptblock properties is forbidden.
+> 1.  **Service-Oriented Architecture:** The application logic **MUST** be organized into services (e.g., `DataManager`, `Navigation`). These services are initialized once and made available through a central `$global:Services` locator.
 >
-> 2.  **State Management:** The application **MUST** use a **Service-Oriented Architecture**. The central `app-store` module is eliminated. State is encapsulated within the service that owns it (e.g., `TaskService` holds the array of tasks).
+> 2.  **Direct Interaction Model:** UI components and screens **MUST** interact with services via **Direct Method Calls** (e.g., `$services.DataManager.AddTask(...)`). The abstract `Dispatch("ACTION_NAME")` pattern is strictly forbidden.
 >
-> 3.  **Interaction Model:** UI components and screens **MUST** interact with services via **Direct Method Calls** (e.g., `$services.Task.AddTask(...)`). The abstract `Dispatch("ACTION_NAME")` pattern is forbidden.
+> 3.  **One-Way Data Flow & Eventing:**
+>     *   **Change:** State is only ever changed by calling a function in a service.
+>     *   **Announce:** After changing state, the service **MUST** announce the change by broadcasting a simple, specific event (e.g., `Publish-Event -EventName "Tasks.Changed"`).
+>     *   **React:** UI Screens **MUST** subscribe to these events to know when to refresh their data from the global state.
 >
-> 4.  **Eventing Model:** Services **MUST** announce state changes using PowerShell's native eventing engine.
->     *   Services announce their events using `Register-EngineEvent`.
->     *   Services broadcast events using `New-Event`.
->     *   UI Screens subscribe to these events using `Register-ObjectEvent`.
->     *   Screens **MUST** clean up their subscriptions via `Unregister-Event` in an `OnExit` method to prevent memory leaks.
+> 4.  **Strict Data Contracts (Classes):** All core data entities (`Task`, `Project`) **MUST** be defined as PowerShell `class` types in a central `models.psm1` module. Passing generic `[hashtable]` objects for business data is forbidden. This ensures type safety and data integrity across all module boundaries.
 >
-> 5.  **Layout System:** All UI layouts **MUST** be managed by the declarative panels in `ui/helios-panels.psm1` (`New-HeliosStackPanel`, `New-HeliosGridPanel`). Manual coordinate calculation is forbidden.
->
-> **New File Structure:**
-> The project will adhere to the following file structure:
-> ```
-> pmc-terminal/
-> |-- Start-PMCTerminal.ps1
-> |-- modules/
-> |   |-- logger.psm1
-> |   |-- exceptions.psm1
-> |   |-- event-system.psm1
-> |   |-- tui-engine.psm1
-> |-- services/
-> |   |-- navigation.psm1
-> |   |-- keybindings.psm1
-> |   |-- task-service.psm1
-> |-- ui/
-> |   |-- helios-components.psm1
-> |   |-- helios-panels.psm1
-> |-- screens/
-> |   |-- dashboard-screen.psm1
-> |   |-- task-screen.psm1
-> ```
+> 5.  **Global State Purity:** The use of `$script:` or `$global:` scope to *share* state between modules is **strictly forbidden**. The only exception is the single `$global:Data` variable, which is owned and managed exclusively by `data-manager.psm1`. All other dependencies (like services) must be passed as parameters.
 
-#### **Part 2: Coding Standards & Style Guide**
+---
+### **Part 2: Coding Standards & Style Guide**
 
 **(Include these rules in every prompt to reinforce them.)**
 
 > **Coding Standards:**
 >
 > *   **Error Handling:** Every public-facing function and any critical internal method **MUST** be wrapped in `Invoke-WithErrorHandling`. Provide detailed `Component` and `Context` parameters.
-> *   **Defensive Programming:** All functions **MUST** perform null checks on their parameters, especially on objects passed from other modules (like `$services` or a component's `Props`).
-> *   **Scope Purity:** The use of `$script:` or `$global:` scope for sharing state between modules is **strictly forbidden**. The only exception is the `$global:TuiState` variable, which is owned and managed exclusively by `tui-engine.psm1`. All other dependencies must be passed as parameters (dependency injection).
-> *   **Logging:** Include `Write-Log` statements at key function entry/exit points and for significant state changes, as seen in the legacy code. Use `Trace-` functions where appropriate.
-> *   **Comments:** Add a header comment to each file explaining its purpose. Add comments to any complex or non-obvious blocks of code.
-> *   **Naming Convention:** New modules and components should be prefixed with "Helios" (e.g., `New-HeliosButton`, `ui/helios-components.psm1`) to distinguish them from the old code.
+> *   **Defensive Programming:** All functions **MUST** perform null checks on their parameters, especially on objects passed from other modules (like `$services`).
+> *   **Logging:** Include `Write-Log` statements at key function entry/exit points and for significant state changes, as seen in the legacy code.
+> *   **Comments:** Add a header comment to each file explaining its purpose. Add comments marked with `AI:` to explain significant changes from the legacy code.
+> *   **File Markers:** The input file will use `# --- START OF FILE [filename] ---` and `# --- END OF FILE [filename] ---` markers. You must preserve these markers in your output for all files.
 
 ---
+### **How to Structure Your Prompts: A Step-by-Step Guide**
 
-### How to Structure Your Prompts: A Step-by-Step Guide
-
-Follow this sequence. Do not move to the next step until the current one is complete and you have tested the output.
+Follow this sequence. Do not move to the next step until the current one is complete.
 
 **General Prompting Strategy:**
 
 *   **One Task Per Prompt:** Give the LLM one, clearly defined goal at a time.
-*   **Provide Full Context:** Always provide the Master Blueprint and Coding Standards. For refactoring tasks, provide the complete source code of the file(s) being replaced.
-*   **State the Output:** Be explicit about what you expect. "Your output should be the full, complete code for the new `modules/tui-engine.psm1` file."
-*   **Iterate and Refine:** If the LLM makes a mistake, start a new chat session. Give it the same prompt, but add a "Constraint" or "Correction" section. Example: "Correction from last attempt: You forgot to make the render loop recursive. Please ensure the new `Render-Frame` function can render children of children."
+*   **Provide Full Context:** Always provide the Master Blueprint and Coding Standards. For refactoring tasks, provide the complete source code of the file(s) being replaced or modified.
+*   **State the Output:** Be explicit about what you expect. "Your output should be the full, complete code for the new `services/data-manager.psm1` file."
+*   **Iterate and Refine:** If the LLM makes a mistake, start a new chat session. Give it the same prompt, but add a "Correction from last attempt" section.
 
 ---
-
 ### **The Step-by-Step Rebuild Plan**
 
 Here are the individual prompts for each step of the refactoring process.
 
 ---
+### **Phase 1: Refactor the Control Flow (The "Verbs")**
 
-### **Step 1: The Foundation - Logger and Exceptions**
+**Goal:** Replace the `app-store` with a direct `DataManager` service and update all UI components to use it.
 
-#### **Prompt 1.1: `logger.psm1`**
+#### **Prompt 1.1: Project Cleanup**
 
 ```text
 Hello. We are starting a major refactoring of a PowerShell TUI application. I will be providing you with a series of tasks. It is critical that you follow the provided blueprint and coding standards for every task.
 
 --- START OF MASTER BLUEPRINT & CODING STANDARDS ---
-
-[... Paste the full content of "Part 1: The Master Blueprint & Core Principles" and "Part 2: Coding Standards & Style Guide" from above here ...]
-
+[... Paste Part 1 and Part 2 of this guide here ...]
 --- END OF MASTER BLUEPRINT & CODING STANDARDS ---
 
-Your first task is to create the foundational `logger.psm1` module.
+Your first task is to clean up obsolete files from the project.
 
-**Task:** Recreate the `logger.psm1` module.
-**Instruction:** The provided legacy code for the logger is well-designed and does not need functional changes. Your job is to copy it verbatim, ensuring it fully adheres to our project's coding standards. Pay close attention to error handling and defensive checks.
-**Output:** Your output should be ONLY the full, complete PowerShell code for the new `modules/logger.psm1` file.
+**Task:** Modify the main application file, `All.txt`.
+**Instruction:**
+1.  In the `All.txt` file, find the code block marked `# --- START OF FILE main-helios.ps1 ---`.
+2.  Inside that block, find the `$script:ModulesToLoad` array.
+3.  Delete the line that loads `app-store.psm1`.
+4.  Next, in `All.txt`, find and delete the entire code block marked `# --- START OF FILE services/app-store.psm1 ---` and its corresponding `--- END OF FILE ---` marker.
+5.  Finally, in `All.txt`, find and delete the entire code block for the manifest file marked `# --- START OF FILE services/app-store.psd1 ---` and its corresponding `--- END OF FILE ---` marker.
 
---- START OF LEGACY logger.psm1 CODE ---
+**Output:** Your output must be the full, complete, and modified code for `All.txt` with the specified sections removed.
 
-# Enhanced Granular Logger Module for PMC Terminal
-# Provides EXTREMELY detailed logging functionality to track down all issues
-
-$script:LogPath = $null
-$script:LogLevel = "Info"  # Reduced for performance
-$script:LogQueue = @()
-$script:MaxLogSize = 5MB  # Increased for detailed logging
-$script:LogInitialized = $false
-$script:CallDepth = 0
-$script:TraceAllCalls = $false
-
-function global:Initialize-Logger {
-    param(
-        [string]$LogDirectory = (Join-Path $env:TEMP "PMCTerminal"),
-        [string]$LogFileName = "pmc_terminal_{0:yyyy-MM-dd}.log" -f (Get-Date),
-        [string]$Level = "Debug"
-    )
-    
-    try {
-        # Create log directory if it doesn't exist
-        if (-not (Test-Path $LogDirectory)) {
-            New-Item -ItemType Directory -Path $LogDirectory -Force | Out-Null
-        }
-        
-        $script:LogPath = Join-Path $LogDirectory $LogFileName
-        $script:LogLevel = $Level
-        $script:LogInitialized = $true
-        
-        # Write initialization message with full system context
-        Write-Log -Level Info -Message "Logger initialized" -Data @{
-            LogPath = $script:LogPath
-            PowerShellVersion = $PSVersionTable.PSVersion.ToString()
-            OS = "$($PSVersionTable.OS)"
-            ProcessId = $PID
-            InitializedAt = Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff"
-        }
-        
-    } catch {
-        Write-Warning "Failed to initialize logger: $_"
-        $script:LogInitialized = $false
-    }
-}
-
-function global:Write-Log {
-    param(
-        [ValidateSet("Debug", "Verbose", "Info", "Warning", "Error", "Trace")]
-        [string]$Level = "Info",
-        [Parameter(Mandatory)]
-        [string]$Message,
-        [object]$Data = $null,
-        [switch]$Force  # Force logging even if level is below threshold
-    )
-    
-    # Skip if logger not initialized, unless this is Force logging
-    if (-not $script:LogInitialized -and -not $Force) { return }
-    
-    $levelPriority = @{
-        Debug = 0
-        Trace = 0
-        Verbose = 1
-        Info = 2
-        Warning = 3
-        Error = 4
-    }
-    
-    if (-not $Force -and $levelPriority[$Level] -lt $levelPriority[$script:LogLevel]) { return }
-    
-    try {
-        # Get call stack information for precise location tracking
-        $callStack = Get-PSCallStack
-        $caller = if ($callStack.Count -gt 1) { $callStack[1] } else { $callStack[0] }
-        
-        $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff"
-        $threadId = [System.Threading.Thread]::CurrentThread.ManagedThreadId
-        
-        # Build comprehensive context
-        $logContext = @{
-            Timestamp = $timestamp
-            Level = $Level
-            ThreadId = $threadId
-            CallDepth = $script:CallDepth
-            Message = $Message
-            Caller = @{
-                Command = $caller.Command
-                Location = $caller.Location
-                ScriptName = $caller.ScriptName
-                LineNumber = $caller.ScriptLineNumber
-                Arguments = $caller.Arguments
-            }
-            FullCallStack = $callStack | ForEach-Object {
-                @{
-                    Command = $_.Command
-                    Location = $_.Location
-                    ScriptName = $_.ScriptName
-                    LineNumber = $_.ScriptLineNumber
-                }
-            }
-        }
-        
-        # Add user data if provided
-        if ($Data) {
-            $logContext.UserData = if ($Data -is [Exception]) {
-                @{
-                    Type = "Exception"
-                    Message = $Data.Message
-                    StackTrace = $Data.StackTrace
-                    InnerException = if ($Data.InnerException) { $Data.InnerException.Message } else { $null }
-                }
-            } else {
-                try {
-                    # Try to serialize safely
-                    $serialized = ConvertTo-SerializableObject -Object $Data
-                    $serialized
-                } catch {
-                    @{
-                        Type = "SerializationFailed"
-                        StringRepresentation = $Data.ToString()
-                        Error = $_.Exception.Message
-                    }
-                }
-            }
-        }
-        
-        # Create formatted log entry
-        $indent = "  " * $script:CallDepth
-        $callerInfo = if ($caller.ScriptName) {
-            "$([System.IO.Path]::GetFileName($caller.ScriptName)):$($caller.ScriptLineNumber)"
-        } else {
-            $caller.Command
-        }
-        
-        $logEntry = "$timestamp[$Level   ]$indent[$callerInfo] $Message"
-        
-        if ($Data) {
-            $dataStr = if ($Data -is [Exception]) {
-                "`n${indent}  Exception: $($Data.Message)`n${indent}  StackTrace: $($Data.StackTrace)"
-            } else {
-                try {
-                    $json = ConvertTo-SerializableObject -Object $Data | ConvertTo-Json -Compress -Depth 3 -WarningAction SilentlyContinue -ErrorAction SilentlyContinue
-                    "`n${indent}  Data: $json"
-                } catch {
-                    "`n${indent}  Data: $($Data.ToString())"
-                }
-            }
-            $logEntry += $dataStr
-        }
-        
-        # Add to in-memory queue (for debug screen)
-        $script:LogQueue += $logContext
-        
-        # Keep only last 2000 entries in memory for detailed debugging
-        if ($script:LogQueue.Count -gt 2000) {
-            $script:LogQueue = $script:LogQueue[-2000..-1]
-        }
-        
-        # Write to file with enhanced error handling
-        if ($script:LogPath) {
-            try {
-                # Ensure directory exists
-                $logDir = Split-Path $script:LogPath -Parent
-                if (-not (Test-Path $logDir)) {
-                    New-Item -ItemType Directory -Path $logDir -Force | Out-Null
-                }
-                
-                # Check file size and rotate if needed
-                if ((Test-Path $script:LogPath) -and (Get-Item $script:LogPath).Length -gt $script:MaxLogSize) {
-                    $archivePath = $script:LogPath -replace '\.log$', "_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
-                    Move-Item $script:LogPath $archivePath -Force
-                }
-                
-                # Force flush to ensure content is written
-                Add-Content -Path $script:LogPath -Value $logEntry -Encoding UTF8 -Force
-                
-            } catch {
-                # If file writing fails, at least output to console
-                Write-Host "LOG WRITE FAILED: $logEntry" -ForegroundColor Yellow
-                Write-Host "Error: $_" -ForegroundColor Red
-            }
-        }
-        
-        # Also output to console for immediate feedback if Error level
-        if ($Level -eq "Error" -or $Level -eq "Warning") {
-            $color = if ($Level -eq "Error") { "Red" } else { "Yellow" }
-            Write-Host $logEntry -ForegroundColor $color
-        }
-        
-    } catch {
-        # Even the logger's error handling should be logged
-        try {
-            $errorEntry = "$(Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff")[LOGGER ERROR] Failed to log message '$Message': $_"
-            if ($script:LogPath) {
-                Add-Content -Path $script:LogPath -Value $errorEntry -Encoding UTF8
-            }
-            Write-Host $errorEntry -ForegroundColor Red
-        } catch {
-            # Ultimate fallback - just write to host
-            Write-Host "CRITICAL: Logger completely failed: $_" -ForegroundColor Red
-        }
-    }
-}
-
-function global:Trace-FunctionEntry {
-    param(
-        [string]$FunctionName,
-        [object]$Parameters = $null
-    )
-    
-    $script:CallDepth++
-    Write-Log -Level Trace -Message "ENTER: $FunctionName" -Data @{
-        Parameters = $Parameters
-        CallDepth = $script:CallDepth
-        Action = "FunctionEntry"
-    }
-}
-
-function global:Trace-FunctionExit {
-    param(
-        [string]$FunctionName,
-        [object]$ReturnValue = $null,
-        [switch]$WithError
-    )
-    
-    Write-Log -Level Trace -Message "EXIT: $FunctionName" -Data @{
-        ReturnValue = $ReturnValue
-        CallDepth = $script:CallDepth
-        Action = if ($WithError) { "FunctionExitWithError" } else { "FunctionExit" }
-        HasError = $WithError.IsPresent
-    }
-    $script:CallDepth--
-    if ($script:CallDepth -lt 0) { $script:CallDepth = 0 }
-}
-
-function global:Trace-Step {
-    param(
-        [string]$StepName,
-        [object]$StepData = $null,
-        [string]$Module = $null
-    )
-    
-    $caller = (Get-PSCallStack)[1]
-    $moduleInfo = if ($Module) { $Module } else { 
-        if ($caller.ScriptName) { [System.IO.Path]::GetFileNameWithoutExtension($caller.ScriptName) } else { "Unknown" }
-    }
-    
-    Write-Log -Level Debug -Message "STEP: $StepName" -Data @{
-        StepData = $StepData
-        Module = $moduleInfo
-        Action = "Step"
-        Caller = @{
-            Command = $caller.Command
-            Location = $caller.Location
-            LineNumber = $caller.ScriptLineNumber
-        }
-    }
-}
-
-function global:Trace-StateChange {
-    param(
-        [string]$StateType,
-        [object]$OldValue = $null,
-        [object]$NewValue = $null,
-        [string]$PropertyPath = $null
-    )
-    
-    Write-Log -Level Debug -Message "STATE: $StateType changed" -Data @{
-        StateType = $StateType
-        PropertyPath = $PropertyPath
-        OldValue = ConvertTo-SerializableObject -Object $OldValue
-        NewValue = ConvertTo-SerializableObject -Object $NewValue
-        Action = "StateChange"
-    }
-}
-
-function global:Trace-ComponentLifecycle {
-    param(
-        [string]$ComponentType,
-        [string]$ComponentId,
-        [string]$Phase,  # Create, Initialize, Render, Update, Destroy
-        [object]$ComponentData = $null
-    )
-    
-    Write-Log -Level Debug -Message "COMPONENT: $ComponentType [$ComponentId] $Phase" -Data @{
-        ComponentType = $ComponentType
-        ComponentId = $ComponentId
-        Phase = $Phase
-        ComponentData = ConvertTo-SerializableObject -Object $ComponentData
-        Action = "ComponentLifecycle"
-    }
-}
-
-function global:Trace-ServiceCall {
-    param(
-        [string]$ServiceName,
-        [string]$MethodName,
-        [object]$Parameters = $null,
-        [object]$Result = $null,
-        [switch]$IsError
-    )
-    
-    $action = if ($IsError) { "ServiceCallError" } else { "ServiceCall" }
-    Write-Log -Level Debug -Message "SERVICE: $ServiceName.$MethodName" -Data @{
-        ServiceName = $ServiceName
-        MethodName = $MethodName
-        Parameters = ConvertTo-SerializableObject -Object $Parameters
-        Result = ConvertTo-SerializableObject -Object $Result
-        Action = $action
-        IsError = $IsError.IsPresent
-    }
-}
-
-function ConvertTo-SerializableObject {
-    param([object]$Object)
-    
-    if ($null -eq $Object) { return $null }
-    
-    # Handle different object types safely
-    switch ($Object.GetType().Name) {
-        "Hashtable" {
-            $result = @{}
-            foreach ($key in $Object.Keys) {
-                try {
-                    $result[$key] = ConvertTo-SerializableObject -Object $Object[$key]
-                } catch {
-                    $result[$key] = "<SerializationError: $($_.Exception.Message)>"
-                }
-            }
-            return $result
-        }
-        "PSCustomObject" {
-            $result = @{}
-            foreach ($prop in $Object.PSObject.Properties) {
-                try {
-                    $result[$prop.Name] = ConvertTo-SerializableObject -Object $prop.Value
-                } catch {
-                    $result[$prop.Name] = "<SerializationError: $($_.Exception.Message)>"
-                }
-            }
-            return $result
-        }
-        "Object[]" {
-            $result = @()
-            for ($i = 0; $i -lt [Math]::Min($Object.Count, 10); $i++) {  # Limit array size for performance
-                try {
-                    $result += ConvertTo-SerializableObject -Object $Object[$i]
-                } catch {
-                    $result += "<SerializationError: $($_.Exception.Message)>"
-                }
-            }
-            if ($Object.Count -gt 10) {
-                $result += "<... $($Object.Count - 10) more items>"
-            }
-            return $result
-        }
-        default {
-            try {
-                # For simple types, return as-is or convert to string
-                if ($Object -is [string] -or $Object -is [int] -or $Object -is [bool] -or $Object -is [double]) {
-                    return $Object
-                } else {
-                    return $Object.ToString()
-                }
-            } catch {
-                return "<ToString failed: $($_.Exception.Message)>"
-            }
-        }
-    }
-}
-
-function global:Get-LogEntries {
-    param(
-        [int]$Count = 100,
-        [string]$Level = $null,
-        [string]$Module = $null,
-        [string]$Action = $null
-    )
-    
-    try {
-        $entries = $script:LogQueue
-        
-        if ($Level) {
-            $entries = $entries | Where-Object { $_.Level -eq $Level }
-        }
-        
-        if ($Module) {
-            $entries = $entries | Where-Object { 
-                $_.Caller.ScriptName -and ([System.IO.Path]::GetFileNameWithoutExtension($_.Caller.ScriptName) -like "*$Module*")
-            }
-        }
-        
-        if ($Action) {
-            $entries = $entries | Where-Object { $_.UserData.Action -eq $Action }
-        }
-        
-        return $entries | Select-Object -Last $Count
-    } catch {
-        Write-Warning "Error getting log entries: $_"
-        return @()
-    }
-}
-
-function global:Get-CallTrace {
-    param([int]$Depth = 10)
-    
-    try {
-        $callStack = Get-PSCallStack
-        $trace = @()
-        
-        for ($i = 0; $i -lt [Math]::Min($callStack.Count, $Depth); $i++) {
-            $call = $callStack[$i]
-            $trace += @{
-                Level = $i
-                Command = $call.Command
-                Location = $call.Location
-                ScriptName = $call.ScriptName
-                LineNumber = $call.ScriptLineNumber
-                Arguments = $call.Arguments
-            }
-        }
-        
-        return $trace
-    } catch {
-        Write-Warning "Error getting call trace: $_"
-        return @()
-    }
-}
-
-function global:Clear-LogQueue {
-    try {
-        $script:LogQueue = @()
-        Write-Log -Level Info -Message "Log queue cleared"
-    } catch {
-        Write-Warning "Error clearing log queue: $_"
-    }
-}
-
-function global:Set-LogLevel {
-    param(
-        [ValidateSet("Debug", "Verbose", "Info", "Warning", "Error", "Trace")]
-        [string]$Level
-    )
-    
-    try {
-        $oldLevel = $script:LogLevel
-        $script:LogLevel = $Level
-        Write-Log -Level Info -Message "Log level changed from $oldLevel to $Level"
-    } catch {
-        Write-Warning "Error setting log level to '$Level': $_"
-    }
-}
-
-function global:Enable-CallTracing {
-    $script:TraceAllCalls = $true
-    Write-Log -Level Info -Message "Call tracing enabled"
-}
-
-function global:Disable-CallTracing {
-    $script:TraceAllCalls = $false
-    Write-Log -Level Info -Message "Call tracing disabled"
-}
-
-function global:Get-LogPath {
-    return $script:LogPath
-}
-
-function global:Get-LogStatistics {
-    try {
-        $stats = @{
-            TotalEntries = $script:LogQueue.Count
-            LogPath = $script:LogPath
-            LogLevel = $script:LogLevel
-            CallTracingEnabled = $script:TraceAllCalls
-            LogFileSize = if ($script:LogPath -and (Test-Path $script:LogPath)) { 
-                (Get-Item $script:LogPath).Length 
-            } else { 0 }
-            EntriesByLevel = @{}
-            EntriesByModule = @{}
-            EntriesByAction = @{}
-        }
-        
-        # Count entries by level
-        foreach ($entry in $script:LogQueue) {
-            $level = $entry.Level
-            if (-not $stats.EntriesByLevel.ContainsKey($level)) {
-                $stats.EntriesByLevel[$level] = 0
-            }
-            $stats.EntriesByLevel[$level]++
-            
-            # Count by module
-            if ($entry.Caller.ScriptName) {
-                $module = [System.IO.Path]::GetFileNameWithoutExtension($entry.Caller.ScriptName)
-                if (-not $stats.EntriesByModule.ContainsKey($module)) {
-                    $stats.EntriesByModule[$module] = 0
-                }
-                $stats.EntriesByModule[$module]++
-            }
-            
-            # Count by action
-            if ($entry.UserData -and $entry.UserData.Action) {
-                $action = $entry.UserData.Action
-                if (-not $stats.EntriesByAction.ContainsKey($action)) {
-                    $stats.EntriesByAction[$action] = 0
-                }
-                $stats.EntriesByAction[$action]++
-            }
-        }
-        
-        return $stats
-    } catch {
-        Write-Warning "Error getting log statistics: $_"
-        return @{}
-    }
-}
-
-Export-ModuleMember -Function @(
-    'Initialize-Logger',
-    'Write-Log',
-    'Trace-FunctionEntry',
-    'Trace-FunctionExit', 
-    'Trace-Step',
-    'Trace-StateChange',
-    'Trace-ComponentLifecycle',
-    'Trace-ServiceCall',
-    'Get-LogEntries',
-    'Get-CallTrace',
-    'Clear-LogQueue',
-    'Set-LogLevel',
-    'Enable-CallTracing',
-    'Disable-CallTracing',
-    'Get-LogPath',
-    'Get-LogStatistics'
-)
-
---- END OF LEGACY logger.psm1 CODE ---
+--- START OF LEGACY All.txt CODE ---
+[... Paste the full content of `All.txt` here ...]
+--- END OF LEGACY All.txt CODE ---
 ```
 
-#### **Prompt 1.2: `exceptions.psm1`**
+#### **Prompt 1.2: Enhance the `DataManager` Service**
 
 ```text
-Excellent. Now for the second foundational module. Remember to adhere to the blueprint.
+Excellent. Now we will create the new `DataManager` service to replace the old `app-store`.
 
 --- START OF MASTER BLUEPRINT & CODING STANDARDS ---
-
-[... Paste the full content of "Part 1: The Master Blueprint & Core Principles" and "Part 2: Coding Standards & Style Guide" from above here ...]
-
+[... Paste Part 1 and Part 2 of this guide here ...]
 --- END OF MASTER BLUEPRINT & CODING STANDARDS ---
 
-Your second task is to create the `exceptions.psm1` module.
+**Task:** Replace the entire `modules/data-manager.psm1` module with a new version that contains the business logic.
+**Instruction:**
+1.  Locate the `# --- START OF FILE modules/data-manager.psm1 ---` block in `All.txt`.
+2.  Replace its entire content with the provided new code. The new code converts the logic from the legacy `TASK_CREATE`, `TASK_UPDATE`, and `TASK_DELETE` action handlers into standalone, exported functions: `Add-PmcTask`, `Update-PmcTask`, and `Remove-PmcTask`.
+3.  These new functions must modify the `$global:Data` variable directly and then publish a simple notification event (`Publish-Event -EventName "Tasks.Changed"`) upon completion.
 
-**Task:** Recreate the `exceptions.psm1` module.
-**Instruction:** Like the logger, the legacy code for this module is well-designed. Your job is to copy it verbatim, ensuring it fully adheres to our project's coding standards. The custom exception types and the `Invoke-WithErrorHandling` function are critical for the entire application.
-**Output:** Your output should be ONLY the full, complete PowerShell code for the new `modules/exceptions.psm1` file.
+**Output:** Your output must be the full, complete, and modified code for the `All.txt` file.
 
---- START OF LEGACY exceptions.psm1 CODE ---
+--- START OF CONTEXT (Legacy main-helios.ps1 for action logic) ---
+[... Paste the full code of the `Initialize-PMCServices` function from the legacy All.txt file here. This gives the LLM the original action logic to translate. ...]
+--- END OF CONTEXT ---
 
-# Enhanced Exception Module for Helios
-# Provides EXTREMELY detailed error tracking and context capture.
-# This module is now self-contained and relies on the main script to load its dependencies.
+--- START OF LEGACY All.txt CODE (to be modified) ---
+[... Paste the full content of `All.txt` here ...]
+--- END OF LEGACY All.txt CODE ---
+```
 
-# Define custom exception types using PowerShell 5-compatible approach
-# FIX: Only add the type if it doesn't already exist to prevent errors on module re-import.
-# Enhanced error handling to prevent compilation failures
-try {
-    if (-not ([System.AppDomain]::CurrentDomain.GetAssemblies() | ForEach-Object { try { $_.GetType('Helios.HeliosException', $false) } catch { $null } } | Where-Object { $_ -ne $null })) {
-        Add-Type -TypeDefinition @"
-        using System;
-        using System.Collections;
+#### **Prompt 1.3: Refactor the Service Initializer**
 
-        namespace Helios {
-            public class HeliosException : Exception {
-                public Hashtable Context { get; set; }
-                public string Component { get; set; }
-                public object OriginalError { get; set; }
-                public DateTime Timestamp { get; set; }
-                
-                public HeliosException(string message, Hashtable context) : base(message) {
-                    this.Context = context ?? new Hashtable();
-                    this.Component = context != null && context.ContainsKey("Component") ? context["Component"].ToString() : "Unknown";
-                    this.Timestamp = DateTime.Now;
-                }
-            }
-            
-            public class NavigationException : HeliosException { public NavigationException(string message, Hashtable context) : base(message, context) { } }
-            public class ServiceInitializationException : HeliosException { public ServiceInitializationException(string message, Hashtable context) : base(message, context) { } }
-            public class ComponentRenderException : HeliosException { public ComponentRenderException(string message, Hashtable context) : base(message, context) { } }
-            public class StateMutationException : HeliosException { public StateMutationException(string message, Hashtable context) : base(message, context) { } }
-            public class InputHandlingException : HeliosException { public InputHandlingException(string message, Hashtable context) : base(message, context) { } }
-            public class DataLoadException : HeliosException { public DataLoadException(string message, Hashtable context) : base(message, context) { } }
-            public class ThemeException : HeliosException { public ThemeException(string message, Hashtable context) : base(message, context) { } }
-        }
-"@ -ErrorAction Stop
-        Write-Verbose "Custom Helios exception types compiled successfully"
-    }
-} catch {
-    # If Add-Type fails, log the error prominently and use PowerShell fallbacks
-    Write-Warning "CRITICAL: Failed to compile custom exception types: $($_.Exception.Message)"
-    Write-Warning "This may cause 'Unable to find type [StateMutationException]' errors"
-    Write-Warning "Falling back to PowerShell objects for exception handling"
-    
-    # Create fallback exception types as PowerShell objects
-    $global:HeliosExceptionTypes = @{
-        HeliosException = @{
-            New = { param($message, $context) 
-                [PSCustomObject]@{
-                    Message = $message
-                    Context = $context
-                    Component = if ($context -and $context.Component) { $context.Component } else { "Unknown" }
-                    Timestamp = Get-Date
-                    GetType = { @{ FullName = "Helios.HeliosException" } }
-                }
-            }
-        }
-        StateMutationException = @{
-            New = { param($message, $context)
-                [PSCustomObject]@{
-                    Message = $message
-                    Context = $context
-                    Component = if ($context -and $context.Component) { $context.Component } else { "Unknown" }
-                    Timestamp = Get-Date
-                    GetType = { @{ FullName = "Helios.StateMutationException" } }
-                }
-            }
-        }
-    }
-}
+```text
+The `DataManager` service is now ready. The next step is to update the main application to use it.
 
-# Global error tracking
-$script:ErrorHistory = [System.Collections.ArrayList]::new()
-$script:MaxErrorHistory   = 500
-$script:GlobalErrorHandler = $null
+--- START OF MASTER BLUEPRINT & CODING STANDARDS ---
+[... Paste Part 1 and Part 2 of this guide here ...]
+--- END OF MASTER BLUEPRINT & CODING STANDARDS ---
 
-# Enhanced error handler with automatic logging
-function global:Set-HeliosErrorHandler {
-    param(
-        [scriptblock]$CustomHandler = $null
-    )
-    $script:GlobalErrorHandler = $CustomHandler
-    if(Get-Command Write-Log -ErrorAction SilentlyContinue) {
-        Write-Log -Level Info -Message "Helios error handler configured" -Data @{ HasCustomHandler = ($null -ne $CustomHandler) }
-    }
-}
+**Task:** Refactor the `Initialize-PMCServices` function within the `main-helios.ps1` section of `All.txt`.
+**Instruction:**
+1.  Find the `Initialize-PMCServices` function.
+2.  Delete all lines related to `Initialize-AppStore` and `RegisterAction`.
+3.  In their place, add the new logic that creates the `$services.DataManager` handle, which points to the new functions from `data-manager.psm1`.
+4.  Ensure the final `$global:Services = $services` line remains, as this is our service locator.
 
-# Get EXTREMELY detailed error information
-function global:Get-DetailedError {
-    param(
-        [System.Management.Automation.ErrorRecord]$ErrorRecord,
-        [hashtable]$AdditionalContext = @{}
-    )
-    try {
-        $callStack = Get-PSCallStack
-        $errorInfo = @{
-            Timestamp = Get-Date -Format "o"
-            Summary = $ErrorRecord.Exception.Message
-            Type = $ErrorRecord.Exception.GetType().FullName
-            Category = $ErrorRecord.CategoryInfo.Category.ToString()
-            CategoryActivity = $ErrorRecord.CategoryInfo.Activity
-            CategoryReason = $ErrorRecord.CategoryInfo.Reason
-            CategoryTargetName = $ErrorRecord.CategoryInfo.TargetName
-            CategoryTargetType = $ErrorRecord.CategoryInfo.TargetType
-            TargetObject = $null
-            ScriptName = $ErrorRecord.InvocationInfo.ScriptName
-            LineNumber = $ErrorRecord.InvocationInfo.ScriptLineNumber
-            ColumnNumber = $ErrorRecord.InvocationInfo.OffsetInLine
-            Line = $ErrorRecord.InvocationInfo.Line
-            Command = $ErrorRecord.InvocationInfo.InvocationName
-            PositionMessage = $ErrorRecord.InvocationInfo.PositionMessage
-            StackTrace = @()
-            InnerExceptions = @()
-            HeliosContext = @{}
-            SystemContext = @{}
-            AdditionalContext = $AdditionalContext
-        }
-        
-        try {
-            if ($ErrorRecord.TargetObject) {
-                $errorInfo.TargetObject = @{
-                    Type = $ErrorRecord.TargetObject.GetType().FullName
-                    ToString = $ErrorRecord.TargetObject.ToString()
-                }
-            }
-        } catch {
-            $errorInfo.TargetObject = "Failed to serialize target object: $($_.Exception.Message)"
-        }
-        
-        foreach ($frame in $callStack) {
-            try {
-                $frameInfo = @{
-                    Command = $frame.Command
-                    Location = $frame.Location
-                    ScriptName = $frame.ScriptName
-                    ScriptLineNumber = $frame.ScriptLineNumber
-                    Module = if ($frame.ScriptName) { [System.IO.Path]::GetFileNameWithoutExtension($frame.ScriptName) } else { "Interactive" }
-                }
-                $errorInfo.StackTrace += $frameInfo
-            } catch {
-                $errorInfo.StackTrace += @{
-                    Command = "Failed to capture frame"
-                    Error = $_.Exception.Message
-                }
-            }
-        }
-        
-        $innerEx = $ErrorRecord.Exception.InnerException
-        while ($innerEx) {
-            try {
-                $errorInfo.InnerExceptions += @{
-                    Message = $innerEx.Message
-                    Type = $innerEx.GetType().FullName
-                    StackTrace = $innerEx.StackTrace
-                }
-                $innerEx = $innerEx.InnerException
-            } catch {
-                # Stop iterating if we can't process an inner exception
-                break
-            }
-        }
-        
-        $errorInfo.Component = Identify-HeliosComponent -ErrorRecord $ErrorRecord
-        
-        try {
-            $errorInfo.SystemContext = @{
-                ProcessId = $PID
-                ThreadId = [System.Threading.Thread]::CurrentThread.ManagedThreadId
-                PowerShellVersion = $PSVersionTable.PSVersion.ToString()
-                ExecutionPolicy = (Get-ExecutionPolicy).ToString()
-                CurrentLocation = (Get-Location).Path
-                MemoryUsage = [System.GC]::GetTotalMemory($false)
-                LoadedModules = try {(Get-Module).Name} catch {"<failed>"}
-            }
-        } catch {
-            $errorInfo.SystemContext = @{ Error = "Failed to capture system context" }
-        }
-        
-        return $errorInfo
-        
-    } catch {
-        return @{
-            Timestamp = Get-Date -Format "o"
-            Summary = "CRITICAL: Error analysis failed"
-            OriginalError = $ErrorRecord.Exception.Message
-            AnalysisError = $_.Exception.Message
-            Type = "ErrorAnalysisFailure"
-        }
-    }
-}
+**Output:** Your output must be the full, complete, and modified code for the `All.txt` file.
 
-function global:Identify-HeliosComponent {
-    param(
-        [System.Management.Automation.ErrorRecord]$ErrorRecord
-    )
-    try {
-        $scriptName = $ErrorRecord.InvocationInfo.ScriptName
-        if (-not $scriptName) {
-            $callStack = Get-PSCallStack
-            foreach ($frame in $callStack) {
-                if ($frame.ScriptName) {
-                    $scriptName = $frame.ScriptName
-                    break
-                }
-            }
-        }
-        
-        if (-not $scriptName) { return "Interactive/Unknown" }
-        
-        $fileName = [System.IO.Path]::GetFileNameWithoutExtension($scriptName)
-        
-        $componentMap = @{
-            'app-store' = 'AppStore'
-            'navigation' = 'Navigation'
-            'tui-engine' = 'TUI Engine'
-            'tui-framework' = 'TUI Framework'
-            'dashboard-screen' = 'Dashboard'
-            'task-screen' = 'Tasks'
-            'main-helios' = 'Application'
-            'data-manager' = 'Data Manager'
-            'theme-manager' = 'Theme Manager'
-            'keybindings' = 'Keybindings'
-            'exceptions' = 'Exceptions'
-            'logger' = 'Logger'
-        }
-        
-        foreach ($pattern in $componentMap.Keys) {
-            if ($fileName -match $pattern) {
-                return $componentMap[$pattern]
-            }
-        }
-        
-        return "Unknown ($fileName)"
-        
-    } catch {
-        return "Component Identification Failed"
-    }
-}
+--- START OF LEGACY All.txt CODE ---
+[... Paste the full content of `All.txt` here ...]
+--- END OF LEGACY CODE ---
+```
 
-function global:Invoke-WithErrorHandling {
-    param(
-        [scriptblock]$ScriptBlock,
-        [string]$Component = "Unknown",
-        [hashtable]$Context = @{},
-        [scriptblock]$ErrorHandler = $null,
-        [string]$OperationName = "Unknown Operation"
-    )
-    if (Get-Command Trace-FunctionEntry -ErrorAction SilentlyContinue) {
-        Trace-FunctionEntry -FunctionName "Invoke-WithErrorHandling" -Parameters @{ Component = $Component; OperationName = $OperationName }
-    }
-    try {
-        return (& $ScriptBlock)
-    } catch {
-        $errorContext = if ($Context) { 
-            $newContext = @{}
-            foreach ($key in $Context.Keys) {
-                $newContext[$key] = $Context[$key]
-            }
-            $newContext
-        } else { @{} }
-        $errorContext.Component = $Component
-        $errorContext.OperationName = $OperationName
-        
-        $errorMessage = "An unknown error occurred in $Component"
-        $detailedError = $null
-        $originalExceptionObject = $_
+#### **Prompt 1.4: Update a UI Screen**
 
-        if ($originalExceptionObject -is [System.Management.Automation.ErrorRecord]) {
-            $errorMessage = $originalExceptionObject.Exception.Message
-            $detailedError = Get-DetailedError -ErrorRecord $originalExceptionObject -AdditionalContext $errorContext
-        } elseif ($originalExceptionObject -is [Exception]) {
-            $errorMessage = $originalExceptionObject.Message
-        } elseif ($originalExceptionObject -is [string]) {
-            $errorMessage = $originalExceptionObject
-        }
-        
-        if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
-            # FIX: Delimit the last variable with ${} to avoid parsing errors with the colon.
-            Write-Log -Level Error -Message "Error in $Component during $OperationName ${errorMessage}" -Data $detailedError
-        }
-        
-        [void]$script:ErrorHistory.Add($detailedError)
-        if ($script:ErrorHistory.Count -gt $script:MaxErrorHistory) {
-            $script:ErrorHistory.RemoveAt(0)
-        }
-        
-        $heliosEx = [PSCustomObject]@{
-            Message = $errorMessage
-            Component = $Component
-            Context = $errorContext
-            Timestamp = (Get-Date)
-            OriginalError = $originalExceptionObject
-            OperationName = $OperationName
-            ExceptionType = 'HeliosException'
-        }
-        
-        if ($ErrorHandler) {
-            try {
-                & $ErrorHandler -Exception $heliosEx -DetailedError $detailedError
-            } catch {
-                if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
-                    Write-Log -Level Error -Message "Error handler itself failed" -Data @{ OriginalError = $heliosEx.Message; HandlerError = $_.Exception.Message }
-                }
-            }
-        } else {
-            $properException = New-Object System.Management.Automation.RuntimeException($heliosEx.Message)
-            $properException.Data.Add("HeliosException", $heliosEx)
-            throw $properException
-        }
-    }
-}
+```text
+The control flow is now refactored. The final step of Phase 1 is to update a UI screen to use this new, direct pattern.
 
-Export-ModuleMember -Function @(
-    'Set-HeliosErrorHandler',
-    'Get-DetailedError',
-    'Identify-HeliosComponent',
-    'Invoke-WithErrorHandling'
-)
+--- START OF MASTER BLUEPRINT & CODING STANDARDS ---
+[... Paste Part 1 and Part 2 of this guide here ...]
+--- END OF MASTER BLUEPRINT & CODING STANDARDS ---
 
---- END OF LEGACY exceptions.psm1 CODE ---
+**Task:** Refactor the `screens/task-screen-helios.psm1` module within `All.txt`.
+**Instruction:** Rewrite this screen to use the new service-oriented architecture.
+1.  The `Get-TaskManagementScreen` factory function must accept a `$services` parameter.
+2.  The screen's `Init` method must store this `$services` object in a `_services` property.
+3.  All calls that previously used `$services.Store.Dispatch` must now be replaced with direct calls to `$services.DataManager` methods (e.g., `& $self._services.DataManager.RemoveTask -Id $id`).
+4.  The screen must subscribe to the `"Tasks.Changed"` event in its `Init` method. The event handler's action block should re-fetch the task list from `$global:Data` and update the table component.
+5.  The screen **MUST** have an `OnExit` method that calls `Unsubscribe-Event` to clean up its subscription and prevent memory leaks.
+
+**Output:** Your output must be the full, complete, and modified code for the `All.txt` file.
+
+--- START OF LEGACY All.txt CODE ---
+[... Paste the full content of `All.txt` here ...]
+--- END OF LEGACY CODE ---
+```
+
+#### **Prompt 1.5: Self-Verification for Phase 1**
+
+```text
+Phase 1 is complete. Now, please verify your work.
+
+--- START OF MASTER BLUEPRINT & CODING STANDARDS ---
+[... Paste Part 1 and Part 2 of this guide here ...]
+--- END OF MASTER BLUEPRINT & CODING STANDARDS ---
+
+**Task:** Analyze the provided `All.txt` file and confirm that it adheres to the Phase 1 refactoring goals.
+**Instruction:** Review the code and answer the following questions with a "Yes" or "No" and a brief explanation.
+1.  Has the `app-store.psm1` module and its manifest been completely removed?
+2.  In `main-helios.ps1`, has the `$script:ModulesToLoad` array been updated to remove the `app-store`?
+3.  In `Initialize-PMCServices`, have all `Initialize-AppStore` and `RegisterAction` calls been removed?
+4.  In `Initialize-PMCServices`, does a `$services.DataManager` handle now exist?
+5.  In `task-screen-helios.psm1`, does it now call methods on `$services.DataManager` instead of using `Dispatch`?
+6.  In `task-screen-helios.psm1`, does it subscribe to a simple notification event like `"Tasks.Changed"`?
+
+**Output:** A list of answers to the 6 questions above.
+
+--- START OF REFACTORED All.txt CODE ---
+[... Paste the full content of the `All.txt` file generated from the previous prompt here ...]
+--- END OF REFACTORED CODE ---
 ```
 
 ---
+### **Phase 2: Refactor the Data Structure (The "Nouns")**
 
-*This completes the foundational setup. Once you have these two files, you can proceed with the more complex modules, building upon this stable base.*
+**Goal:** Replace hashtables with strongly-typed PowerShell classes to create a strict, self-validating data contract.
+
+**(Continue with similar, detailed prompts for Phase 2, covering the creation of `models.psm1`, updating `DataManager` to use classes, and finally updating the UI screens to pass class objects.)**
